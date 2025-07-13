@@ -1,0 +1,2 @@
+/usr/bin/ar qc /home/kali/MTD/ns-3.45/build/lib/libscratch-nested-subdir-lib.a "CMakeFiles/scratch-nested-subdir-lib.dir/lib/scratch-nested-subdir-library-source.cc.o"
+/usr/bin/ranlib /home/kali/MTD/ns-3.45/build/lib/libscratch-nested-subdir-lib.a

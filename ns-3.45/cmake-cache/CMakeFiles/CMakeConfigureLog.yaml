@@ -1,0 +1,1416 @@
+
+---
+events:
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/CMakeDetermineSystem.cmake:205 (message)"
+      - "CMakeLists.txt:9 (project)"
+    message: |
+      The system is: Linux - 6.12.13-amd64 - x86_64
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/CMakeDetermineCompilerId.cmake:17 (message)"
+      - "/usr/share/cmake-3.31/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "/usr/share/cmake-3.31/Modules/CMakeDetermineCXXCompiler.cmake:126 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:9 (project)"
+    message: |
+      Compiling the CXX compiler identification source file "CMakeCXXCompilerId.cpp" succeeded.
+      Compiler: /usr/bin/c++ 
+      Build flags: 
+      Id flags:  
+      
+      The output was:
+      0
+      
+      
+      Compilation of the CXX compiler identification source "CMakeCXXCompilerId.cpp" produced "a.out"
+      
+      The CXX compiler identification is GNU, found in:
+        /home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/3.31.6/CompilerIdCXX/a.out
+      
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/CMakeDetermineCompilerId.cmake:17 (message)"
+      - "/usr/share/cmake-3.31/Modules/CMakeDetermineCompilerId.cmake:64 (__determine_compiler_id_test)"
+      - "/usr/share/cmake-3.31/Modules/CMakeDetermineCCompiler.cmake:123 (CMAKE_DETERMINE_COMPILER_ID)"
+      - "CMakeLists.txt:9 (project)"
+    message: |
+      Compiling the C compiler identification source file "CMakeCCompilerId.c" succeeded.
+      Compiler: /usr/bin/cc 
+      Build flags: 
+      Id flags:  
+      
+      The output was:
+      0
+      
+      
+      Compilation of the C compiler identification source "CMakeCCompilerId.c" produced "a.out"
+      
+      The C compiler identification is GNU, found in:
+        /home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/3.31.6/CompilerIdC/a.out
+      
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/CMakeDetermineCompilerABI.cmake:74 (try_compile)"
+      - "/usr/share/cmake-3.31/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:9 (project)"
+    checks:
+      - "Detecting CXX compiler ABI info"
+    directories:
+      source: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-EMspHO"
+      binary: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-EMspHO"
+    cmakeVariables:
+      CMAKE_CXX_FLAGS: ""
+      CMAKE_CXX_FLAGS_DEBUG: "-g"
+      CMAKE_CXX_SCAN_FOR_MODULES: "OFF"
+      CMAKE_EXE_LINKER_FLAGS: ""
+    buildResult:
+      variable: "CMAKE_CXX_ABI_COMPILED"
+      cached: true
+      stdout: |
+        Change Dir: '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-EMspHO'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_dcf90/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_dcf90.dir/build.make CMakeFiles/cmTC_dcf90.dir/build
+        gmake[1]: Entering directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-EMspHO'
+        Building CXX object CMakeFiles/cmTC_dcf90.dir/CMakeCXXCompilerABI.cpp.o
+        /usr/bin/c++   -v -o CMakeFiles/cmTC_dcf90.dir/CMakeCXXCompilerABI.cpp.o -c /usr/share/cmake-3.31/Modules/CMakeCXXCompilerABI.cpp
+        Using built-in specs.
+        COLLECT_GCC=/usr/bin/c++
+        OFFLOAD_TARGET_NAMES=nvptx-none:amdgcn-amdhsa
+        OFFLOAD_TARGET_DEFAULT=1
+        Target: x86_64-linux-gnu
+        Configured with: ../src/configure -v --with-pkgversion='Debian 14.2.0-16' --with-bugurl=file:///usr/share/doc/gcc-14/README.Bugs --enable-languages=c,ada,c++,go,d,fortran,objc,obj-c++,m2,rust --prefix=/usr --with-gcc-major-version-only --program-suffix=-14 --program-prefix=x86_64-linux-gnu- --enable-shared --enable-linker-build-id --libexecdir=/usr/libexec --without-included-gettext --enable-threads=posix --libdir=/usr/lib --enable-nls --enable-bootstrap --enable-clocale=gnu --enable-libstdcxx-debug --enable-libstdcxx-time=yes --with-default-libstdcxx-abi=new --enable-libstdcxx-backtrace --enable-gnu-unique-object --disable-vtable-verify --enable-plugin --enable-default-pie --with-system-zlib --enable-libphobos-checking=release --with-target-system-zlib=auto --enable-objc-gc=auto --enable-multiarch --disable-werror --enable-cet --with-arch-32=i686 --with-abi=m64 --with-multilib-list=m32,m64,mx32 --enable-multilib --with-tune=generic --enable-offload-targets=nvptx-none=/build/reproducible-path/gcc-14-14.2.0/debian/tmp-nvptx/usr,amdgcn-amdhsa=/build/reproducible-path/gcc-14-14.2.0/debian/tmp-gcn/usr --enable-offload-defaulted --without-cuda-driver --enable-checking=release --build=x86_64-linux-gnu --host=x86_64-linux-gnu --target=x86_64-linux-gnu --with-build-config=bootstrap-lto-lean --enable-link-serialization=3
+        Thread model: posix
+        Supported LTO compression algorithms: zlib zstd
+        gcc version 14.2.0 (Debian 14.2.0-16) 
+        COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_dcf90.dir/CMakeCXXCompilerABI.cpp.o' '-c' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_dcf90.dir/'
+         /usr/libexec/gcc/x86_64-linux-gnu/14/cc1plus -quiet -v -imultiarch x86_64-linux-gnu -D_GNU_SOURCE /usr/share/cmake-3.31/Modules/CMakeCXXCompilerABI.cpp -quiet -dumpdir CMakeFiles/cmTC_dcf90.dir/ -dumpbase CMakeCXXCompilerABI.cpp.cpp -dumpbase-ext .cpp -mtune=generic -march=x86-64 -version -fasynchronous-unwind-tables -o /tmp/cc2oQi7O.s
+        GNU C++17 (Debian 14.2.0-16) version 14.2.0 (x86_64-linux-gnu)
+        	compiled by GNU C version 14.2.0, GMP version 6.3.0, MPFR version 4.2.1, MPC version 1.3.1, isl version isl-0.27-GMP
+        
+        GGC heuristics: --param ggc-min-expand=100 --param ggc-min-heapsize=131072
+        ignoring duplicate directory "/usr/include/x86_64-linux-gnu/c++/14"
+        ignoring nonexistent directory "/usr/local/include/x86_64-linux-gnu"
+        ignoring nonexistent directory "/usr/lib/gcc/x86_64-linux-gnu/14/include-fixed/x86_64-linux-gnu"
+        ignoring nonexistent directory "/usr/lib/gcc/x86_64-linux-gnu/14/include-fixed"
+        ignoring nonexistent directory "/usr/lib/gcc/x86_64-linux-gnu/14/../../../../x86_64-linux-gnu/include"
+        #include "..." search starts here:
+        #include <...> search starts here:
+         /usr/include/c++/14
+         /usr/include/x86_64-linux-gnu/c++/14
+         /usr/include/c++/14/backward
+         /usr/lib/gcc/x86_64-linux-gnu/14/include
+         /usr/local/include
+         /usr/include/x86_64-linux-gnu
+         /usr/include
+        End of search list.
+        Compiler executable checksum: 894028f5718d01c9d80074c7ad2e4ab8
+        COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_dcf90.dir/CMakeCXXCompilerABI.cpp.o' '-c' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_dcf90.dir/'
+         as -v --64 -o CMakeFiles/cmTC_dcf90.dir/CMakeCXXCompilerABI.cpp.o /tmp/cc2oQi7O.s
+        GNU assembler version 2.44 (x86_64-linux-gnu) using BFD version (GNU Binutils for Debian) 2.44
+        COMPILER_PATH=/usr/libexec/gcc/x86_64-linux-gnu/14/:/usr/libexec/gcc/x86_64-linux-gnu/14/:/usr/libexec/gcc/x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/14/:/usr/lib/gcc/x86_64-linux-gnu/
+        LIBRARY_PATH=/usr/lib/gcc/x86_64-linux-gnu/14/:/usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/14/../../../../lib/:/lib/x86_64-linux-gnu/:/lib/../lib/:/usr/lib/x86_64-linux-gnu/:/usr/lib/../lib/:/usr/lib/gcc/x86_64-linux-gnu/14/../../../:/lib/:/usr/lib/
+        COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_dcf90.dir/CMakeCXXCompilerABI.cpp.o' '-c' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_dcf90.dir/CMakeCXXCompilerABI.cpp.'
+        Linking CXX executable cmTC_dcf90
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_dcf90.dir/link.txt --verbose=1
+        Using built-in specs.
+        COLLECT_GCC=/usr/bin/c++
+        COLLECT_LTO_WRAPPER=/usr/libexec/gcc/x86_64-linux-gnu/14/lto-wrapper
+        OFFLOAD_TARGET_NAMES=nvptx-none:amdgcn-amdhsa
+        OFFLOAD_TARGET_DEFAULT=1
+        Target: x86_64-linux-gnu
+        Configured with: ../src/configure -v --with-pkgversion='Debian 14.2.0-16' --with-bugurl=file:///usr/share/doc/gcc-14/README.Bugs --enable-languages=c,ada,c++,go,d,fortran,objc,obj-c++,m2,rust --prefix=/usr --with-gcc-major-version-only --program-suffix=-14 --program-prefix=x86_64-linux-gnu- --enable-shared --enable-linker-build-id --libexecdir=/usr/libexec --without-included-gettext --enable-threads=posix --libdir=/usr/lib --enable-nls --enable-bootstrap --enable-clocale=gnu --enable-libstdcxx-debug --enable-libstdcxx-time=yes --with-default-libstdcxx-abi=new --enable-libstdcxx-backtrace --enable-gnu-unique-object --disable-vtable-verify --enable-plugin --enable-default-pie --with-system-zlib --enable-libphobos-checking=release --with-target-system-zlib=auto --enable-objc-gc=auto --enable-multiarch --disable-werror --enable-cet --with-arch-32=i686 --with-abi=m64 --with-multilib-list=m32,m64,mx32 --enable-multilib --with-tune=generic --enable-offload-targets=nvptx-none=/build/reproducible-path/gcc-14-14.2.0/debian/tmp-nvptx/usr,amdgcn-amdhsa=/build/reproducible-path/gcc-14-14.2.0/debian/tmp-gcn/usr --enable-offload-defaulted --without-cuda-driver --enable-checking=release --build=x86_64-linux-gnu --host=x86_64-linux-gnu --target=x86_64-linux-gnu --with-build-config=bootstrap-lto-lean --enable-link-serialization=3
+        Thread model: posix
+        Supported LTO compression algorithms: zlib zstd
+        gcc version 14.2.0 (Debian 14.2.0-16) 
+        COMPILER_PATH=/usr/libexec/gcc/x86_64-linux-gnu/14/:/usr/libexec/gcc/x86_64-linux-gnu/14/:/usr/libexec/gcc/x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/14/:/usr/lib/gcc/x86_64-linux-gnu/
+        LIBRARY_PATH=/usr/lib/gcc/x86_64-linux-gnu/14/:/usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/14/../../../../lib/:/lib/x86_64-linux-gnu/:/lib/../lib/:/usr/lib/x86_64-linux-gnu/:/usr/lib/../lib/:/usr/lib/gcc/x86_64-linux-gnu/14/../../../:/lib/:/usr/lib/
+        COLLECT_GCC_OPTIONS='-v' '-o' 'cmTC_dcf90' '-foffload-options=-l_GCC_m' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-dumpdir' 'cmTC_dcf90.'
+         /usr/libexec/gcc/x86_64-linux-gnu/14/collect2 -plugin /usr/libexec/gcc/x86_64-linux-gnu/14/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/x86_64-linux-gnu/14/lto-wrapper -plugin-opt=-fresolution=/tmp/ccbRwyyl.res -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc --build-id --eh-frame-hdr -m elf_x86_64 --hash-style=gnu --as-needed -dynamic-linker /lib64/ld-linux-x86-64.so.2 -pie -o cmTC_dcf90 /usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/Scrt1.o /usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/crti.o /usr/lib/gcc/x86_64-linux-gnu/14/crtbeginS.o -L/usr/lib/gcc/x86_64-linux-gnu/14 -L/usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu -L/usr/lib/gcc/x86_64-linux-gnu/14/../../../../lib -L/lib/x86_64-linux-gnu -L/lib/../lib -L/usr/lib/x86_64-linux-gnu -L/usr/lib/../lib -L/usr/lib/gcc/x86_64-linux-gnu/14/../../.. -v CMakeFiles/cmTC_dcf90.dir/CMakeCXXCompilerABI.cpp.o -lstdc++ -lm -lgcc_s -lgcc -lc -lgcc_s -lgcc /usr/lib/gcc/x86_64-linux-gnu/14/crtendS.o /usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/crtn.o
+        collect2 version 14.2.0
+        /usr/bin/ld -plugin /usr/libexec/gcc/x86_64-linux-gnu/14/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/x86_64-linux-gnu/14/lto-wrapper -plugin-opt=-fresolution=/tmp/ccbRwyyl.res -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc --build-id --eh-frame-hdr -m elf_x86_64 --hash-style=gnu --as-needed -dynamic-linker /lib64/ld-linux-x86-64.so.2 -pie -o cmTC_dcf90 /usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/Scrt1.o /usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/crti.o /usr/lib/gcc/x86_64-linux-gnu/14/crtbeginS.o -L/usr/lib/gcc/x86_64-linux-gnu/14 -L/usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu -L/usr/lib/gcc/x86_64-linux-gnu/14/../../../../lib -L/lib/x86_64-linux-gnu -L/lib/../lib -L/usr/lib/x86_64-linux-gnu -L/usr/lib/../lib -L/usr/lib/gcc/x86_64-linux-gnu/14/../../.. -v CMakeFiles/cmTC_dcf90.dir/CMakeCXXCompilerABI.cpp.o -lstdc++ -lm -lgcc_s -lgcc -lc -lgcc_s -lgcc /usr/lib/gcc/x86_64-linux-gnu/14/crtendS.o /usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/crtn.o
+        GNU ld (GNU Binutils for Debian) 2.44
+        COLLECT_GCC_OPTIONS='-v' '-o' 'cmTC_dcf90' '-foffload-options=-l_GCC_m' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-dumpdir' 'cmTC_dcf90.'
+        /usr/bin/c++  -v -Wl,-v CMakeFiles/cmTC_dcf90.dir/CMakeCXXCompilerABI.cpp.o -o cmTC_dcf90
+        gmake[1]: Leaving directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-EMspHO'
+        
+      exitCode: 0
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/CMakeDetermineCompilerABI.cmake:182 (message)"
+      - "/usr/share/cmake-3.31/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:9 (project)"
+    message: |
+      Parsed CXX implicit include dir info: rv=done
+        found start of include info
+        found start of implicit include info
+          add: [/usr/include/c++/14]
+          add: [/usr/include/x86_64-linux-gnu/c++/14]
+          add: [/usr/include/c++/14/backward]
+          add: [/usr/lib/gcc/x86_64-linux-gnu/14/include]
+          add: [/usr/local/include]
+          add: [/usr/include/x86_64-linux-gnu]
+          add: [/usr/include]
+        end of search list found
+        collapse include dir [/usr/include/c++/14] ==> [/usr/include/c++/14]
+        collapse include dir [/usr/include/x86_64-linux-gnu/c++/14] ==> [/usr/include/x86_64-linux-gnu/c++/14]
+        collapse include dir [/usr/include/c++/14/backward] ==> [/usr/include/c++/14/backward]
+        collapse include dir [/usr/lib/gcc/x86_64-linux-gnu/14/include] ==> [/usr/lib/gcc/x86_64-linux-gnu/14/include]
+        collapse include dir [/usr/local/include] ==> [/usr/local/include]
+        collapse include dir [/usr/include/x86_64-linux-gnu] ==> [/usr/include/x86_64-linux-gnu]
+        collapse include dir [/usr/include] ==> [/usr/include]
+        implicit include dirs: [/usr/include/c++/14;/usr/include/x86_64-linux-gnu/c++/14;/usr/include/c++/14/backward;/usr/lib/gcc/x86_64-linux-gnu/14/include;/usr/local/include;/usr/include/x86_64-linux-gnu;/usr/include]
+      
+      
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/CMakeDetermineCompilerABI.cmake:218 (message)"
+      - "/usr/share/cmake-3.31/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:9 (project)"
+    message: |
+      Parsed CXX implicit link information:
+        link line regex: [^( *|.*[/\\])(ld[0-9]*(\\.[a-z]+)?|CMAKE_LINK_STARTFILE-NOTFOUND|([^/\\]+-)?ld|collect2)[^/\\]*( |$)]
+        linker tool regex: [^[ 	]*(->|")?[ 	]*(([^"]*[/\\])?(ld[0-9]*(\\.[a-z]+)?))("|,| |$)]
+        ignore line: [Change Dir: '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-EMspHO']
+        ignore line: []
+        ignore line: [Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_dcf90/fast]
+        ignore line: [/usr/bin/gmake  -f CMakeFiles/cmTC_dcf90.dir/build.make CMakeFiles/cmTC_dcf90.dir/build]
+        ignore line: [gmake[1]: Entering directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-EMspHO']
+        ignore line: [Building CXX object CMakeFiles/cmTC_dcf90.dir/CMakeCXXCompilerABI.cpp.o]
+        ignore line: [/usr/bin/c++   -v -o CMakeFiles/cmTC_dcf90.dir/CMakeCXXCompilerABI.cpp.o -c /usr/share/cmake-3.31/Modules/CMakeCXXCompilerABI.cpp]
+        ignore line: [Using built-in specs.]
+        ignore line: [COLLECT_GCC=/usr/bin/c++]
+        ignore line: [OFFLOAD_TARGET_NAMES=nvptx-none:amdgcn-amdhsa]
+        ignore line: [OFFLOAD_TARGET_DEFAULT=1]
+        ignore line: [Target: x86_64-linux-gnu]
+        ignore line: [Configured with: ../src/configure -v --with-pkgversion='Debian 14.2.0-16' --with-bugurl=file:///usr/share/doc/gcc-14/README.Bugs --enable-languages=c ada c++ go d fortran objc obj-c++ m2 rust --prefix=/usr --with-gcc-major-version-only --program-suffix=-14 --program-prefix=x86_64-linux-gnu- --enable-shared --enable-linker-build-id --libexecdir=/usr/libexec --without-included-gettext --enable-threads=posix --libdir=/usr/lib --enable-nls --enable-bootstrap --enable-clocale=gnu --enable-libstdcxx-debug --enable-libstdcxx-time=yes --with-default-libstdcxx-abi=new --enable-libstdcxx-backtrace --enable-gnu-unique-object --disable-vtable-verify --enable-plugin --enable-default-pie --with-system-zlib --enable-libphobos-checking=release --with-target-system-zlib=auto --enable-objc-gc=auto --enable-multiarch --disable-werror --enable-cet --with-arch-32=i686 --with-abi=m64 --with-multilib-list=m32 m64 mx32 --enable-multilib --with-tune=generic --enable-offload-targets=nvptx-none=/build/reproducible-path/gcc-14-14.2.0/debian/tmp-nvptx/usr amdgcn-amdhsa=/build/reproducible-path/gcc-14-14.2.0/debian/tmp-gcn/usr --enable-offload-defaulted --without-cuda-driver --enable-checking=release --build=x86_64-linux-gnu --host=x86_64-linux-gnu --target=x86_64-linux-gnu --with-build-config=bootstrap-lto-lean --enable-link-serialization=3]
+        ignore line: [Thread model: posix]
+        ignore line: [Supported LTO compression algorithms: zlib zstd]
+        ignore line: [gcc version 14.2.0 (Debian 14.2.0-16) ]
+        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_dcf90.dir/CMakeCXXCompilerABI.cpp.o' '-c' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_dcf90.dir/']
+        ignore line: [ /usr/libexec/gcc/x86_64-linux-gnu/14/cc1plus -quiet -v -imultiarch x86_64-linux-gnu -D_GNU_SOURCE /usr/share/cmake-3.31/Modules/CMakeCXXCompilerABI.cpp -quiet -dumpdir CMakeFiles/cmTC_dcf90.dir/ -dumpbase CMakeCXXCompilerABI.cpp.cpp -dumpbase-ext .cpp -mtune=generic -march=x86-64 -version -fasynchronous-unwind-tables -o /tmp/cc2oQi7O.s]
+        ignore line: [GNU C++17 (Debian 14.2.0-16) version 14.2.0 (x86_64-linux-gnu)]
+        ignore line: [	compiled by GNU C version 14.2.0  GMP version 6.3.0  MPFR version 4.2.1  MPC version 1.3.1  isl version isl-0.27-GMP]
+        ignore line: []
+        ignore line: [GGC heuristics: --param ggc-min-expand=100 --param ggc-min-heapsize=131072]
+        ignore line: [ignoring duplicate directory "/usr/include/x86_64-linux-gnu/c++/14"]
+        ignore line: [ignoring nonexistent directory "/usr/local/include/x86_64-linux-gnu"]
+        ignore line: [ignoring nonexistent directory "/usr/lib/gcc/x86_64-linux-gnu/14/include-fixed/x86_64-linux-gnu"]
+        ignore line: [ignoring nonexistent directory "/usr/lib/gcc/x86_64-linux-gnu/14/include-fixed"]
+        ignore line: [ignoring nonexistent directory "/usr/lib/gcc/x86_64-linux-gnu/14/../../../../x86_64-linux-gnu/include"]
+        ignore line: [#include "..." search starts here:]
+        ignore line: [#include <...> search starts here:]
+        ignore line: [ /usr/include/c++/14]
+        ignore line: [ /usr/include/x86_64-linux-gnu/c++/14]
+        ignore line: [ /usr/include/c++/14/backward]
+        ignore line: [ /usr/lib/gcc/x86_64-linux-gnu/14/include]
+        ignore line: [ /usr/local/include]
+        ignore line: [ /usr/include/x86_64-linux-gnu]
+        ignore line: [ /usr/include]
+        ignore line: [End of search list.]
+        ignore line: [Compiler executable checksum: 894028f5718d01c9d80074c7ad2e4ab8]
+        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_dcf90.dir/CMakeCXXCompilerABI.cpp.o' '-c' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_dcf90.dir/']
+        ignore line: [ as -v --64 -o CMakeFiles/cmTC_dcf90.dir/CMakeCXXCompilerABI.cpp.o /tmp/cc2oQi7O.s]
+        ignore line: [GNU assembler version 2.44 (x86_64-linux-gnu) using BFD version (GNU Binutils for Debian) 2.44]
+        ignore line: [COMPILER_PATH=/usr/libexec/gcc/x86_64-linux-gnu/14/:/usr/libexec/gcc/x86_64-linux-gnu/14/:/usr/libexec/gcc/x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/14/:/usr/lib/gcc/x86_64-linux-gnu/]
+        ignore line: [LIBRARY_PATH=/usr/lib/gcc/x86_64-linux-gnu/14/:/usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/14/../../../../lib/:/lib/x86_64-linux-gnu/:/lib/../lib/:/usr/lib/x86_64-linux-gnu/:/usr/lib/../lib/:/usr/lib/gcc/x86_64-linux-gnu/14/../../../:/lib/:/usr/lib/]
+        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_dcf90.dir/CMakeCXXCompilerABI.cpp.o' '-c' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_dcf90.dir/CMakeCXXCompilerABI.cpp.']
+        ignore line: [Linking CXX executable cmTC_dcf90]
+        ignore line: [/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_dcf90.dir/link.txt --verbose=1]
+        ignore line: [Using built-in specs.]
+        ignore line: [COLLECT_GCC=/usr/bin/c++]
+        ignore line: [COLLECT_LTO_WRAPPER=/usr/libexec/gcc/x86_64-linux-gnu/14/lto-wrapper]
+        ignore line: [OFFLOAD_TARGET_NAMES=nvptx-none:amdgcn-amdhsa]
+        ignore line: [OFFLOAD_TARGET_DEFAULT=1]
+        ignore line: [Target: x86_64-linux-gnu]
+        ignore line: [Configured with: ../src/configure -v --with-pkgversion='Debian 14.2.0-16' --with-bugurl=file:///usr/share/doc/gcc-14/README.Bugs --enable-languages=c ada c++ go d fortran objc obj-c++ m2 rust --prefix=/usr --with-gcc-major-version-only --program-suffix=-14 --program-prefix=x86_64-linux-gnu- --enable-shared --enable-linker-build-id --libexecdir=/usr/libexec --without-included-gettext --enable-threads=posix --libdir=/usr/lib --enable-nls --enable-bootstrap --enable-clocale=gnu --enable-libstdcxx-debug --enable-libstdcxx-time=yes --with-default-libstdcxx-abi=new --enable-libstdcxx-backtrace --enable-gnu-unique-object --disable-vtable-verify --enable-plugin --enable-default-pie --with-system-zlib --enable-libphobos-checking=release --with-target-system-zlib=auto --enable-objc-gc=auto --enable-multiarch --disable-werror --enable-cet --with-arch-32=i686 --with-abi=m64 --with-multilib-list=m32 m64 mx32 --enable-multilib --with-tune=generic --enable-offload-targets=nvptx-none=/build/reproducible-path/gcc-14-14.2.0/debian/tmp-nvptx/usr amdgcn-amdhsa=/build/reproducible-path/gcc-14-14.2.0/debian/tmp-gcn/usr --enable-offload-defaulted --without-cuda-driver --enable-checking=release --build=x86_64-linux-gnu --host=x86_64-linux-gnu --target=x86_64-linux-gnu --with-build-config=bootstrap-lto-lean --enable-link-serialization=3]
+        ignore line: [Thread model: posix]
+        ignore line: [Supported LTO compression algorithms: zlib zstd]
+        ignore line: [gcc version 14.2.0 (Debian 14.2.0-16) ]
+        ignore line: [COMPILER_PATH=/usr/libexec/gcc/x86_64-linux-gnu/14/:/usr/libexec/gcc/x86_64-linux-gnu/14/:/usr/libexec/gcc/x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/14/:/usr/lib/gcc/x86_64-linux-gnu/]
+        ignore line: [LIBRARY_PATH=/usr/lib/gcc/x86_64-linux-gnu/14/:/usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/14/../../../../lib/:/lib/x86_64-linux-gnu/:/lib/../lib/:/usr/lib/x86_64-linux-gnu/:/usr/lib/../lib/:/usr/lib/gcc/x86_64-linux-gnu/14/../../../:/lib/:/usr/lib/]
+        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'cmTC_dcf90' '-foffload-options=-l_GCC_m' '-shared-libgcc' '-mtune=generic' '-march=x86-64' '-dumpdir' 'cmTC_dcf90.']
+        link line: [ /usr/libexec/gcc/x86_64-linux-gnu/14/collect2 -plugin /usr/libexec/gcc/x86_64-linux-gnu/14/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/x86_64-linux-gnu/14/lto-wrapper -plugin-opt=-fresolution=/tmp/ccbRwyyl.res -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc --build-id --eh-frame-hdr -m elf_x86_64 --hash-style=gnu --as-needed -dynamic-linker /lib64/ld-linux-x86-64.so.2 -pie -o cmTC_dcf90 /usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/Scrt1.o /usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/crti.o /usr/lib/gcc/x86_64-linux-gnu/14/crtbeginS.o -L/usr/lib/gcc/x86_64-linux-gnu/14 -L/usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu -L/usr/lib/gcc/x86_64-linux-gnu/14/../../../../lib -L/lib/x86_64-linux-gnu -L/lib/../lib -L/usr/lib/x86_64-linux-gnu -L/usr/lib/../lib -L/usr/lib/gcc/x86_64-linux-gnu/14/../../.. -v CMakeFiles/cmTC_dcf90.dir/CMakeCXXCompilerABI.cpp.o -lstdc++ -lm -lgcc_s -lgcc -lc -lgcc_s -lgcc /usr/lib/gcc/x86_64-linux-gnu/14/crtendS.o /usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/crtn.o]
+          arg [/usr/libexec/gcc/x86_64-linux-gnu/14/collect2] ==> ignore
+          arg [-plugin] ==> ignore
+          arg [/usr/libexec/gcc/x86_64-linux-gnu/14/liblto_plugin.so] ==> ignore
+          arg [-plugin-opt=/usr/libexec/gcc/x86_64-linux-gnu/14/lto-wrapper] ==> ignore
+          arg [-plugin-opt=-fresolution=/tmp/ccbRwyyl.res] ==> ignore
+          arg [-plugin-opt=-pass-through=-lgcc_s] ==> ignore
+          arg [-plugin-opt=-pass-through=-lgcc] ==> ignore
+          arg [-plugin-opt=-pass-through=-lc] ==> ignore
+          arg [-plugin-opt=-pass-through=-lgcc_s] ==> ignore
+          arg [-plugin-opt=-pass-through=-lgcc] ==> ignore
+          arg [--build-id] ==> ignore
+          arg [--eh-frame-hdr] ==> ignore
+          arg [-m] ==> ignore
+          arg [elf_x86_64] ==> ignore
+          arg [--hash-style=gnu] ==> ignore
+          arg [--as-needed] ==> ignore
+          arg [-dynamic-linker] ==> ignore
+          arg [/lib64/ld-linux-x86-64.so.2] ==> ignore
+          arg [-pie] ==> ignore
+          arg [-o] ==> ignore
+          arg [cmTC_dcf90] ==> ignore
+          arg [/usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/Scrt1.o] ==> obj [/usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/Scrt1.o]
+          arg [/usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/crti.o] ==> obj [/usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/crti.o]
+          arg [/usr/lib/gcc/x86_64-linux-gnu/14/crtbeginS.o] ==> obj [/usr/lib/gcc/x86_64-linux-gnu/14/crtbeginS.o]
+          arg [-L/usr/lib/gcc/x86_64-linux-gnu/14] ==> dir [/usr/lib/gcc/x86_64-linux-gnu/14]
+          arg [-L/usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu] ==> dir [/usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu]
+          arg [-L/usr/lib/gcc/x86_64-linux-gnu/14/../../../../lib] ==> dir [/usr/lib/gcc/x86_64-linux-gnu/14/../../../../lib]
+          arg [-L/lib/x86_64-linux-gnu] ==> dir [/lib/x86_64-linux-gnu]
+          arg [-L/lib/../lib] ==> dir [/lib/../lib]
+          arg [-L/usr/lib/x86_64-linux-gnu] ==> dir [/usr/lib/x86_64-linux-gnu]
+          arg [-L/usr/lib/../lib] ==> dir [/usr/lib/../lib]
+          arg [-L/usr/lib/gcc/x86_64-linux-gnu/14/../../..] ==> dir [/usr/lib/gcc/x86_64-linux-gnu/14/../../..]
+          arg [-v] ==> ignore
+          arg [CMakeFiles/cmTC_dcf90.dir/CMakeCXXCompilerABI.cpp.o] ==> ignore
+          arg [-lstdc++] ==> lib [stdc++]
+          arg [-lm] ==> lib [m]
+          arg [-lgcc_s] ==> lib [gcc_s]
+          arg [-lgcc] ==> lib [gcc]
+          arg [-lc] ==> lib [c]
+          arg [-lgcc_s] ==> lib [gcc_s]
+          arg [-lgcc] ==> lib [gcc]
+          arg [/usr/lib/gcc/x86_64-linux-gnu/14/crtendS.o] ==> obj [/usr/lib/gcc/x86_64-linux-gnu/14/crtendS.o]
+          arg [/usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/crtn.o] ==> obj [/usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/crtn.o]
+        ignore line: [collect2 version 14.2.0]
+        ignore line: [/usr/bin/ld -plugin /usr/libexec/gcc/x86_64-linux-gnu/14/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/x86_64-linux-gnu/14/lto-wrapper -plugin-opt=-fresolution=/tmp/ccbRwyyl.res -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lgcc --build-id --eh-frame-hdr -m elf_x86_64 --hash-style=gnu --as-needed -dynamic-linker /lib64/ld-linux-x86-64.so.2 -pie -o cmTC_dcf90 /usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/Scrt1.o /usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/crti.o /usr/lib/gcc/x86_64-linux-gnu/14/crtbeginS.o -L/usr/lib/gcc/x86_64-linux-gnu/14 -L/usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu -L/usr/lib/gcc/x86_64-linux-gnu/14/../../../../lib -L/lib/x86_64-linux-gnu -L/lib/../lib -L/usr/lib/x86_64-linux-gnu -L/usr/lib/../lib -L/usr/lib/gcc/x86_64-linux-gnu/14/../../.. -v CMakeFiles/cmTC_dcf90.dir/CMakeCXXCompilerABI.cpp.o -lstdc++ -lm -lgcc_s -lgcc -lc -lgcc_s -lgcc /usr/lib/gcc/x86_64-linux-gnu/14/crtendS.o /usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/crtn.o]
+        linker tool for 'CXX': /usr/bin/ld
+        collapse obj [/usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/Scrt1.o] ==> [/usr/lib/x86_64-linux-gnu/Scrt1.o]
+        collapse obj [/usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/crti.o] ==> [/usr/lib/x86_64-linux-gnu/crti.o]
+        collapse obj [/usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/crtn.o] ==> [/usr/lib/x86_64-linux-gnu/crtn.o]
+        collapse library dir [/usr/lib/gcc/x86_64-linux-gnu/14] ==> [/usr/lib/gcc/x86_64-linux-gnu/14]
+        collapse library dir [/usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu] ==> [/usr/lib/x86_64-linux-gnu]
+        collapse library dir [/usr/lib/gcc/x86_64-linux-gnu/14/../../../../lib] ==> [/usr/lib]
+        collapse library dir [/lib/x86_64-linux-gnu] ==> [/lib/x86_64-linux-gnu]
+        collapse library dir [/lib/../lib] ==> [/lib]
+        collapse library dir [/usr/lib/x86_64-linux-gnu] ==> [/usr/lib/x86_64-linux-gnu]
+        collapse library dir [/usr/lib/../lib] ==> [/usr/lib]
+        collapse library dir [/usr/lib/gcc/x86_64-linux-gnu/14/../../..] ==> [/usr/lib]
+        implicit libs: [stdc++;m;gcc_s;gcc;c;gcc_s;gcc]
+        implicit objs: [/usr/lib/x86_64-linux-gnu/Scrt1.o;/usr/lib/x86_64-linux-gnu/crti.o;/usr/lib/gcc/x86_64-linux-gnu/14/crtbeginS.o;/usr/lib/gcc/x86_64-linux-gnu/14/crtendS.o;/usr/lib/x86_64-linux-gnu/crtn.o]
+        implicit dirs: [/usr/lib/gcc/x86_64-linux-gnu/14;/usr/lib/x86_64-linux-gnu;/usr/lib;/lib/x86_64-linux-gnu;/lib]
+        implicit fwks: []
+      
+      
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/Internal/CMakeDetermineLinkerId.cmake:40 (message)"
+      - "/usr/share/cmake-3.31/Modules/CMakeDetermineCompilerABI.cmake:255 (cmake_determine_linker_id)"
+      - "/usr/share/cmake-3.31/Modules/CMakeTestCXXCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:9 (project)"
+    message: |
+      Running the CXX compiler's linker: "/usr/bin/ld" "-v"
+      GNU ld (GNU Binutils for Debian) 2.44
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/CMakeDetermineCompilerABI.cmake:74 (try_compile)"
+      - "/usr/share/cmake-3.31/Modules/CMakeTestCCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:9 (project)"
+    checks:
+      - "Detecting C compiler ABI info"
+    directories:
+      source: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-IO66wO"
+      binary: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-IO66wO"
+    cmakeVariables:
+      CMAKE_C_FLAGS: ""
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+    buildResult:
+      variable: "CMAKE_C_ABI_COMPILED"
+      cached: true
+      stdout: |
+        Change Dir: '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-IO66wO'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_4ba27/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_4ba27.dir/build.make CMakeFiles/cmTC_4ba27.dir/build
+        gmake[1]: Entering directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-IO66wO'
+        Building C object CMakeFiles/cmTC_4ba27.dir/CMakeCCompilerABI.c.o
+        /usr/bin/cc   -v -o CMakeFiles/cmTC_4ba27.dir/CMakeCCompilerABI.c.o -c /usr/share/cmake-3.31/Modules/CMakeCCompilerABI.c
+        Using built-in specs.
+        COLLECT_GCC=/usr/bin/cc
+        OFFLOAD_TARGET_NAMES=nvptx-none:amdgcn-amdhsa
+        OFFLOAD_TARGET_DEFAULT=1
+        Target: x86_64-linux-gnu
+        Configured with: ../src/configure -v --with-pkgversion='Debian 14.2.0-16' --with-bugurl=file:///usr/share/doc/gcc-14/README.Bugs --enable-languages=c,ada,c++,go,d,fortran,objc,obj-c++,m2,rust --prefix=/usr --with-gcc-major-version-only --program-suffix=-14 --program-prefix=x86_64-linux-gnu- --enable-shared --enable-linker-build-id --libexecdir=/usr/libexec --without-included-gettext --enable-threads=posix --libdir=/usr/lib --enable-nls --enable-bootstrap --enable-clocale=gnu --enable-libstdcxx-debug --enable-libstdcxx-time=yes --with-default-libstdcxx-abi=new --enable-libstdcxx-backtrace --enable-gnu-unique-object --disable-vtable-verify --enable-plugin --enable-default-pie --with-system-zlib --enable-libphobos-checking=release --with-target-system-zlib=auto --enable-objc-gc=auto --enable-multiarch --disable-werror --enable-cet --with-arch-32=i686 --with-abi=m64 --with-multilib-list=m32,m64,mx32 --enable-multilib --with-tune=generic --enable-offload-targets=nvptx-none=/build/reproducible-path/gcc-14-14.2.0/debian/tmp-nvptx/usr,amdgcn-amdhsa=/build/reproducible-path/gcc-14-14.2.0/debian/tmp-gcn/usr --enable-offload-defaulted --without-cuda-driver --enable-checking=release --build=x86_64-linux-gnu --host=x86_64-linux-gnu --target=x86_64-linux-gnu --with-build-config=bootstrap-lto-lean --enable-link-serialization=3
+        Thread model: posix
+        Supported LTO compression algorithms: zlib zstd
+        gcc version 14.2.0 (Debian 14.2.0-16) 
+        COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_4ba27.dir/CMakeCCompilerABI.c.o' '-c' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_4ba27.dir/'
+         /usr/libexec/gcc/x86_64-linux-gnu/14/cc1 -quiet -v -imultiarch x86_64-linux-gnu /usr/share/cmake-3.31/Modules/CMakeCCompilerABI.c -quiet -dumpdir CMakeFiles/cmTC_4ba27.dir/ -dumpbase CMakeCCompilerABI.c.c -dumpbase-ext .c -mtune=generic -march=x86-64 -version -fasynchronous-unwind-tables -o /tmp/ccB4Qg7o.s
+        GNU C17 (Debian 14.2.0-16) version 14.2.0 (x86_64-linux-gnu)
+        	compiled by GNU C version 14.2.0, GMP version 6.3.0, MPFR version 4.2.1, MPC version 1.3.1, isl version isl-0.27-GMP
+        
+        GGC heuristics: --param ggc-min-expand=100 --param ggc-min-heapsize=131072
+        ignoring nonexistent directory "/usr/local/include/x86_64-linux-gnu"
+        ignoring nonexistent directory "/usr/lib/gcc/x86_64-linux-gnu/14/include-fixed/x86_64-linux-gnu"
+        ignoring nonexistent directory "/usr/lib/gcc/x86_64-linux-gnu/14/include-fixed"
+        ignoring nonexistent directory "/usr/lib/gcc/x86_64-linux-gnu/14/../../../../x86_64-linux-gnu/include"
+        #include "..." search starts here:
+        #include <...> search starts here:
+         /usr/lib/gcc/x86_64-linux-gnu/14/include
+         /usr/local/include
+         /usr/include/x86_64-linux-gnu
+         /usr/include
+        End of search list.
+        Compiler executable checksum: 6b5dcb379479404c8f69c50b055c2a01
+        COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_4ba27.dir/CMakeCCompilerABI.c.o' '-c' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_4ba27.dir/'
+         as -v --64 -o CMakeFiles/cmTC_4ba27.dir/CMakeCCompilerABI.c.o /tmp/ccB4Qg7o.s
+        GNU assembler version 2.44 (x86_64-linux-gnu) using BFD version (GNU Binutils for Debian) 2.44
+        COMPILER_PATH=/usr/libexec/gcc/x86_64-linux-gnu/14/:/usr/libexec/gcc/x86_64-linux-gnu/14/:/usr/libexec/gcc/x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/14/:/usr/lib/gcc/x86_64-linux-gnu/
+        LIBRARY_PATH=/usr/lib/gcc/x86_64-linux-gnu/14/:/usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/14/../../../../lib/:/lib/x86_64-linux-gnu/:/lib/../lib/:/usr/lib/x86_64-linux-gnu/:/usr/lib/../lib/:/usr/lib/gcc/x86_64-linux-gnu/14/../../../:/lib/:/usr/lib/
+        COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_4ba27.dir/CMakeCCompilerABI.c.o' '-c' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_4ba27.dir/CMakeCCompilerABI.c.'
+        Linking C executable cmTC_4ba27
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_4ba27.dir/link.txt --verbose=1
+        Using built-in specs.
+        COLLECT_GCC=/usr/bin/cc
+        COLLECT_LTO_WRAPPER=/usr/libexec/gcc/x86_64-linux-gnu/14/lto-wrapper
+        OFFLOAD_TARGET_NAMES=nvptx-none:amdgcn-amdhsa
+        OFFLOAD_TARGET_DEFAULT=1
+        Target: x86_64-linux-gnu
+        Configured with: ../src/configure -v --with-pkgversion='Debian 14.2.0-16' --with-bugurl=file:///usr/share/doc/gcc-14/README.Bugs --enable-languages=c,ada,c++,go,d,fortran,objc,obj-c++,m2,rust --prefix=/usr --with-gcc-major-version-only --program-suffix=-14 --program-prefix=x86_64-linux-gnu- --enable-shared --enable-linker-build-id --libexecdir=/usr/libexec --without-included-gettext --enable-threads=posix --libdir=/usr/lib --enable-nls --enable-bootstrap --enable-clocale=gnu --enable-libstdcxx-debug --enable-libstdcxx-time=yes --with-default-libstdcxx-abi=new --enable-libstdcxx-backtrace --enable-gnu-unique-object --disable-vtable-verify --enable-plugin --enable-default-pie --with-system-zlib --enable-libphobos-checking=release --with-target-system-zlib=auto --enable-objc-gc=auto --enable-multiarch --disable-werror --enable-cet --with-arch-32=i686 --with-abi=m64 --with-multilib-list=m32,m64,mx32 --enable-multilib --with-tune=generic --enable-offload-targets=nvptx-none=/build/reproducible-path/gcc-14-14.2.0/debian/tmp-nvptx/usr,amdgcn-amdhsa=/build/reproducible-path/gcc-14-14.2.0/debian/tmp-gcn/usr --enable-offload-defaulted --without-cuda-driver --enable-checking=release --build=x86_64-linux-gnu --host=x86_64-linux-gnu --target=x86_64-linux-gnu --with-build-config=bootstrap-lto-lean --enable-link-serialization=3
+        Thread model: posix
+        Supported LTO compression algorithms: zlib zstd
+        gcc version 14.2.0 (Debian 14.2.0-16) 
+        COMPILER_PATH=/usr/libexec/gcc/x86_64-linux-gnu/14/:/usr/libexec/gcc/x86_64-linux-gnu/14/:/usr/libexec/gcc/x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/14/:/usr/lib/gcc/x86_64-linux-gnu/
+        LIBRARY_PATH=/usr/lib/gcc/x86_64-linux-gnu/14/:/usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/14/../../../../lib/:/lib/x86_64-linux-gnu/:/lib/../lib/:/usr/lib/x86_64-linux-gnu/:/usr/lib/../lib/:/usr/lib/gcc/x86_64-linux-gnu/14/../../../:/lib/:/usr/lib/
+        COLLECT_GCC_OPTIONS='-v' '-o' 'cmTC_4ba27' '-mtune=generic' '-march=x86-64' '-dumpdir' 'cmTC_4ba27.'
+         /usr/libexec/gcc/x86_64-linux-gnu/14/collect2 -plugin /usr/libexec/gcc/x86_64-linux-gnu/14/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/x86_64-linux-gnu/14/lto-wrapper -plugin-opt=-fresolution=/tmp/ccdBZYGz.res -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s --build-id --eh-frame-hdr -m elf_x86_64 --hash-style=gnu --as-needed -dynamic-linker /lib64/ld-linux-x86-64.so.2 -pie -o cmTC_4ba27 /usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/Scrt1.o /usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/crti.o /usr/lib/gcc/x86_64-linux-gnu/14/crtbeginS.o -L/usr/lib/gcc/x86_64-linux-gnu/14 -L/usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu -L/usr/lib/gcc/x86_64-linux-gnu/14/../../../../lib -L/lib/x86_64-linux-gnu -L/lib/../lib -L/usr/lib/x86_64-linux-gnu -L/usr/lib/../lib -L/usr/lib/gcc/x86_64-linux-gnu/14/../../.. -v CMakeFiles/cmTC_4ba27.dir/CMakeCCompilerABI.c.o -lgcc --push-state --as-needed -lgcc_s --pop-state -lc -lgcc --push-state --as-needed -lgcc_s --pop-state /usr/lib/gcc/x86_64-linux-gnu/14/crtendS.o /usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/crtn.o
+        collect2 version 14.2.0
+        /usr/bin/ld -plugin /usr/libexec/gcc/x86_64-linux-gnu/14/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/x86_64-linux-gnu/14/lto-wrapper -plugin-opt=-fresolution=/tmp/ccdBZYGz.res -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s --build-id --eh-frame-hdr -m elf_x86_64 --hash-style=gnu --as-needed -dynamic-linker /lib64/ld-linux-x86-64.so.2 -pie -o cmTC_4ba27 /usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/Scrt1.o /usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/crti.o /usr/lib/gcc/x86_64-linux-gnu/14/crtbeginS.o -L/usr/lib/gcc/x86_64-linux-gnu/14 -L/usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu -L/usr/lib/gcc/x86_64-linux-gnu/14/../../../../lib -L/lib/x86_64-linux-gnu -L/lib/../lib -L/usr/lib/x86_64-linux-gnu -L/usr/lib/../lib -L/usr/lib/gcc/x86_64-linux-gnu/14/../../.. -v CMakeFiles/cmTC_4ba27.dir/CMakeCCompilerABI.c.o -lgcc --push-state --as-needed -lgcc_s --pop-state -lc -lgcc --push-state --as-needed -lgcc_s --pop-state /usr/lib/gcc/x86_64-linux-gnu/14/crtendS.o /usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/crtn.o
+        GNU ld (GNU Binutils for Debian) 2.44
+        COLLECT_GCC_OPTIONS='-v' '-o' 'cmTC_4ba27' '-mtune=generic' '-march=x86-64' '-dumpdir' 'cmTC_4ba27.'
+        /usr/bin/cc  -v -Wl,-v CMakeFiles/cmTC_4ba27.dir/CMakeCCompilerABI.c.o -o cmTC_4ba27
+        gmake[1]: Leaving directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-IO66wO'
+        
+      exitCode: 0
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/CMakeDetermineCompilerABI.cmake:182 (message)"
+      - "/usr/share/cmake-3.31/Modules/CMakeTestCCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:9 (project)"
+    message: |
+      Parsed C implicit include dir info: rv=done
+        found start of include info
+        found start of implicit include info
+          add: [/usr/lib/gcc/x86_64-linux-gnu/14/include]
+          add: [/usr/local/include]
+          add: [/usr/include/x86_64-linux-gnu]
+          add: [/usr/include]
+        end of search list found
+        collapse include dir [/usr/lib/gcc/x86_64-linux-gnu/14/include] ==> [/usr/lib/gcc/x86_64-linux-gnu/14/include]
+        collapse include dir [/usr/local/include] ==> [/usr/local/include]
+        collapse include dir [/usr/include/x86_64-linux-gnu] ==> [/usr/include/x86_64-linux-gnu]
+        collapse include dir [/usr/include] ==> [/usr/include]
+        implicit include dirs: [/usr/lib/gcc/x86_64-linux-gnu/14/include;/usr/local/include;/usr/include/x86_64-linux-gnu;/usr/include]
+      
+      
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/CMakeDetermineCompilerABI.cmake:218 (message)"
+      - "/usr/share/cmake-3.31/Modules/CMakeTestCCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:9 (project)"
+    message: |
+      Parsed C implicit link information:
+        link line regex: [^( *|.*[/\\])(ld[0-9]*(\\.[a-z]+)?|CMAKE_LINK_STARTFILE-NOTFOUND|([^/\\]+-)?ld|collect2)[^/\\]*( |$)]
+        linker tool regex: [^[ 	]*(->|")?[ 	]*(([^"]*[/\\])?(ld[0-9]*(\\.[a-z]+)?))("|,| |$)]
+        ignore line: [Change Dir: '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-IO66wO']
+        ignore line: []
+        ignore line: [Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_4ba27/fast]
+        ignore line: [/usr/bin/gmake  -f CMakeFiles/cmTC_4ba27.dir/build.make CMakeFiles/cmTC_4ba27.dir/build]
+        ignore line: [gmake[1]: Entering directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-IO66wO']
+        ignore line: [Building C object CMakeFiles/cmTC_4ba27.dir/CMakeCCompilerABI.c.o]
+        ignore line: [/usr/bin/cc   -v -o CMakeFiles/cmTC_4ba27.dir/CMakeCCompilerABI.c.o -c /usr/share/cmake-3.31/Modules/CMakeCCompilerABI.c]
+        ignore line: [Using built-in specs.]
+        ignore line: [COLLECT_GCC=/usr/bin/cc]
+        ignore line: [OFFLOAD_TARGET_NAMES=nvptx-none:amdgcn-amdhsa]
+        ignore line: [OFFLOAD_TARGET_DEFAULT=1]
+        ignore line: [Target: x86_64-linux-gnu]
+        ignore line: [Configured with: ../src/configure -v --with-pkgversion='Debian 14.2.0-16' --with-bugurl=file:///usr/share/doc/gcc-14/README.Bugs --enable-languages=c ada c++ go d fortran objc obj-c++ m2 rust --prefix=/usr --with-gcc-major-version-only --program-suffix=-14 --program-prefix=x86_64-linux-gnu- --enable-shared --enable-linker-build-id --libexecdir=/usr/libexec --without-included-gettext --enable-threads=posix --libdir=/usr/lib --enable-nls --enable-bootstrap --enable-clocale=gnu --enable-libstdcxx-debug --enable-libstdcxx-time=yes --with-default-libstdcxx-abi=new --enable-libstdcxx-backtrace --enable-gnu-unique-object --disable-vtable-verify --enable-plugin --enable-default-pie --with-system-zlib --enable-libphobos-checking=release --with-target-system-zlib=auto --enable-objc-gc=auto --enable-multiarch --disable-werror --enable-cet --with-arch-32=i686 --with-abi=m64 --with-multilib-list=m32 m64 mx32 --enable-multilib --with-tune=generic --enable-offload-targets=nvptx-none=/build/reproducible-path/gcc-14-14.2.0/debian/tmp-nvptx/usr amdgcn-amdhsa=/build/reproducible-path/gcc-14-14.2.0/debian/tmp-gcn/usr --enable-offload-defaulted --without-cuda-driver --enable-checking=release --build=x86_64-linux-gnu --host=x86_64-linux-gnu --target=x86_64-linux-gnu --with-build-config=bootstrap-lto-lean --enable-link-serialization=3]
+        ignore line: [Thread model: posix]
+        ignore line: [Supported LTO compression algorithms: zlib zstd]
+        ignore line: [gcc version 14.2.0 (Debian 14.2.0-16) ]
+        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_4ba27.dir/CMakeCCompilerABI.c.o' '-c' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_4ba27.dir/']
+        ignore line: [ /usr/libexec/gcc/x86_64-linux-gnu/14/cc1 -quiet -v -imultiarch x86_64-linux-gnu /usr/share/cmake-3.31/Modules/CMakeCCompilerABI.c -quiet -dumpdir CMakeFiles/cmTC_4ba27.dir/ -dumpbase CMakeCCompilerABI.c.c -dumpbase-ext .c -mtune=generic -march=x86-64 -version -fasynchronous-unwind-tables -o /tmp/ccB4Qg7o.s]
+        ignore line: [GNU C17 (Debian 14.2.0-16) version 14.2.0 (x86_64-linux-gnu)]
+        ignore line: [	compiled by GNU C version 14.2.0  GMP version 6.3.0  MPFR version 4.2.1  MPC version 1.3.1  isl version isl-0.27-GMP]
+        ignore line: []
+        ignore line: [GGC heuristics: --param ggc-min-expand=100 --param ggc-min-heapsize=131072]
+        ignore line: [ignoring nonexistent directory "/usr/local/include/x86_64-linux-gnu"]
+        ignore line: [ignoring nonexistent directory "/usr/lib/gcc/x86_64-linux-gnu/14/include-fixed/x86_64-linux-gnu"]
+        ignore line: [ignoring nonexistent directory "/usr/lib/gcc/x86_64-linux-gnu/14/include-fixed"]
+        ignore line: [ignoring nonexistent directory "/usr/lib/gcc/x86_64-linux-gnu/14/../../../../x86_64-linux-gnu/include"]
+        ignore line: [#include "..." search starts here:]
+        ignore line: [#include <...> search starts here:]
+        ignore line: [ /usr/lib/gcc/x86_64-linux-gnu/14/include]
+        ignore line: [ /usr/local/include]
+        ignore line: [ /usr/include/x86_64-linux-gnu]
+        ignore line: [ /usr/include]
+        ignore line: [End of search list.]
+        ignore line: [Compiler executable checksum: 6b5dcb379479404c8f69c50b055c2a01]
+        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_4ba27.dir/CMakeCCompilerABI.c.o' '-c' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_4ba27.dir/']
+        ignore line: [ as -v --64 -o CMakeFiles/cmTC_4ba27.dir/CMakeCCompilerABI.c.o /tmp/ccB4Qg7o.s]
+        ignore line: [GNU assembler version 2.44 (x86_64-linux-gnu) using BFD version (GNU Binutils for Debian) 2.44]
+        ignore line: [COMPILER_PATH=/usr/libexec/gcc/x86_64-linux-gnu/14/:/usr/libexec/gcc/x86_64-linux-gnu/14/:/usr/libexec/gcc/x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/14/:/usr/lib/gcc/x86_64-linux-gnu/]
+        ignore line: [LIBRARY_PATH=/usr/lib/gcc/x86_64-linux-gnu/14/:/usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/14/../../../../lib/:/lib/x86_64-linux-gnu/:/lib/../lib/:/usr/lib/x86_64-linux-gnu/:/usr/lib/../lib/:/usr/lib/gcc/x86_64-linux-gnu/14/../../../:/lib/:/usr/lib/]
+        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'CMakeFiles/cmTC_4ba27.dir/CMakeCCompilerABI.c.o' '-c' '-mtune=generic' '-march=x86-64' '-dumpdir' 'CMakeFiles/cmTC_4ba27.dir/CMakeCCompilerABI.c.']
+        ignore line: [Linking C executable cmTC_4ba27]
+        ignore line: [/usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_4ba27.dir/link.txt --verbose=1]
+        ignore line: [Using built-in specs.]
+        ignore line: [COLLECT_GCC=/usr/bin/cc]
+        ignore line: [COLLECT_LTO_WRAPPER=/usr/libexec/gcc/x86_64-linux-gnu/14/lto-wrapper]
+        ignore line: [OFFLOAD_TARGET_NAMES=nvptx-none:amdgcn-amdhsa]
+        ignore line: [OFFLOAD_TARGET_DEFAULT=1]
+        ignore line: [Target: x86_64-linux-gnu]
+        ignore line: [Configured with: ../src/configure -v --with-pkgversion='Debian 14.2.0-16' --with-bugurl=file:///usr/share/doc/gcc-14/README.Bugs --enable-languages=c ada c++ go d fortran objc obj-c++ m2 rust --prefix=/usr --with-gcc-major-version-only --program-suffix=-14 --program-prefix=x86_64-linux-gnu- --enable-shared --enable-linker-build-id --libexecdir=/usr/libexec --without-included-gettext --enable-threads=posix --libdir=/usr/lib --enable-nls --enable-bootstrap --enable-clocale=gnu --enable-libstdcxx-debug --enable-libstdcxx-time=yes --with-default-libstdcxx-abi=new --enable-libstdcxx-backtrace --enable-gnu-unique-object --disable-vtable-verify --enable-plugin --enable-default-pie --with-system-zlib --enable-libphobos-checking=release --with-target-system-zlib=auto --enable-objc-gc=auto --enable-multiarch --disable-werror --enable-cet --with-arch-32=i686 --with-abi=m64 --with-multilib-list=m32 m64 mx32 --enable-multilib --with-tune=generic --enable-offload-targets=nvptx-none=/build/reproducible-path/gcc-14-14.2.0/debian/tmp-nvptx/usr amdgcn-amdhsa=/build/reproducible-path/gcc-14-14.2.0/debian/tmp-gcn/usr --enable-offload-defaulted --without-cuda-driver --enable-checking=release --build=x86_64-linux-gnu --host=x86_64-linux-gnu --target=x86_64-linux-gnu --with-build-config=bootstrap-lto-lean --enable-link-serialization=3]
+        ignore line: [Thread model: posix]
+        ignore line: [Supported LTO compression algorithms: zlib zstd]
+        ignore line: [gcc version 14.2.0 (Debian 14.2.0-16) ]
+        ignore line: [COMPILER_PATH=/usr/libexec/gcc/x86_64-linux-gnu/14/:/usr/libexec/gcc/x86_64-linux-gnu/14/:/usr/libexec/gcc/x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/14/:/usr/lib/gcc/x86_64-linux-gnu/]
+        ignore line: [LIBRARY_PATH=/usr/lib/gcc/x86_64-linux-gnu/14/:/usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/:/usr/lib/gcc/x86_64-linux-gnu/14/../../../../lib/:/lib/x86_64-linux-gnu/:/lib/../lib/:/usr/lib/x86_64-linux-gnu/:/usr/lib/../lib/:/usr/lib/gcc/x86_64-linux-gnu/14/../../../:/lib/:/usr/lib/]
+        ignore line: [COLLECT_GCC_OPTIONS='-v' '-o' 'cmTC_4ba27' '-mtune=generic' '-march=x86-64' '-dumpdir' 'cmTC_4ba27.']
+        link line: [ /usr/libexec/gcc/x86_64-linux-gnu/14/collect2 -plugin /usr/libexec/gcc/x86_64-linux-gnu/14/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/x86_64-linux-gnu/14/lto-wrapper -plugin-opt=-fresolution=/tmp/ccdBZYGz.res -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s --build-id --eh-frame-hdr -m elf_x86_64 --hash-style=gnu --as-needed -dynamic-linker /lib64/ld-linux-x86-64.so.2 -pie -o cmTC_4ba27 /usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/Scrt1.o /usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/crti.o /usr/lib/gcc/x86_64-linux-gnu/14/crtbeginS.o -L/usr/lib/gcc/x86_64-linux-gnu/14 -L/usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu -L/usr/lib/gcc/x86_64-linux-gnu/14/../../../../lib -L/lib/x86_64-linux-gnu -L/lib/../lib -L/usr/lib/x86_64-linux-gnu -L/usr/lib/../lib -L/usr/lib/gcc/x86_64-linux-gnu/14/../../.. -v CMakeFiles/cmTC_4ba27.dir/CMakeCCompilerABI.c.o -lgcc --push-state --as-needed -lgcc_s --pop-state -lc -lgcc --push-state --as-needed -lgcc_s --pop-state /usr/lib/gcc/x86_64-linux-gnu/14/crtendS.o /usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/crtn.o]
+          arg [/usr/libexec/gcc/x86_64-linux-gnu/14/collect2] ==> ignore
+          arg [-plugin] ==> ignore
+          arg [/usr/libexec/gcc/x86_64-linux-gnu/14/liblto_plugin.so] ==> ignore
+          arg [-plugin-opt=/usr/libexec/gcc/x86_64-linux-gnu/14/lto-wrapper] ==> ignore
+          arg [-plugin-opt=-fresolution=/tmp/ccdBZYGz.res] ==> ignore
+          arg [-plugin-opt=-pass-through=-lgcc] ==> ignore
+          arg [-plugin-opt=-pass-through=-lgcc_s] ==> ignore
+          arg [-plugin-opt=-pass-through=-lc] ==> ignore
+          arg [-plugin-opt=-pass-through=-lgcc] ==> ignore
+          arg [-plugin-opt=-pass-through=-lgcc_s] ==> ignore
+          arg [--build-id] ==> ignore
+          arg [--eh-frame-hdr] ==> ignore
+          arg [-m] ==> ignore
+          arg [elf_x86_64] ==> ignore
+          arg [--hash-style=gnu] ==> ignore
+          arg [--as-needed] ==> ignore
+          arg [-dynamic-linker] ==> ignore
+          arg [/lib64/ld-linux-x86-64.so.2] ==> ignore
+          arg [-pie] ==> ignore
+          arg [-o] ==> ignore
+          arg [cmTC_4ba27] ==> ignore
+          arg [/usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/Scrt1.o] ==> obj [/usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/Scrt1.o]
+          arg [/usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/crti.o] ==> obj [/usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/crti.o]
+          arg [/usr/lib/gcc/x86_64-linux-gnu/14/crtbeginS.o] ==> obj [/usr/lib/gcc/x86_64-linux-gnu/14/crtbeginS.o]
+          arg [-L/usr/lib/gcc/x86_64-linux-gnu/14] ==> dir [/usr/lib/gcc/x86_64-linux-gnu/14]
+          arg [-L/usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu] ==> dir [/usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu]
+          arg [-L/usr/lib/gcc/x86_64-linux-gnu/14/../../../../lib] ==> dir [/usr/lib/gcc/x86_64-linux-gnu/14/../../../../lib]
+          arg [-L/lib/x86_64-linux-gnu] ==> dir [/lib/x86_64-linux-gnu]
+          arg [-L/lib/../lib] ==> dir [/lib/../lib]
+          arg [-L/usr/lib/x86_64-linux-gnu] ==> dir [/usr/lib/x86_64-linux-gnu]
+          arg [-L/usr/lib/../lib] ==> dir [/usr/lib/../lib]
+          arg [-L/usr/lib/gcc/x86_64-linux-gnu/14/../../..] ==> dir [/usr/lib/gcc/x86_64-linux-gnu/14/../../..]
+          arg [-v] ==> ignore
+          arg [CMakeFiles/cmTC_4ba27.dir/CMakeCCompilerABI.c.o] ==> ignore
+          arg [-lgcc] ==> lib [gcc]
+          arg [--push-state] ==> ignore
+          arg [--as-needed] ==> ignore
+          arg [-lgcc_s] ==> lib [gcc_s]
+          arg [--pop-state] ==> ignore
+          arg [-lc] ==> lib [c]
+          arg [-lgcc] ==> lib [gcc]
+          arg [--push-state] ==> ignore
+          arg [--as-needed] ==> ignore
+          arg [-lgcc_s] ==> lib [gcc_s]
+          arg [--pop-state] ==> ignore
+          arg [/usr/lib/gcc/x86_64-linux-gnu/14/crtendS.o] ==> obj [/usr/lib/gcc/x86_64-linux-gnu/14/crtendS.o]
+          arg [/usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/crtn.o] ==> obj [/usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/crtn.o]
+        ignore line: [collect2 version 14.2.0]
+        ignore line: [/usr/bin/ld -plugin /usr/libexec/gcc/x86_64-linux-gnu/14/liblto_plugin.so -plugin-opt=/usr/libexec/gcc/x86_64-linux-gnu/14/lto-wrapper -plugin-opt=-fresolution=/tmp/ccdBZYGz.res -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s -plugin-opt=-pass-through=-lc -plugin-opt=-pass-through=-lgcc -plugin-opt=-pass-through=-lgcc_s --build-id --eh-frame-hdr -m elf_x86_64 --hash-style=gnu --as-needed -dynamic-linker /lib64/ld-linux-x86-64.so.2 -pie -o cmTC_4ba27 /usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/Scrt1.o /usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/crti.o /usr/lib/gcc/x86_64-linux-gnu/14/crtbeginS.o -L/usr/lib/gcc/x86_64-linux-gnu/14 -L/usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu -L/usr/lib/gcc/x86_64-linux-gnu/14/../../../../lib -L/lib/x86_64-linux-gnu -L/lib/../lib -L/usr/lib/x86_64-linux-gnu -L/usr/lib/../lib -L/usr/lib/gcc/x86_64-linux-gnu/14/../../.. -v CMakeFiles/cmTC_4ba27.dir/CMakeCCompilerABI.c.o -lgcc --push-state --as-needed -lgcc_s --pop-state -lc -lgcc --push-state --as-needed -lgcc_s --pop-state /usr/lib/gcc/x86_64-linux-gnu/14/crtendS.o /usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/crtn.o]
+        linker tool for 'C': /usr/bin/ld
+        collapse obj [/usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/Scrt1.o] ==> [/usr/lib/x86_64-linux-gnu/Scrt1.o]
+        collapse obj [/usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/crti.o] ==> [/usr/lib/x86_64-linux-gnu/crti.o]
+        collapse obj [/usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu/crtn.o] ==> [/usr/lib/x86_64-linux-gnu/crtn.o]
+        collapse library dir [/usr/lib/gcc/x86_64-linux-gnu/14] ==> [/usr/lib/gcc/x86_64-linux-gnu/14]
+        collapse library dir [/usr/lib/gcc/x86_64-linux-gnu/14/../../../x86_64-linux-gnu] ==> [/usr/lib/x86_64-linux-gnu]
+        collapse library dir [/usr/lib/gcc/x86_64-linux-gnu/14/../../../../lib] ==> [/usr/lib]
+        collapse library dir [/lib/x86_64-linux-gnu] ==> [/lib/x86_64-linux-gnu]
+        collapse library dir [/lib/../lib] ==> [/lib]
+        collapse library dir [/usr/lib/x86_64-linux-gnu] ==> [/usr/lib/x86_64-linux-gnu]
+        collapse library dir [/usr/lib/../lib] ==> [/usr/lib]
+        collapse library dir [/usr/lib/gcc/x86_64-linux-gnu/14/../../..] ==> [/usr/lib]
+        implicit libs: [gcc;gcc_s;c;gcc;gcc_s]
+        implicit objs: [/usr/lib/x86_64-linux-gnu/Scrt1.o;/usr/lib/x86_64-linux-gnu/crti.o;/usr/lib/gcc/x86_64-linux-gnu/14/crtbeginS.o;/usr/lib/gcc/x86_64-linux-gnu/14/crtendS.o;/usr/lib/x86_64-linux-gnu/crtn.o]
+        implicit dirs: [/usr/lib/gcc/x86_64-linux-gnu/14;/usr/lib/x86_64-linux-gnu;/usr/lib;/lib/x86_64-linux-gnu;/lib]
+        implicit fwks: []
+      
+      
+  -
+    kind: "message-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/Internal/CMakeDetermineLinkerId.cmake:40 (message)"
+      - "/usr/share/cmake-3.31/Modules/CMakeDetermineCompilerABI.cmake:255 (cmake_determine_linker_id)"
+      - "/usr/share/cmake-3.31/Modules/CMakeTestCCompiler.cmake:26 (CMAKE_DETERMINE_COMPILER_ABI)"
+      - "CMakeLists.txt:9 (project)"
+    message: |
+      Running the C compiler's linker: "/usr/bin/ld" "-v"
+      GNU ld (GNU Binutils for Debian) 2.44
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/Internal/CheckSourceCompiles.cmake:108 (try_compile)"
+      - "/usr/share/cmake-3.31/Modules/CheckCXXSourceCompiles.cmake:58 (cmake_check_source_compiles)"
+      - "build-support/custom-modules/ns3-compiler-and-linker-support.cmake:57 (check_cxx_source_compiles)"
+      - "build-support/macros-and-definitions.cmake:44 (include)"
+      - "CMakeLists.txt:116 (include)"
+    checks:
+      - "Performing Test GCC_WORKING_PEDANTIC_SEMICOLON"
+    directories:
+      source: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-8Sejdh"
+      binary: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-8Sejdh"
+    cmakeVariables:
+      CMAKE_CXX_FLAGS: ""
+      CMAKE_CXX_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/home/kali/MTD/ns-3.45/build-support/custom-modules;/home/kali/MTD/ns-3.45/build-support/3rd-party"
+      CMAKE_POSITION_INDEPENDENT_CODE: "ON"
+    buildResult:
+      variable: "GCC_WORKING_PEDANTIC_SEMICOLON"
+      cached: true
+      stdout: |
+        Change Dir: '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-8Sejdh'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_233a2/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_233a2.dir/build.make CMakeFiles/cmTC_233a2.dir/build
+        gmake[1]: Entering directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-8Sejdh'
+        Building CXX object CMakeFiles/cmTC_233a2.dir/src.cxx.o
+        /usr/bin/c++ -DGCC_WORKING_PEDANTIC_SEMICOLON  -Wall -Wpedantic -Werror -fPIE -o CMakeFiles/cmTC_233a2.dir/src.cxx.o -c /home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-8Sejdh/src.cxx
+        Linking CXX executable cmTC_233a2
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_233a2.dir/link.txt --verbose=1
+        /usr/bin/c++  -Wall -Wpedantic -Werror CMakeFiles/cmTC_233a2.dir/src.cxx.o -o cmTC_233a2
+        gmake[1]: Leaving directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-8Sejdh'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/Internal/CheckSourceCompiles.cmake:108 (try_compile)"
+      - "/usr/share/cmake-3.31/Modules/CheckCSourceCompiles.cmake:58 (cmake_check_source_compiles)"
+      - "/usr/share/cmake-3.31/Modules/FindThreads.cmake:97 (CHECK_C_SOURCE_COMPILES)"
+      - "/usr/share/cmake-3.31/Modules/FindThreads.cmake:163 (_threads_check_libc)"
+      - "build-support/macros-and-definitions.cmake:626 (find_package)"
+      - "CMakeLists.txt:178 (process_options)"
+    directories:
+      source: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-imFOu8"
+      binary: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-imFOu8"
+    cmakeVariables:
+      CMAKE_C_FLAGS: ""
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/home/kali/MTD/ns-3.45/build-support/custom-modules;/home/kali/MTD/ns-3.45/build-support/3rd-party"
+      CMAKE_POSITION_INDEPENDENT_CODE: "ON"
+    buildResult:
+      variable: "CMAKE_HAVE_LIBC_PTHREAD"
+      cached: true
+      stdout: |
+        Change Dir: '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-imFOu8'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_b3422/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_b3422.dir/build.make CMakeFiles/cmTC_b3422.dir/build
+        gmake[1]: Entering directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-imFOu8'
+        Building C object CMakeFiles/cmTC_b3422.dir/src.c.o
+        /usr/bin/cc -DCMAKE_HAVE_LIBC_PTHREAD  -fPIE -o CMakeFiles/cmTC_b3422.dir/src.c.o -c /home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-imFOu8/src.c
+        Linking C executable cmTC_b3422
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_b3422.dir/link.txt --verbose=1
+        /usr/bin/cc CMakeFiles/cmTC_b3422.dir/src.c.o -o cmTC_b3422
+        gmake[1]: Leaving directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-imFOu8'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/Internal/CheckSourceCompiles.cmake:108 (try_compile)"
+      - "/usr/share/cmake-3.31/Modules/CheckCXXSourceCompiles.cmake:58 (cmake_check_source_compiles)"
+      - "build-support/macros-and-definitions.cmake:1076 (check_cxx_source_compiles)"
+      - "CMakeLists.txt:178 (process_options)"
+    checks:
+      - "Performing Test HAVE_UINT128_T"
+    directories:
+      source: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-3DYFRL"
+      binary: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-3DYFRL"
+    cmakeVariables:
+      CMAKE_CXX_FLAGS: ""
+      CMAKE_CXX_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/home/kali/MTD/ns-3.45/build-support/custom-modules;/home/kali/MTD/ns-3.45/build-support/3rd-party"
+      CMAKE_POSITION_INDEPENDENT_CODE: "ON"
+    buildResult:
+      variable: "HAVE_UINT128_T"
+      cached: true
+      stdout: |
+        Change Dir: '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-3DYFRL'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_32528/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_32528.dir/build.make CMakeFiles/cmTC_32528.dir/build
+        gmake[1]: Entering directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-3DYFRL'
+        Building CXX object CMakeFiles/cmTC_32528.dir/src.cxx.o
+        /usr/bin/c++ -DHAVE_UINT128_T  -std=c++20 -fPIE -o CMakeFiles/cmTC_32528.dir/src.cxx.o -c /home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-3DYFRL/src.cxx
+        /home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-3DYFRL/src.cxx: In function ‘int main()’:
+        /home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-3DYFRL/src.cxx:4:18: error: ‘uint128_t’ was not declared in this scope; did you mean ‘uint8_t’?
+            4 |             if ((uint128_t *) 0) return 0;
+              |                  ^~~~~~~~~
+              |                  uint8_t
+        /home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-3DYFRL/src.cxx:4:29: error: expected primary-expression before ‘)’ token
+            4 |             if ((uint128_t *) 0) return 0;
+              |                             ^
+        /home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-3DYFRL/src.cxx:4:30: error: expected ‘)’ before numeric constant
+            4 |             if ((uint128_t *) 0) return 0;
+              |                ~             ^~
+              |                              )
+        /home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-3DYFRL/src.cxx:5:25: error: ‘uint128_t’ was not declared in this scope; did you mean ‘uint8_t’?
+            5 |             if (sizeof (uint128_t)) return 0;
+              |                         ^~~~~~~~~
+              |                         uint8_t
+        gmake[1]: *** [CMakeFiles/cmTC_32528.dir/build.make:81: CMakeFiles/cmTC_32528.dir/src.cxx.o] Error 1
+        gmake[1]: Leaving directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-3DYFRL'
+        gmake: *** [Makefile:134: cmTC_32528/fast] Error 2
+        
+      exitCode: 2
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/Internal/CheckSourceCompiles.cmake:108 (try_compile)"
+      - "/usr/share/cmake-3.31/Modules/CheckCXXSourceCompiles.cmake:58 (cmake_check_source_compiles)"
+      - "build-support/macros-and-definitions.cmake:1086 (check_cxx_source_compiles)"
+      - "CMakeLists.txt:178 (process_options)"
+    checks:
+      - "Performing Test HAVE___UINT128_T"
+    directories:
+      source: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-8MokrD"
+      binary: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-8MokrD"
+    cmakeVariables:
+      CMAKE_CXX_FLAGS: ""
+      CMAKE_CXX_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/home/kali/MTD/ns-3.45/build-support/custom-modules;/home/kali/MTD/ns-3.45/build-support/3rd-party"
+      CMAKE_POSITION_INDEPENDENT_CODE: "ON"
+    buildResult:
+      variable: "HAVE___UINT128_T"
+      cached: true
+      stdout: |
+        Change Dir: '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-8MokrD'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_0349f/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_0349f.dir/build.make CMakeFiles/cmTC_0349f.dir/build
+        gmake[1]: Entering directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-8MokrD'
+        Building CXX object CMakeFiles/cmTC_0349f.dir/src.cxx.o
+        /usr/bin/c++ -DHAVE___UINT128_T  -std=c++20 -fPIE -o CMakeFiles/cmTC_0349f.dir/src.cxx.o -c /home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-8MokrD/src.cxx
+        Linking CXX executable cmTC_0349f
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_0349f.dir/link.txt --verbose=1
+        /usr/bin/c++ CMakeFiles/cmTC_0349f.dir/src.cxx.o -o cmTC_0349f
+        gmake[1]: Leaving directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-8MokrD'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/CheckIncludeFile.cmake:99 (try_compile)"
+      - "build-support/macros-and-definitions.cmake:1132 (check_include_file)"
+      - "CMakeLists.txt:178 (process_options)"
+    checks:
+      - "Looking for stdint.h"
+    directories:
+      source: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-hGJAyc"
+      binary: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-hGJAyc"
+    cmakeVariables:
+      CMAKE_C_FLAGS: ""
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/home/kali/MTD/ns-3.45/build-support/custom-modules;/home/kali/MTD/ns-3.45/build-support/3rd-party"
+      CMAKE_POSITION_INDEPENDENT_CODE: "ON"
+    buildResult:
+      variable: "HAVE_STDINT_H"
+      cached: true
+      stdout: |
+        Change Dir: '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-hGJAyc'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_c5826/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_c5826.dir/build.make CMakeFiles/cmTC_c5826.dir/build
+        gmake[1]: Entering directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-hGJAyc'
+        Building C object CMakeFiles/cmTC_c5826.dir/CheckIncludeFile.c.o
+        /usr/bin/cc   -fPIE -o CMakeFiles/cmTC_c5826.dir/CheckIncludeFile.c.o -c /home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-hGJAyc/CheckIncludeFile.c
+        Linking C executable cmTC_c5826
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_c5826.dir/link.txt --verbose=1
+        /usr/bin/cc CMakeFiles/cmTC_c5826.dir/CheckIncludeFile.c.o -o cmTC_c5826
+        gmake[1]: Leaving directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-hGJAyc'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/CheckIncludeFile.cmake:99 (try_compile)"
+      - "build-support/macros-and-definitions.cmake:1133 (check_include_file)"
+      - "CMakeLists.txt:178 (process_options)"
+    checks:
+      - "Looking for inttypes.h"
+    directories:
+      source: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-QQAZKt"
+      binary: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-QQAZKt"
+    cmakeVariables:
+      CMAKE_C_FLAGS: ""
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/home/kali/MTD/ns-3.45/build-support/custom-modules;/home/kali/MTD/ns-3.45/build-support/3rd-party"
+      CMAKE_POSITION_INDEPENDENT_CODE: "ON"
+    buildResult:
+      variable: "HAVE_INTTYPES_H"
+      cached: true
+      stdout: |
+        Change Dir: '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-QQAZKt'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_56220/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_56220.dir/build.make CMakeFiles/cmTC_56220.dir/build
+        gmake[1]: Entering directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-QQAZKt'
+        Building C object CMakeFiles/cmTC_56220.dir/CheckIncludeFile.c.o
+        /usr/bin/cc   -fPIE -o CMakeFiles/cmTC_56220.dir/CheckIncludeFile.c.o -c /home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-QQAZKt/CheckIncludeFile.c
+        Linking C executable cmTC_56220
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_56220.dir/link.txt --verbose=1
+        /usr/bin/cc CMakeFiles/cmTC_56220.dir/CheckIncludeFile.c.o -o cmTC_56220
+        gmake[1]: Leaving directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-QQAZKt'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/CheckIncludeFile.cmake:99 (try_compile)"
+      - "build-support/macros-and-definitions.cmake:1134 (check_include_file)"
+      - "CMakeLists.txt:178 (process_options)"
+    checks:
+      - "Looking for sys/types.h"
+    directories:
+      source: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-Z9okVL"
+      binary: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-Z9okVL"
+    cmakeVariables:
+      CMAKE_C_FLAGS: ""
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/home/kali/MTD/ns-3.45/build-support/custom-modules;/home/kali/MTD/ns-3.45/build-support/3rd-party"
+      CMAKE_POSITION_INDEPENDENT_CODE: "ON"
+    buildResult:
+      variable: "HAVE_SYS_TYPES_H"
+      cached: true
+      stdout: |
+        Change Dir: '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-Z9okVL'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_7ec71/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_7ec71.dir/build.make CMakeFiles/cmTC_7ec71.dir/build
+        gmake[1]: Entering directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-Z9okVL'
+        Building C object CMakeFiles/cmTC_7ec71.dir/CheckIncludeFile.c.o
+        /usr/bin/cc   -fPIE -o CMakeFiles/cmTC_7ec71.dir/CheckIncludeFile.c.o -c /home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-Z9okVL/CheckIncludeFile.c
+        Linking C executable cmTC_7ec71
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_7ec71.dir/link.txt --verbose=1
+        /usr/bin/cc CMakeFiles/cmTC_7ec71.dir/CheckIncludeFile.c.o -o cmTC_7ec71
+        gmake[1]: Leaving directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-Z9okVL'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/CheckIncludeFile.cmake:99 (try_compile)"
+      - "build-support/macros-and-definitions.cmake:1135 (check_include_file)"
+      - "CMakeLists.txt:178 (process_options)"
+    checks:
+      - "Looking for sys/stat.h"
+    directories:
+      source: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-nyz6aY"
+      binary: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-nyz6aY"
+    cmakeVariables:
+      CMAKE_C_FLAGS: ""
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/home/kali/MTD/ns-3.45/build-support/custom-modules;/home/kali/MTD/ns-3.45/build-support/3rd-party"
+      CMAKE_POSITION_INDEPENDENT_CODE: "ON"
+    buildResult:
+      variable: "HAVE_SYS_STAT_H"
+      cached: true
+      stdout: |
+        Change Dir: '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-nyz6aY'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_9a4f4/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_9a4f4.dir/build.make CMakeFiles/cmTC_9a4f4.dir/build
+        gmake[1]: Entering directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-nyz6aY'
+        Building C object CMakeFiles/cmTC_9a4f4.dir/CheckIncludeFile.c.o
+        /usr/bin/cc   -fPIE -o CMakeFiles/cmTC_9a4f4.dir/CheckIncludeFile.c.o -c /home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-nyz6aY/CheckIncludeFile.c
+        Linking C executable cmTC_9a4f4
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_9a4f4.dir/link.txt --verbose=1
+        /usr/bin/cc CMakeFiles/cmTC_9a4f4.dir/CheckIncludeFile.c.o -o cmTC_9a4f4
+        gmake[1]: Leaving directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-nyz6aY'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/CheckIncludeFile.cmake:99 (try_compile)"
+      - "build-support/macros-and-definitions.cmake:1136 (check_include_file)"
+      - "CMakeLists.txt:178 (process_options)"
+    checks:
+      - "Looking for dirent.h"
+    directories:
+      source: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-NzznCx"
+      binary: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-NzznCx"
+    cmakeVariables:
+      CMAKE_C_FLAGS: ""
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/home/kali/MTD/ns-3.45/build-support/custom-modules;/home/kali/MTD/ns-3.45/build-support/3rd-party"
+      CMAKE_POSITION_INDEPENDENT_CODE: "ON"
+    buildResult:
+      variable: "HAVE_DIRENT_H"
+      cached: true
+      stdout: |
+        Change Dir: '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-NzznCx'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_f25e3/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_f25e3.dir/build.make CMakeFiles/cmTC_f25e3.dir/build
+        gmake[1]: Entering directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-NzznCx'
+        Building C object CMakeFiles/cmTC_f25e3.dir/CheckIncludeFile.c.o
+        /usr/bin/cc   -fPIE -o CMakeFiles/cmTC_f25e3.dir/CheckIncludeFile.c.o -c /home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-NzznCx/CheckIncludeFile.c
+        Linking C executable cmTC_f25e3
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_f25e3.dir/link.txt --verbose=1
+        /usr/bin/cc CMakeFiles/cmTC_f25e3.dir/CheckIncludeFile.c.o -o cmTC_f25e3
+        gmake[1]: Leaving directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-NzznCx'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/CheckIncludeFile.cmake:99 (try_compile)"
+      - "build-support/macros-and-definitions.cmake:1137 (check_include_file)"
+      - "CMakeLists.txt:178 (process_options)"
+    checks:
+      - "Looking for stdlib.h"
+    directories:
+      source: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-Y9vfti"
+      binary: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-Y9vfti"
+    cmakeVariables:
+      CMAKE_C_FLAGS: ""
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/home/kali/MTD/ns-3.45/build-support/custom-modules;/home/kali/MTD/ns-3.45/build-support/3rd-party"
+      CMAKE_POSITION_INDEPENDENT_CODE: "ON"
+    buildResult:
+      variable: "HAVE_STDLIB_H"
+      cached: true
+      stdout: |
+        Change Dir: '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-Y9vfti'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_1fd5a/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_1fd5a.dir/build.make CMakeFiles/cmTC_1fd5a.dir/build
+        gmake[1]: Entering directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-Y9vfti'
+        Building C object CMakeFiles/cmTC_1fd5a.dir/CheckIncludeFile.c.o
+        /usr/bin/cc   -fPIE -o CMakeFiles/cmTC_1fd5a.dir/CheckIncludeFile.c.o -c /home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-Y9vfti/CheckIncludeFile.c
+        Linking C executable cmTC_1fd5a
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_1fd5a.dir/link.txt --verbose=1
+        /usr/bin/cc CMakeFiles/cmTC_1fd5a.dir/CheckIncludeFile.c.o -o cmTC_1fd5a
+        gmake[1]: Leaving directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-Y9vfti'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/CheckIncludeFile.cmake:99 (try_compile)"
+      - "build-support/macros-and-definitions.cmake:1138 (check_include_file)"
+      - "CMakeLists.txt:178 (process_options)"
+    checks:
+      - "Looking for signal.h"
+    directories:
+      source: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-Wt32HG"
+      binary: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-Wt32HG"
+    cmakeVariables:
+      CMAKE_C_FLAGS: ""
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/home/kali/MTD/ns-3.45/build-support/custom-modules;/home/kali/MTD/ns-3.45/build-support/3rd-party"
+      CMAKE_POSITION_INDEPENDENT_CODE: "ON"
+    buildResult:
+      variable: "HAVE_SIGNAL_H"
+      cached: true
+      stdout: |
+        Change Dir: '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-Wt32HG'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_dc854/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_dc854.dir/build.make CMakeFiles/cmTC_dc854.dir/build
+        gmake[1]: Entering directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-Wt32HG'
+        Building C object CMakeFiles/cmTC_dc854.dir/CheckIncludeFile.c.o
+        /usr/bin/cc   -fPIE -o CMakeFiles/cmTC_dc854.dir/CheckIncludeFile.c.o -c /home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-Wt32HG/CheckIncludeFile.c
+        Linking C executable cmTC_dc854
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_dc854.dir/link.txt --verbose=1
+        /usr/bin/cc CMakeFiles/cmTC_dc854.dir/CheckIncludeFile.c.o -o cmTC_dc854
+        gmake[1]: Leaving directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-Wt32HG'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/CheckIncludeFile.cmake:99 (try_compile)"
+      - "build-support/macros-and-definitions.cmake:1139 (check_include_file)"
+      - "CMakeLists.txt:178 (process_options)"
+    checks:
+      - "Looking for netpacket/packet.h"
+    directories:
+      source: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-1LufiO"
+      binary: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-1LufiO"
+    cmakeVariables:
+      CMAKE_C_FLAGS: ""
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/home/kali/MTD/ns-3.45/build-support/custom-modules;/home/kali/MTD/ns-3.45/build-support/3rd-party"
+      CMAKE_POSITION_INDEPENDENT_CODE: "ON"
+    buildResult:
+      variable: "HAVE_PACKETH"
+      cached: true
+      stdout: |
+        Change Dir: '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-1LufiO'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_571d1/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_571d1.dir/build.make CMakeFiles/cmTC_571d1.dir/build
+        gmake[1]: Entering directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-1LufiO'
+        Building C object CMakeFiles/cmTC_571d1.dir/CheckIncludeFile.c.o
+        /usr/bin/cc   -fPIE -o CMakeFiles/cmTC_571d1.dir/CheckIncludeFile.c.o -c /home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-1LufiO/CheckIncludeFile.c
+        Linking C executable cmTC_571d1
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_571d1.dir/link.txt --verbose=1
+        /usr/bin/cc CMakeFiles/cmTC_571d1.dir/CheckIncludeFile.c.o -o cmTC_571d1
+        gmake[1]: Leaving directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-1LufiO'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/CheckFunctionExists.cmake:93 (try_compile)"
+      - "build-support/macros-and-definitions.cmake:1140 (check_function_exists)"
+      - "CMakeLists.txt:178 (process_options)"
+    checks:
+      - "Looking for getenv"
+    directories:
+      source: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-6gdHtD"
+      binary: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-6gdHtD"
+    cmakeVariables:
+      CMAKE_C_FLAGS: ""
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/home/kali/MTD/ns-3.45/build-support/custom-modules;/home/kali/MTD/ns-3.45/build-support/3rd-party"
+      CMAKE_POSITION_INDEPENDENT_CODE: "ON"
+    buildResult:
+      variable: "HAVE_GETENV"
+      cached: true
+      stdout: |
+        Change Dir: '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-6gdHtD'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_c919e/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_c919e.dir/build.make CMakeFiles/cmTC_c919e.dir/build
+        gmake[1]: Entering directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-6gdHtD'
+        Building C object CMakeFiles/cmTC_c919e.dir/CheckFunctionExists.c.o
+        /usr/bin/cc   -DCHECK_FUNCTION_EXISTS=getenv -fPIE -o CMakeFiles/cmTC_c919e.dir/CheckFunctionExists.c.o -c /home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-6gdHtD/CheckFunctionExists.c
+        Linking C executable cmTC_c919e
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_c919e.dir/link.txt --verbose=1
+        /usr/bin/cc  -DCHECK_FUNCTION_EXISTS=getenv CMakeFiles/cmTC_c919e.dir/CheckFunctionExists.c.o -o cmTC_c919e
+        gmake[1]: Leaving directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-6gdHtD'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/Internal/CheckSourceCompiles.cmake:108 (try_compile)"
+      - "/usr/share/cmake-3.31/Modules/CheckCXXSourceCompiles.cmake:58 (cmake_check_source_compiles)"
+      - "src/antenna/CMakeLists.txt:2 (check_cxx_source_compiles)"
+    checks:
+      - "Performing Test HAVE_STD_BESSEL_FUNC"
+    directories:
+      source: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-hGPUz0"
+      binary: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-hGPUz0"
+    cmakeVariables:
+      CMAKE_CXX_FLAGS: ""
+      CMAKE_CXX_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/home/kali/MTD/ns-3.45/build-support/custom-modules;/home/kali/MTD/ns-3.45/build-support/3rd-party"
+      CMAKE_POSITION_INDEPENDENT_CODE: "ON"
+    buildResult:
+      variable: "HAVE_STD_BESSEL_FUNC"
+      cached: true
+      stdout: |
+        Change Dir: '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-hGPUz0'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_1d630/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_1d630.dir/build.make CMakeFiles/cmTC_1d630.dir/build
+        gmake[1]: Entering directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-hGPUz0'
+        Building CXX object CMakeFiles/cmTC_1d630.dir/src.cxx.o
+        /usr/bin/c++ -DHAVE_STD_BESSEL_FUNC  -std=c++20 -fPIE -o CMakeFiles/cmTC_1d630.dir/src.cxx.o -c /home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-hGPUz0/src.cxx
+        Linking CXX executable cmTC_1d630
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_1d630.dir/link.txt --verbose=1
+        /usr/bin/c++ CMakeFiles/cmTC_1d630.dir/src.cxx.o -o cmTC_1d630
+        gmake[1]: Leaving directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-hGPUz0'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/CheckIncludeFiles.cmake:141 (try_compile)"
+      - "src/core/CMakeLists.txt:28 (check_include_files)"
+    checks:
+      - "Looking for include files boost/units/quantity.hpp, boost/units/systems/si.hpp"
+    directories:
+      source: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-GHL7eb"
+      binary: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-GHL7eb"
+    cmakeVariables:
+      CMAKE_CXX_FLAGS: ""
+      CMAKE_CXX_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/home/kali/MTD/ns-3.45/build-support/custom-modules;/home/kali/MTD/ns-3.45/build-support/3rd-party"
+      CMAKE_POSITION_INDEPENDENT_CODE: "ON"
+    buildResult:
+      variable: "HAVE_BOOST_UNITS"
+      cached: true
+      stdout: |
+        Change Dir: '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-GHL7eb'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_23b53/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_23b53.dir/build.make CMakeFiles/cmTC_23b53.dir/build
+        gmake[1]: Entering directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-GHL7eb'
+        Building CXX object CMakeFiles/cmTC_23b53.dir/HAVE_BOOST_UNITS.cpp.o
+        /usr/bin/c++   -std=c++20 -fPIE -o CMakeFiles/cmTC_23b53.dir/HAVE_BOOST_UNITS.cpp.o -c /home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-GHL7eb/HAVE_BOOST_UNITS.cpp
+        /home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-GHL7eb/HAVE_BOOST_UNITS.cpp:2:10: fatal error: boost/units/quantity.hpp: No such file or directory
+            2 | #include <boost/units/quantity.hpp>
+              |          ^~~~~~~~~~~~~~~~~~~~~~~~~~
+        compilation terminated.
+        gmake[1]: *** [CMakeFiles/cmTC_23b53.dir/build.make:81: CMakeFiles/cmTC_23b53.dir/HAVE_BOOST_UNITS.cpp.o] Error 1
+        gmake[1]: Leaving directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-GHL7eb'
+        gmake: *** [Makefile:134: cmTC_23b53/fast] Error 2
+        
+      exitCode: 2
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/CheckIncludeFile.cmake:99 (try_compile)"
+      - "src/fd-net-device/CMakeLists.txt:3 (check_include_file)"
+    checks:
+      - "Looking for net/ethernet.h"
+    directories:
+      source: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-kVILjj"
+      binary: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-kVILjj"
+    cmakeVariables:
+      CMAKE_C_FLAGS: ""
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/home/kali/MTD/ns-3.45/build-support/custom-modules;/home/kali/MTD/ns-3.45/build-support/3rd-party"
+      CMAKE_POSITION_INDEPENDENT_CODE: "ON"
+    buildResult:
+      variable: "HAVE_NET_ETHERNET_H"
+      cached: true
+      stdout: |
+        Change Dir: '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-kVILjj'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_79177/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_79177.dir/build.make CMakeFiles/cmTC_79177.dir/build
+        gmake[1]: Entering directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-kVILjj'
+        Building C object CMakeFiles/cmTC_79177.dir/CheckIncludeFile.c.o
+        /usr/bin/cc   -fPIE -o CMakeFiles/cmTC_79177.dir/CheckIncludeFile.c.o -c /home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-kVILjj/CheckIncludeFile.c
+        Linking C executable cmTC_79177
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_79177.dir/link.txt --verbose=1
+        /usr/bin/cc CMakeFiles/cmTC_79177.dir/CheckIncludeFile.c.o -o cmTC_79177
+        gmake[1]: Leaving directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-kVILjj'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/CheckIncludeFile.cmake:99 (try_compile)"
+      - "src/fd-net-device/CMakeLists.txt:7 (check_include_file)"
+    checks:
+      - "Looking for netpacket/packet.h"
+    directories:
+      source: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-vBsgYn"
+      binary: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-vBsgYn"
+    cmakeVariables:
+      CMAKE_C_FLAGS: ""
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/home/kali/MTD/ns-3.45/build-support/custom-modules;/home/kali/MTD/ns-3.45/build-support/3rd-party"
+      CMAKE_POSITION_INDEPENDENT_CODE: "ON"
+    buildResult:
+      variable: "HAVE_PACKET_H"
+      cached: true
+      stdout: |
+        Change Dir: '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-vBsgYn'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_b7142/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_b7142.dir/build.make CMakeFiles/cmTC_b7142.dir/build
+        gmake[1]: Entering directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-vBsgYn'
+        Building C object CMakeFiles/cmTC_b7142.dir/CheckIncludeFile.c.o
+        /usr/bin/cc   -fPIE -o CMakeFiles/cmTC_b7142.dir/CheckIncludeFile.c.o -c /home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-vBsgYn/CheckIncludeFile.c
+        Linking C executable cmTC_b7142
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_b7142.dir/link.txt --verbose=1
+        /usr/bin/cc CMakeFiles/cmTC_b7142.dir/CheckIncludeFile.c.o -o cmTC_b7142
+        gmake[1]: Leaving directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-vBsgYn'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/CheckIncludeFile.cmake:99 (try_compile)"
+      - "src/fd-net-device/CMakeLists.txt:11 (check_include_file)"
+    checks:
+      - "Looking for net/if.h"
+    directories:
+      source: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-itCYGS"
+      binary: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-itCYGS"
+    cmakeVariables:
+      CMAKE_C_FLAGS: ""
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/home/kali/MTD/ns-3.45/build-support/custom-modules;/home/kali/MTD/ns-3.45/build-support/3rd-party"
+      CMAKE_POSITION_INDEPENDENT_CODE: "ON"
+    buildResult:
+      variable: "HAVE_IF_NETS_H"
+      cached: true
+      stdout: |
+        Change Dir: '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-itCYGS'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_00f83/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_00f83.dir/build.make CMakeFiles/cmTC_00f83.dir/build
+        gmake[1]: Entering directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-itCYGS'
+        Building C object CMakeFiles/cmTC_00f83.dir/CheckIncludeFile.c.o
+        /usr/bin/cc   -fPIE -o CMakeFiles/cmTC_00f83.dir/CheckIncludeFile.c.o -c /home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-itCYGS/CheckIncludeFile.c
+        Linking C executable cmTC_00f83
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_00f83.dir/link.txt --verbose=1
+        /usr/bin/cc CMakeFiles/cmTC_00f83.dir/CheckIncludeFile.c.o -o cmTC_00f83
+        gmake[1]: Leaving directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-itCYGS'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/CheckIncludeFile.cmake:99 (try_compile)"
+      - "src/fd-net-device/CMakeLists.txt:15 (check_include_file)"
+    checks:
+      - "Looking for linux/if_tun.h"
+    directories:
+      source: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-25YPdy"
+      binary: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-25YPdy"
+    cmakeVariables:
+      CMAKE_C_FLAGS: ""
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/home/kali/MTD/ns-3.45/build-support/custom-modules;/home/kali/MTD/ns-3.45/build-support/3rd-party"
+      CMAKE_POSITION_INDEPENDENT_CODE: "ON"
+    buildResult:
+      variable: "HAVE_IF_TUN_H"
+      cached: true
+      stdout: |
+        Change Dir: '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-25YPdy'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_4de17/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_4de17.dir/build.make CMakeFiles/cmTC_4de17.dir/build
+        gmake[1]: Entering directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-25YPdy'
+        Building C object CMakeFiles/cmTC_4de17.dir/CheckIncludeFile.c.o
+        /usr/bin/cc   -fPIE -o CMakeFiles/cmTC_4de17.dir/CheckIncludeFile.c.o -c /home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-25YPdy/CheckIncludeFile.c
+        Linking C executable cmTC_4de17
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_4de17.dir/link.txt --verbose=1
+        /usr/bin/cc CMakeFiles/cmTC_4de17.dir/CheckIncludeFile.c.o -o cmTC_4de17
+        gmake[1]: Leaving directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-25YPdy'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/CheckIncludeFile.cmake:99 (try_compile)"
+      - "src/fd-net-device/CMakeLists.txt:19 (check_include_file)"
+    checks:
+      - "Looking for net/netmap_user.h"
+    directories:
+      source: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-MUJ4Uv"
+      binary: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-MUJ4Uv"
+    cmakeVariables:
+      CMAKE_C_FLAGS: ""
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/home/kali/MTD/ns-3.45/build-support/custom-modules;/home/kali/MTD/ns-3.45/build-support/3rd-party"
+      CMAKE_POSITION_INDEPENDENT_CODE: "ON"
+    buildResult:
+      variable: "HAVE_NETMAP_USER_H"
+      cached: true
+      stdout: |
+        Change Dir: '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-MUJ4Uv'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_90f06/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_90f06.dir/build.make CMakeFiles/cmTC_90f06.dir/build
+        gmake[1]: Entering directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-MUJ4Uv'
+        Building C object CMakeFiles/cmTC_90f06.dir/CheckIncludeFile.c.o
+        /usr/bin/cc   -fPIE -o CMakeFiles/cmTC_90f06.dir/CheckIncludeFile.c.o -c /home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-MUJ4Uv/CheckIncludeFile.c
+        /home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-MUJ4Uv/CheckIncludeFile.c:1:10: fatal error: net/netmap_user.h: No such file or directory
+            1 | #include <net/netmap_user.h>
+              |          ^~~~~~~~~~~~~~~~~~~
+        compilation terminated.
+        gmake[1]: *** [CMakeFiles/cmTC_90f06.dir/build.make:81: CMakeFiles/cmTC_90f06.dir/CheckIncludeFile.c.o] Error 1
+        gmake[1]: Leaving directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-MUJ4Uv'
+        gmake: *** [Makefile:134: cmTC_90f06/fast] Error 2
+        
+      exitCode: 2
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/CheckIncludeFile.cmake:99 (try_compile)"
+      - "src/fd-net-device/CMakeLists.txt:23 (check_include_file)"
+    checks:
+      - "Looking for sys/ioctl.h"
+    directories:
+      source: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-hEa7uI"
+      binary: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-hEa7uI"
+    cmakeVariables:
+      CMAKE_C_FLAGS: ""
+      CMAKE_C_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/home/kali/MTD/ns-3.45/build-support/custom-modules;/home/kali/MTD/ns-3.45/build-support/3rd-party"
+      CMAKE_POSITION_INDEPENDENT_CODE: "ON"
+    buildResult:
+      variable: "HAVE_SYS_IOCTL_H"
+      cached: true
+      stdout: |
+        Change Dir: '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-hEa7uI'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_46dc5/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_46dc5.dir/build.make CMakeFiles/cmTC_46dc5.dir/build
+        gmake[1]: Entering directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-hEa7uI'
+        Building C object CMakeFiles/cmTC_46dc5.dir/CheckIncludeFile.c.o
+        /usr/bin/cc   -fPIE -o CMakeFiles/cmTC_46dc5.dir/CheckIncludeFile.c.o -c /home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-hEa7uI/CheckIncludeFile.c
+        Linking C executable cmTC_46dc5
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_46dc5.dir/link.txt --verbose=1
+        /usr/bin/cc CMakeFiles/cmTC_46dc5.dir/CheckIncludeFile.c.o -o cmTC_46dc5
+        gmake[1]: Leaving directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-hEa7uI'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/Internal/CheckSourceCompiles.cmake:108 (try_compile)"
+      - "/usr/share/cmake-3.31/Modules/Internal/CheckCompilerFlag.cmake:18 (cmake_check_source_compiles)"
+      - "/usr/share/cmake-3.31/Modules/CheckCompilerFlag.cmake:56 (cmake_check_compiler_flag)"
+      - "/usr/share/cmake-3.31/Modules/GenerateExportHeader.cmake:238 (check_compiler_flag)"
+      - "/usr/share/cmake-3.31/Modules/GenerateExportHeader.cmake:419 (_test_compiler_hidden_visibility)"
+      - "build-support/custom-modules/ns3-module-macros.cmake:192 (generate_export_header)"
+      - "src/internet/CMakeLists.txt:338 (build_lib)"
+    checks:
+      - "Performing Test COMPILER_HAS_HIDDEN_VISIBILITY"
+    directories:
+      source: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-wgQdSQ"
+      binary: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-wgQdSQ"
+    cmakeVariables:
+      CMAKE_CXX_FLAGS: ""
+      CMAKE_CXX_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/home/kali/MTD/ns-3.45/build-support/custom-modules;/home/kali/MTD/ns-3.45/build-support/3rd-party"
+      CMAKE_POSITION_INDEPENDENT_CODE: "ON"
+    buildResult:
+      variable: "COMPILER_HAS_HIDDEN_VISIBILITY"
+      cached: true
+      stdout: |
+        Change Dir: '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-wgQdSQ'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_82c48/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_82c48.dir/build.make CMakeFiles/cmTC_82c48.dir/build
+        gmake[1]: Entering directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-wgQdSQ'
+        Building CXX object CMakeFiles/cmTC_82c48.dir/src.cxx.o
+        /usr/bin/c++ -DCOMPILER_HAS_HIDDEN_VISIBILITY  -std=c++20 -fPIE   -fvisibility=hidden -o CMakeFiles/cmTC_82c48.dir/src.cxx.o -c /home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-wgQdSQ/src.cxx
+        Linking CXX executable cmTC_82c48
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_82c48.dir/link.txt --verbose=1
+        /usr/bin/c++ CMakeFiles/cmTC_82c48.dir/src.cxx.o -o cmTC_82c48
+        gmake[1]: Leaving directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-wgQdSQ'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/Internal/CheckSourceCompiles.cmake:108 (try_compile)"
+      - "/usr/share/cmake-3.31/Modules/Internal/CheckCompilerFlag.cmake:18 (cmake_check_source_compiles)"
+      - "/usr/share/cmake-3.31/Modules/CheckCompilerFlag.cmake:56 (cmake_check_compiler_flag)"
+      - "/usr/share/cmake-3.31/Modules/GenerateExportHeader.cmake:239 (check_compiler_flag)"
+      - "/usr/share/cmake-3.31/Modules/GenerateExportHeader.cmake:419 (_test_compiler_hidden_visibility)"
+      - "build-support/custom-modules/ns3-module-macros.cmake:192 (generate_export_header)"
+      - "src/internet/CMakeLists.txt:338 (build_lib)"
+    checks:
+      - "Performing Test COMPILER_HAS_HIDDEN_INLINE_VISIBILITY"
+    directories:
+      source: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-zBPQPe"
+      binary: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-zBPQPe"
+    cmakeVariables:
+      CMAKE_CXX_FLAGS: ""
+      CMAKE_CXX_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/home/kali/MTD/ns-3.45/build-support/custom-modules;/home/kali/MTD/ns-3.45/build-support/3rd-party"
+      CMAKE_POSITION_INDEPENDENT_CODE: "ON"
+    buildResult:
+      variable: "COMPILER_HAS_HIDDEN_INLINE_VISIBILITY"
+      cached: true
+      stdout: |
+        Change Dir: '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-zBPQPe'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_4924c/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_4924c.dir/build.make CMakeFiles/cmTC_4924c.dir/build
+        gmake[1]: Entering directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-zBPQPe'
+        Building CXX object CMakeFiles/cmTC_4924c.dir/src.cxx.o
+        /usr/bin/c++ -DCOMPILER_HAS_HIDDEN_INLINE_VISIBILITY  -std=c++20 -fPIE   -fvisibility-inlines-hidden -o CMakeFiles/cmTC_4924c.dir/src.cxx.o -c /home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-zBPQPe/src.cxx
+        Linking CXX executable cmTC_4924c
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_4924c.dir/link.txt --verbose=1
+        /usr/bin/c++ CMakeFiles/cmTC_4924c.dir/src.cxx.o -o cmTC_4924c
+        gmake[1]: Leaving directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-zBPQPe'
+        
+      exitCode: 0
+  -
+    kind: "try_compile-v1"
+    backtrace:
+      - "/usr/share/cmake-3.31/Modules/Internal/CheckSourceCompiles.cmake:108 (try_compile)"
+      - "/usr/share/cmake-3.31/Modules/CheckSourceCompiles.cmake:89 (cmake_check_source_compiles)"
+      - "/usr/share/cmake-3.31/Modules/GenerateExportHeader.cmake:206 (check_source_compiles)"
+      - "/usr/share/cmake-3.31/Modules/GenerateExportHeader.cmake:263 (_check_cxx_compiler_attribute)"
+      - "/usr/share/cmake-3.31/Modules/GenerateExportHeader.cmake:420 (_test_compiler_has_deprecated)"
+      - "build-support/custom-modules/ns3-module-macros.cmake:192 (generate_export_header)"
+      - "src/internet/CMakeLists.txt:338 (build_lib)"
+    checks:
+      - "Performing Test COMPILER_HAS_DEPRECATED_ATTR"
+    directories:
+      source: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-nrWMNg"
+      binary: "/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-nrWMNg"
+    cmakeVariables:
+      CMAKE_CXX_FLAGS: ""
+      CMAKE_CXX_FLAGS_DEBUG: "-g"
+      CMAKE_EXE_LINKER_FLAGS: ""
+      CMAKE_MODULE_PATH: "/home/kali/MTD/ns-3.45/build-support/custom-modules;/home/kali/MTD/ns-3.45/build-support/3rd-party"
+      CMAKE_POSITION_INDEPENDENT_CODE: "ON"
+    buildResult:
+      variable: "COMPILER_HAS_DEPRECATED_ATTR"
+      cached: true
+      stdout: |
+        Change Dir: '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-nrWMNg'
+        
+        Run Build Command(s): /usr/bin/cmake -E env VERBOSE=1 /usr/bin/gmake -f Makefile cmTC_09704/fast
+        /usr/bin/gmake  -f CMakeFiles/cmTC_09704.dir/build.make CMakeFiles/cmTC_09704.dir/build
+        gmake[1]: Entering directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-nrWMNg'
+        Building CXX object CMakeFiles/cmTC_09704.dir/src.cxx.o
+        /usr/bin/c++ -DCOMPILER_HAS_DEPRECATED_ATTR  -std=c++20 -fPIE -o CMakeFiles/cmTC_09704.dir/src.cxx.o -c /home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-nrWMNg/src.cxx
+        /home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-nrWMNg/src.cxx: In function ‘int main()’:
+        /home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-nrWMNg/src.cxx:2:33: warning: ‘int somefunc()’ is deprecated [-Wdeprecated-declarations]
+            2 |     int main() { return somefunc();}
+              |                         ~~~~~~~~^~
+        /home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-nrWMNg/src.cxx:1:37: note: declared here
+            1 | __attribute__((__deprecated__)) int somefunc() { return 0; }
+              |                                     ^~~~~~~~
+        Linking CXX executable cmTC_09704
+        /usr/bin/cmake -E cmake_link_script CMakeFiles/cmTC_09704.dir/link.txt --verbose=1
+        /usr/bin/c++ CMakeFiles/cmTC_09704.dir/src.cxx.o -o cmTC_09704
+        gmake[1]: Leaving directory '/home/kali/MTD/ns-3.45/cmake-cache/CMakeFiles/CMakeScratch/TryCompile-nrWMNg'
+        
+      exitCode: 0
+...

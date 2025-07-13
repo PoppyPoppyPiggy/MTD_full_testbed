@@ -1,0 +1,40 @@
+{
+  "target": {
+    "host": "localhost",
+    "mode": "local_docker",
+    "network_range": "172.20.0.0/16",
+    "docker_network": "dvd_network"
+  },
+  "connection": {
+    "mode": "local_docker",
+    "docker_compose_file": "docker-compose.yml",
+    "container_prefix": "dvd"
+  },
+  "attacks": {
+    "enabled": [
+      "wifi_scan",
+      "drone_discovery",
+      "packet_sniff",
+      "telemetry_spoof",
+      "command_inject",
+      "waypoint_inject",
+      "param_extract",
+      "log_extract"
+    ],
+    "delay_between": 1.5,
+    "max_concurrent": 3,
+    "safe_mode": false
+  },
+  "assessment": {
+    "type": "comprehensive",
+    "iterations": 2,
+    "include_report": true,
+    "generate_graphs": true
+  },
+  "output": {
+    "directory": "results/docker_dvd/",
+    "formats": ["json", "csv", "stix"],
+    "include_logs": true,
+    "compress_results": true
+  }
+}
