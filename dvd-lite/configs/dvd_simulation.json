@@ -1,0 +1,44 @@
+{
+  "target": {
+    "host": "simulation",
+    "mode": "simulation",
+    "network_range": "10.13.0.0/24"
+  },
+  "connection": {
+    "mode": "simulation",
+    "simulate_network_delay": true,
+    "realistic_responses": true
+  },
+  "attacks": {
+    "enabled": [
+      "wifi_scan",
+      "drone_discovery", 
+      "packet_sniff",
+      "telemetry_spoof",
+      "command_inject",
+      "waypoint_inject",
+      "log_extract",
+      "param_extract"
+    ],
+    "delay_between": 0.5,
+    "max_concurrent": 5,
+    "safe_mode": true
+  },
+  "assessment": {
+    "type": "comprehensive",
+    "iterations": 3,
+    "include_report": true,
+    "benchmark_mode": true
+  },
+  "output": {
+    "directory": "results/simulation/",
+    "formats": ["json", "csv"],
+    "include_logs": false
+  },
+  "simulation": {
+    "success_rate_variation": 0.3,
+    "response_time_variation": 0.2,
+    "realistic_iocs": true,
+    "failure_simulation": true
+  }
+}

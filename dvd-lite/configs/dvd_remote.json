@@ -1,0 +1,47 @@
+{
+  "target": {
+    "host": "192.168.1.100", 
+    "mode": "remote",
+    "network_range": "192.168.1.0/24"
+  },
+  "connection": {
+    "mode": "remote",
+    "timeout": 60,
+    "retry_count": 2,
+    "verify_ssl": false
+  },
+  "attacks": {
+    "enabled": [
+      "wifi_scan",
+      "drone_discovery",
+      "packet_sniff"
+    ],
+    "delay_between": 5.0,
+    "max_concurrent": 1,
+    "safe_mode": true,
+    "read_only": true
+  },
+  "assessment": {
+    "type": "quick",
+    "iterations": 1,
+    "include_report": true
+  },
+  "output": {
+    "directory": "results/remote_dvd/",
+    "formats": ["json"],
+    "include_logs": true,
+    "encrypt_results": true
+  },
+  "safety": {
+    "destructive_attacks_disabled": true,
+    "require_confirmation": true,
+    "auto_stop_on_error": true,
+    "strict_mode": true,
+    "max_attack_duration": 300
+  },
+  "authentication": {
+    "required": true,
+    "method": "key_based",
+    "key_file": "~/.ssh/dvd_key"
+  }
+}

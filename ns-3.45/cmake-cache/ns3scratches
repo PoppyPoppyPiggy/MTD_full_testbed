@@ -1,0 +1,5 @@
+/home/kali/MTD/ns-3.45/scratch/scratch-simulator.cc
+/home/kali/MTD/ns-3.45/scratch/subdir/scratch-subdir.cc
+/home/kali/MTD/ns-3.45/scratch/subdir/scratch-subdir-additional-header.cc
+/home/kali/MTD/ns-3.45/scratch/nested-subdir/scratch-nested-subdir-executable.cc
+/home/kali/MTD/ns-3.45/scratch/nested-subdir/lib/scratch-nested-subdir-library-source.cc

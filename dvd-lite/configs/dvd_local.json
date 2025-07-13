@@ -1,0 +1,84 @@
+{
+  "target": {
+    "host": "10.13.0.2",
+    "mode": "local_vm",
+    "network_range": "10.13.0.0/24",
+    "wifi_interface": "wlan0"
+  },
+  "connection": {
+    "mode": "local_vm",
+    "timeout": 30,
+    "retry_count": 3
+  },
+  "attacks": {
+    "enabled": [
+      "wifi_scan",
+      "drone_discovery",
+      "packet_sniff",
+      "param_extract"
+    ],
+    "delay_between": 2.0,
+    "max_concurrent": 2,
+    "safe_mode": true
+  },
+  "assessment": {
+    "type": "standard",
+    "iterations": 1,
+    "include_report": true
+  },
+  "output": {
+    "directory": "results/local_dvd/",
+    "formats": ["json", "csv"],
+    "include_logs": true
+  },
+  "safety": {
+    "destructive_attacks_disabled": true,
+    "require_confirmation": false,
+    "auto_stop_on_error": true
+  }
+}
+
+---
+
+# configs/dvd_docker.json  
+# Docker DVD 환경 설정
+{
+  "target": {
+    "host": "localhost",
+    "mode": "local_docker",
+    "network_range": "172.20.0.0/16",
+    "docker_network": "dvd_network"
+  },
+  "connection": {
+    "mode": "local_docker",
+    "docker_compose_file": "docker-compose.yml",
+    "container_prefix": "dvd"
+  },
+  "attacks": {
+    "enabled": [
+      "wifi_scan",
+      "drone_discovery",
+      "packet_sniff",
+      "telemetry_spoof",
+      "command_inject",
+      "waypoint_inject",
+      "param_extract",
+      "log_extract"
+    ],
+    "delay_between": 1.5,
+    "max_concurrent": 3,
+    "safe_mode": false
+  },
+  "assessment": {
+    "type": "comprehensive",
+    "iterations": 2,
+    "include_report": true,
+    "generate_graphs": true
+  },
+  "output": {
+    "directory": "results/docker_dvd/",
+    "formats": ["json", "csv", "stix"],
+    "include_logs": true,
+    "compress_results": true
+  }
+}
