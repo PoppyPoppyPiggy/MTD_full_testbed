@@ -1,13 +1,9 @@
-# =============================================================================
-# 공격 등록 및 관리 시스템
-# =============================================================================
-
-# dvd_attacks/registry/attack_registry.py
+# dvd_lite/dvd_attacks/registry/attack_registry.py
 """
 DVD 공격 등록 시스템
 """
 import logging
-from typing import Dict, List, Type, Optional
+from typing import Dict, List, Type, Optional, Any
 from ..core.attack_base import BaseAttack
 from ..core.scenario import DVDAttackScenario
 from ..core.enums import DVDAttackTactic, DVDFlightState, AttackDifficulty
