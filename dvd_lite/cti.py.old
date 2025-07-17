@@ -1,0 +1,1356 @@
+#!/usr/bin/env python3
+"""
+누락된 핵심 모듈 파일들을 생성하는 스크립트
+"""
+
+import os
+from pathlib import Path
+
+def create_cti_module():
+    """CTI 모듈 생성"""
+    content = '''# dvd_lite/cti.py
+"""
+DVD-Lite CTI 수집기
+간단한 위협 정보 수집 및 내보내기
+"""
+
+import json
+import time
+from datetime import datetime
+from typing import Dict, List, Any, Optional
+from dataclasses import dataclass
+from pathlib import Path
+
+# ThreatIndicator를 여기서 정의
+@dataclass
+class ThreatIndicator:
+    ioc_type: str
+    value: str
+    confidence: int
+    attack_type: str
+    timestamp: datetime
+    source: str = "dvd-lite"
+
+# =============================================================================
+# 간단한 CTI 수집기
+# =============================================================================
+
+class SimpleCTI:
+    """간단한 CTI 수집기"""
+    
+    def __init__(self, config: Dict[str, Any] = None):
+        self.config = config or {"confidence_threshold": 60, "export_format": "json"}
+        self.indicators = []
+        self.attack_patterns = {}
+        self.statistics = {
+            "total_indicators": 0,
+            "by_attack_type": {},
+            "by_confidence": {"high": 0, "medium": 0, "low": 0},
+            "last_update": None
+        }
+    
+    async def collect_from_result(self, attack_result):
+        """공격 결과에서 CTI 수집"""
+        # IOC에서 위협 지표 생성
+        for ioc in attack_result.iocs:
+            indicator = self._create_indicator(ioc, attack_result)
+            if indicator:
+                self.indicators.append(indicator)
+        
+        # 공격 패턴 저장
+        pattern_id = f"{attack_result.attack_type.value}_{attack_result.attack_name}"
+        self.attack_patterns[pattern_id] = {
+            "attack_name": attack_result.attack_name,
+            "attack_type": attack_result.attack_type.value,
+            "success_rate": attack_result.success_rate,
+            "avg_response_time": attack_result.response_time,
+            "last_seen": datetime.fromtimestamp(attack_result.timestamp).isoformat(),
+            "ioc_count": len(attack_result.iocs)
+        }
+        
+        # 통계 업데이트
+        self._update_statistics()
+    
+    def _create_indicator(self, ioc: str, attack_result) -> Optional[ThreatIndicator]:
+        """IOC에서 위협 지표 생성"""
+        try:
+            # IOC 파싱
+            if ":" in ioc:
+                ioc_type, value = ioc.split(":", 1)
+            else:
+                ioc_type = "unknown"
+                value = ioc
+            
+            # 신뢰도 계산
+            confidence = self._calculate_confidence(ioc_type, attack_result)
+            
+            # 최소 신뢰도 확인
+            if confidence < self.config["confidence_threshold"]:
+                return None
+            
+            indicator = ThreatIndicator(
+                ioc_type=ioc_type.lower(),
+                value=value,
+                confidence=confidence,
+                attack_type=attack_result.attack_type.value,
+                timestamp=datetime.fromtimestamp(attack_result.timestamp),
+                source="dvd-lite"
+            )
+            
+            return indicator
+            
+        except Exception:
+            return None
+    
+    def _calculate_confidence(self, ioc_type: str, attack_result) -> int:
+        """IOC 신뢰도 계산"""
+        base_confidence = 70
+        
+        # 공격 성공 여부에 따른 조정
+        if attack_result.status.value == "success":
+            confidence_modifier = 15
+        elif attack_result.status.value == "detected":
+            confidence_modifier = 10
+        else:
+            confidence_modifier = -20
+        
+        # IOC 타입별 조정
+        type_modifiers = {
+            "mavlink_msg": 10,
+            "mavlink_host": 15,
+            "command_injected": 20,
+            "fake_gps": 25,
+            "waypoint_injected": 18,
+            "log_extracted": 12,
+            "param_extracted": 10
+        }
+        
+        type_modifier = type_modifiers.get(ioc_type, 0)
+        
+        final_confidence = base_confidence + confidence_modifier + type_modifier
+        return max(10, min(100, final_confidence))
+    
+    def _update_statistics(self):
+        """통계 업데이트"""
+        self.statistics["total_indicators"] = len(self.indicators)
+        self.statistics["last_update"] = datetime.now().isoformat()
+        
+        # 공격 타입별 통계
+        type_counts = {}
+        confidence_counts = {"high": 0, "medium": 0, "low": 0}
+        
+        for indicator in self.indicators:
+            # 공격 타입별
+            attack_type = indicator.attack_type
+            type_counts[attack_type] = type_counts.get(attack_type, 0) + 1
+            
+            # 신뢰도별
+            if indicator.confidence >= 80:
+                confidence_counts["high"] += 1
+            elif indicator.confidence >= 60:
+                confidence_counts["medium"] += 1
+            else:
+                confidence_counts["low"] += 1
+        
+        self.statistics["by_attack_type"] = type_counts
+        self.statistics["by_confidence"] = confidence_counts
+    
+    def get_summary(self) -> Dict[str, Any]:
+        """위협 정보 요약"""
+        return {
+            "total_indicators": len(self.indicators),
+            "total_patterns": len(self.attack_patterns),
+            "statistics": self.statistics,
+            "recent_indicators": [
+                {
+                    "type": ind.ioc_type,
+                    "value": ind.value[:50] + "..." if len(ind.value) > 50 else ind.value,
+                    "confidence": ind.confidence,
+                    "attack_type": ind.attack_type
+                }
+                for ind in sorted(self.indicators, key=lambda x: x.timestamp, reverse=True)[:5]
+            ]
+        }
+    
+    def export_json(self, filename: str = None) -> str:
+        """JSON 형식으로 내보내기"""
+        if filename is None:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"results/cti_data_{timestamp}.json"
+        
+        # 결과 디렉토리 생성
+        Path(filename).parent.mkdir(parents=True, exist_ok=True)
+        
+        # 내보낼 데이터 구성
+        export_data = {
+            "metadata": {
+                "export_time": datetime.now().isoformat(),
+                "total_indicators": len(self.indicators),
+                "total_patterns": len(self.attack_patterns),
+                "source": "dvd-lite"
+            },
+            "statistics": self.statistics,
+            "indicators": [
+                {
+                    "ioc_type": ind.ioc_type,
+                    "value": ind.value,
+                    "confidence": ind.confidence,
+                    "attack_type": ind.attack_type,
+                    "timestamp": ind.timestamp.isoformat(),
+                    "source": ind.source
+                }
+                for ind in self.indicators
+            ],
+            "attack_patterns": self.attack_patterns
+        }
+        
+        # JSON 파일로 저장
+        with open(filename, 'w', encoding='utf-8') as f:
+            json.dump(export_data, f, indent=2, ensure_ascii=False)
+        
+        return filename
+    
+    def export_csv(self, filename: str = None) -> str:
+        """CSV 형식으로 내보내기"""
+        if filename is None:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"results/cti_indicators_{timestamp}.csv"
+        
+        # 결과 디렉토리 생성
+        Path(filename).parent.mkdir(parents=True, exist_ok=True)
+        
+        # CSV 내용 생성
+        csv_lines = [
+            "IOC_Type,Value,Confidence,Attack_Type,Timestamp,Source"
+        ]
+        
+        for ind in self.indicators:
+            line = f"{ind.ioc_type},{ind.value},{ind.confidence},{ind.attack_type},{ind.timestamp.isoformat()},{ind.source}"
+            csv_lines.append(line)
+        
+        # CSV 파일로 저장
+        with open(filename, 'w', encoding='utf-8') as f:
+            f.write('\\n'.join(csv_lines))
+        
+        return filename
+    
+    def query_indicators(self, **filters) -> List[ThreatIndicator]:
+        """지표 쿼리"""
+        results = []
+        
+        for indicator in self.indicators:
+            match = True
+            
+            # 필터 조건 확인
+            for key, value in filters.items():
+                if key == "ioc_type" and indicator.ioc_type != value:
+                    match = False
+                    break
+                elif key == "attack_type" and indicator.attack_type != value:
+                    match = False
+                    break
+                elif key == "min_confidence" and indicator.confidence < value:
+                    match = False
+                    break
+            
+            if match:
+                results.append(indicator)
+        
+        return results
+    
+    def print_summary(self):
+        """요약 정보 출력"""
+        summary = self.get_summary()
+        
+        print("\\n" + "="*40)
+        print("🔍 CTI 수집 결과 요약")
+        print("="*40)
+        print(f"수집된 지표: {summary['total_indicators']}개")
+        print(f"공격 패턴: {summary['total_patterns']}개")
+        
+        if summary["statistics"]["by_attack_type"]:
+            print("\\n📊 공격 타입별 분포:")
+            for attack_type, count in summary["statistics"]["by_attack_type"].items():
+                print(f"  - {attack_type}: {count}개")
+        
+        print(f"\\n🎯 신뢰도 분포:")
+        confidence_stats = summary["statistics"]["by_confidence"]
+        print(f"  - 높음 (80+): {confidence_stats['high']}개")
+        print(f"  - 중간 (60-79): {confidence_stats['medium']}개")
+        print(f"  - 낮음 (<60): {confidence_stats['low']}개")
+        
+        if summary["recent_indicators"]:
+            print(f"\\n📋 최근 지표 (최신 5개):")
+            for i, ind in enumerate(summary["recent_indicators"], 1):
+                print(f"  {i}. {ind['type']}: {ind['value']} (신뢰도: {ind['confidence']})")
+        
+        print("="*40)
+'''
+    
+    file_path = Path("dvd_lite/cti.py")
+    with open(file_path, 'w', encoding='utf-8') as f:
+        f.write(content)
+    print(f"✅ 생성: {file_path}")
+
+def create_attacks_module():
+    """기본 attacks 모듈 생성"""
+    content = '''# dvd_lite/attacks.py
+"""
+DVD-Lite 공격 모듈들
+8개 핵심 드론 공격 시나리오 구현
+"""
+
+import asyncio
+import random
+import time
+from typing import Tuple, List, Dict, Any
+
+from .main import BaseAttack, AttackType
+
+# =============================================================================
+# 정찰 공격들
+# =============================================================================
+
+class WiFiScan(BaseAttack):
+    """WiFi 네트워크 스캔 공격"""
+    
+    def _get_attack_type(self) -> AttackType:
+        return AttackType.RECONNAISSANCE
+    
+    async def _run_attack(self) -> Tuple[bool, List[str], Dict[str, Any]]:
+        """WiFi 네트워크 스캔 실행"""
+        await asyncio.sleep(1.5)  # 스캔 시간 시뮬레이션
+        
+        # 발견된 네트워크 시뮬레이션
+        networks = ["Drone_WiFi", "DroneControl", "UAV_Network", "Companion_AP"]
+        found_networks = random.sample(networks, k=random.randint(1, 3))
+        
+        # IOC 생성
+        iocs = [f"SSID:{network}" for network in found_networks]
+        
+        # 타겟 네트워크 발견 여부로 성공 판단
+        success = "Drone_WiFi" in found_networks or random.random() > 0.3
+        
+        details = {
+            "found_networks": found_networks,
+            "scan_duration": 1.5,
+            "success_rate": 0.8 if success else 0.2
+        }
+        
+        return success, iocs, details
+
+class DroneDiscovery(BaseAttack):
+    """드론 시스템 발견 공격"""
+    
+    def _get_attack_type(self) -> AttackType:
+        return AttackType.RECONNAISSANCE
+    
+    async def _run_attack(self) -> Tuple[bool, List[str], Dict[str, Any]]:
+        """네트워크에서 드론 시스템 발견"""
+        await asyncio.sleep(2.0)
+        
+        # 스캔된 호스트들
+        hosts = [f"10.13.0.{i}" for i in range(2, 6)]
+        
+        # MAVLink 포트 확인 시뮬레이션
+        mavlink_hosts = []
+        for host in hosts:
+            if random.random() > 0.6:  # 40% 확률로 MAVLink 발견
+                mavlink_hosts.append(host)
+        
+        iocs = [f"MAVLINK_HOST:{host}" for host in mavlink_hosts]
+        
+        success = len(mavlink_hosts) > 0
+        
+        details = {
+            "scanned_hosts": hosts,
+            "mavlink_hosts": mavlink_hosts,
+            "open_ports": [14550, 14551] if success else [],
+            "success_rate": 0.9 if success else 0.1
+        }
+        
+        return success, iocs, details
+
+class PacketSniff(BaseAttack):
+    """패킷 스니핑 공격"""
+    
+    def _get_attack_type(self) -> AttackType:
+        return AttackType.RECONNAISSANCE
+    
+    async def _run_attack(self) -> Tuple[bool, List[str], Dict[str, Any]]:
+        """MAVLink 패킷 캡처"""
+        await asyncio.sleep(3.0)
+        
+        # 캡처된 메시지 시뮬레이션
+        mavlink_messages = [
+            "HEARTBEAT", "GPS_RAW_INT", "ATTITUDE", "GLOBAL_POSITION_INT",
+            "MISSION_CURRENT", "RC_CHANNELS", "SERVO_OUTPUT_RAW"
+        ]
+        
+        captured = random.sample(mavlink_messages, k=random.randint(2, 5))
+        
+        iocs = [f"MAVLINK_MSG:{msg}" for msg in captured]
+        
+        success = len(captured) >= 3
+        
+        details = {
+            "captured_messages": captured,
+            "capture_duration": 3.0,
+            "total_packets": random.randint(50, 200),
+            "success_rate": 0.7 if success else 0.3
+        }
+        
+        return success, iocs, details
+
+# =============================================================================
+# 프로토콜 변조 공격들
+# =============================================================================
+
+class TelemetrySpoof(BaseAttack):
+    """텔레메트리 스푸핑 공격"""
+    
+    def _get_attack_type(self) -> AttackType:
+        return AttackType.PROTOCOL_TAMPERING
+    
+    async def _run_attack(self) -> Tuple[bool, List[str], Dict[str, Any]]:
+        """가짜 텔레메트리 데이터 주입"""
+        await asyncio.sleep(2.5)
+        
+        # 스푸핑할 데이터
+        fake_data = {
+            "gps_lat": 37.7749 + random.uniform(-0.01, 0.01),
+            "gps_lon": -122.4194 + random.uniform(-0.01, 0.01),
+            "altitude": random.randint(50, 150),
+            "battery": random.randint(20, 80)
+        }
+        
+        iocs = [
+            f"FAKE_GPS:{fake_data['gps_lat']:.6f},{fake_data['gps_lon']:.6f}",
+            f"FAKE_ALT:{fake_data['altitude']}",
+            f"FAKE_BATTERY:{fake_data['battery']}"
+        ]
+        
+        success = random.random() > 0.4  # 60% 성공률
+        
+        details = {
+            "spoofed_data": fake_data,
+            "injection_method": "MAVLink",
+            "success_rate": 0.6 if success else 0.0
+        }
+        
+        return success, iocs, details
+
+# =============================================================================
+# 주입 공격들
+# =============================================================================
+
+class CommandInject(BaseAttack):
+    """명령 주입 공격"""
+    
+    def _get_attack_type(self) -> AttackType:
+        return AttackType.INJECTION
+    
+    async def _run_attack(self) -> Tuple[bool, List[str], Dict[str, Any]]:
+        """MAVLink 명령 주입"""
+        await asyncio.sleep(1.8)
+        
+        # 주입할 명령들
+        commands = ["ARM_DISARM", "SET_MODE", "NAV_LAND", "DO_SET_SERVO"]
+        injected_cmd = random.choice(commands)
+        
+        iocs = [f"COMMAND_INJECTED:{injected_cmd}"]
+        
+        success = random.random() > 0.5  # 50% 성공률
+        
+        details = {
+            "injected_command": injected_cmd,
+            "target_system": 1,
+            "target_component": 1,
+            "success_rate": 0.5 if success else 0.0
+        }
+        
+        return success, iocs, details
+
+class WaypointInject(BaseAttack):
+    """웨이포인트 주입 공격"""
+    
+    def _get_attack_type(self) -> AttackType:
+        return AttackType.INJECTION
+    
+    async def _run_attack(self) -> Tuple[bool, List[str], Dict[str, Any]]:
+        """악성 웨이포인트 주입"""
+        await asyncio.sleep(2.2)
+        
+        # 악성 웨이포인트
+        malicious_waypoint = {
+            "lat": 37.7749 + random.uniform(-0.1, 0.1),
+            "lon": -122.4194 + random.uniform(-0.1, 0.1),
+            "alt": random.randint(10, 200)
+        }
+        
+        iocs = [f"WAYPOINT_INJECTED:{malicious_waypoint['lat']:.6f},{malicious_waypoint['lon']:.6f},{malicious_waypoint['alt']}"]
+        
+        success = random.random() > 0.6  # 40% 성공률
+        
+        details = {
+            "malicious_waypoint": malicious_waypoint,
+            "mission_cleared": success,
+            "success_rate": 0.4 if success else 0.0
+        }
+        
+        return success, iocs, details
+
+# =============================================================================
+# 데이터 탈취 공격들
+# =============================================================================
+
+class LogExtract(BaseAttack):
+    """로그 추출 공격"""
+    
+    def _get_attack_type(self) -> AttackType:
+        return AttackType.EXFILTRATION
+    
+    async def _run_attack(self) -> Tuple[bool, List[str], Dict[str, Any]]:
+        """비행 로그 추출"""
+        await asyncio.sleep(3.5)
+        
+        # 추출 가능한 로그 파일들
+        log_files = [
+            "flight_log_001.bin",
+            "flight_log_002.bin", 
+            "parameters.txt",
+            "waypoints.log"
+        ]
+        
+        extracted = random.sample(log_files, k=random.randint(1, 3))
+        
+        iocs = [f"LOG_EXTRACTED:{log}" for log in extracted]
+        
+        success = len(extracted) >= 2
+        
+        details = {
+            "extracted_files": extracted,
+            "access_method": "FTP",
+            "file_sizes": {log: random.randint(1024, 10240) for log in extracted},
+            "success_rate": 0.6 if success else 0.2
+        }
+        
+        return success, iocs, details
+
+class ParamExtract(BaseAttack):
+    """파라미터 추출 공격"""
+    
+    def _get_attack_type(self) -> AttackType:
+        return AttackType.EXFILTRATION
+    
+    async def _run_attack(self) -> Tuple[bool, List[str], Dict[str, Any]]:
+        """시스템 파라미터 추출"""
+        await asyncio.sleep(2.8)
+        
+        # 추출된 파라미터들
+        parameters = {
+            "BATT_CAPACITY": 5000,
+            "FENCE_ENABLE": 1,
+            "RTL_ALT": 15,
+            "COMPASS_CAL": 1,
+            "GPS_TYPE": 1
+        }
+        
+        extracted_params = dict(random.sample(list(parameters.items()), k=random.randint(2, 4)))
+        
+        iocs = [f"PARAM_EXTRACTED:{param}={value}" for param, value in extracted_params.items()]
+        
+        success = len(extracted_params) >= 3
+        
+        details = {
+            "extracted_parameters": extracted_params,
+            "total_available": len(parameters),
+            "extraction_method": "MAVLink PARAM_REQUEST",
+            "success_rate": 0.7 if success else 0.3
+        }
+        
+        return success, iocs, details
+
+# =============================================================================
+# 공격 모듈 등록 함수
+# =============================================================================
+
+def register_all_attacks(dvd_lite):
+    """모든 공격 모듈을 DVD-Lite에 등록"""
+    attacks = {
+        "wifi_scan": WiFiScan,
+        "drone_discovery": DroneDiscovery,
+        "packet_sniff": PacketSniff,
+        "telemetry_spoof": TelemetrySpoof,
+        "command_inject": CommandInject,
+        "waypoint_inject": WaypointInject,
+        "log_extract": LogExtract,
+        "param_extract": ParamExtract
+    }
+    
+    for name, attack_class in attacks.items():
+        dvd_lite.register_attack(name, attack_class)
+    
+    return list(attacks.keys())
+'''
+    
+    file_path = Path("dvd_lite/attacks.py")
+    with open(file_path, 'w', encoding='utf-8') as f:
+        f.write(content)
+    print(f"✅ 생성: {file_path}")
+
+def create_main_module():
+    """메인 모듈 업데이트"""
+    content = '''# dvd_lite/main.py
+"""
+DVD-Lite 메인 프레임워크
+경량화된 드론 보안 테스트 및 CTI 수집
+"""
+
+import asyncio
+import json
+import time
+import logging
+from datetime import datetime
+from typing import Dict, List, Any, Optional
+from dataclasses import dataclass, asdict
+from enum import Enum
+from pathlib import Path
+
+# 로깅 설정
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+# =============================================================================
+# 기본 데이터 구조
+# =============================================================================
+
+class AttackType(Enum):
+    RECONNAISSANCE = "reconnaissance"
+    PROTOCOL_TAMPERING = "protocol_tampering"
+    INJECTION = "injection"
+    DOS = "denial_of_service"
+    EXFILTRATION = "exfiltration"
+
+class AttackStatus(Enum):
+    SUCCESS = "success"
+    FAILED = "failed"
+    DETECTED = "detected"
+
+@dataclass
+class AttackResult:
+    attack_id: str
+    attack_name: str
+    attack_type: AttackType
+    status: AttackStatus
+    success_rate: float
+    response_time: float
+    timestamp: float
+    target: str
+    iocs: List[str]
+    details: Dict[str, Any]
+    
+    @property
+    def success(self) -> bool:
+        """호환성을 위한 success 프로퍼티"""
+        return self.status == AttackStatus.SUCCESS
+    
+    @property
+    def execution_time(self) -> float:
+        """호환성을 위한 execution_time 프로퍼티"""
+        return self.response_time
+    
+    @property
+    def error_message(self) -> Optional[str]:
+        """호환성을 위한 error_message 프로퍼티"""
+        return self.details.get("error")
+
+# =============================================================================
+# DVD-Lite 메인 클래스
+# =============================================================================
+
+class DVDLite:
+    """경량화된 DVD 테스트베드"""
+    
+    def __init__(self, config_path: str = "config.json"):
+        self.config = self._load_config(config_path)
+        self.attack_modules = {}
+        self.results = []
+        self.cti_collector = None
+        
+    def _load_config(self, config_path: str) -> Dict[str, Any]:
+        """설정 파일 로드"""
+        try:
+            with open(config_path, 'r') as f:
+                return json.load(f)
+        except FileNotFoundError:
+            logger.warning(f"설정 파일 {config_path}를 찾을 수 없습니다. 기본 설정을 사용합니다.")
+            return self._default_config()
+    
+    def _default_config(self) -> Dict[str, Any]:
+        """기본 설정"""
+        return {
+            "target": {"ip": "10.13.0.2", "mavlink_port": 14550},
+            "attacks": {"enabled": [], "delay_between": 2.0},
+            "cti": {"auto_collect": True, "export_format": "json"},
+            "output": {"results_dir": "results", "log_level": "INFO"}
+        }
+    
+    def register_attack(self, name: str, attack_class):
+        """공격 모듈 등록"""
+        self.attack_modules[name] = attack_class
+        logger.info(f"✅ 공격 모듈 등록: {name}")
+    
+    def register_cti_collector(self, cti_collector):
+        """CTI 수집기 등록"""
+        self.cti_collector = cti_collector
+        logger.info("✅ CTI 수집기 등록 완료")
+    
+    def list_attacks(self) -> List[str]:
+        """등록된 공격 목록 반환"""
+        return list(self.attack_modules.keys())
+    
+    def get_attack_info(self, attack_name: str) -> Dict[str, Any]:
+        """공격 정보 반환"""
+        attack_class = self.attack_modules.get(attack_name)
+        if not attack_class:
+            return {}
+        
+        return {
+            "name": attack_name,
+            "class": attack_class.__name__,
+            "docstring": attack_class.__doc__ or "",
+            "type": getattr(attack_class, '_get_attack_type', lambda: AttackType.RECONNAISSANCE)().value
+        }
+    
+    async def run_attack(self, attack_name: str, **kwargs) -> AttackResult:
+        """단일 공격 실행"""
+        if attack_name not in self.attack_modules:
+            raise ValueError(f"공격 모듈 '{attack_name}'을 찾을 수 없습니다.")
+        
+        # 공격 모듈 인스턴스 생성
+        attack_class = self.attack_modules[attack_name]
+        attack_instance = attack_class(
+            target_ip=self.config["target"]["ip"],
+            **kwargs
+        )
+        
+        # 공격 실행
+        result = await attack_instance.execute()
+        self.results.append(result)
+        
+        # CTI 수집
+        if self.cti_collector and self.config["cti"]["auto_collect"]:
+            await self.cti_collector.collect_from_result(result)
+        
+        return result
+    
+    async def run_multiple_attacks(self, attack_names: List[str]) -> List[AttackResult]:
+        """여러 공격 실행"""
+        results = []
+        
+        for attack_name in attack_names:
+            try:
+                result = await self.run_attack(attack_name)
+                results.append(result)
+                
+                # 공격 간 지연
+                await asyncio.sleep(self.config["attacks"]["delay_between"])
+                
+            except Exception as e:
+                logger.error(f"공격 {attack_name} 실패: {str(e)}")
+        
+        return results
+    
+    async def run_campaign(self, attack_names: List[str] = None) -> List[AttackResult]:
+        """공격 캠페인 실행"""
+        if attack_names is None:
+            attack_names = self.config["attacks"]["enabled"]
+        
+        logger.info(f"🚀 공격 캠페인 시작: {len(attack_names)}개 공격")
+        results = []
+        
+        for i, attack_name in enumerate(attack_names, 1):
+            logger.info(f"공격 {i}/{len(attack_names)}: {attack_name}")
+            
+            try:
+                result = await self.run_attack(attack_name)
+                results.append(result)
+                
+                # 공격 간 대기
+                if i < len(attack_names):
+                    await asyncio.sleep(self.config["attacks"]["delay_between"])
+                    
+            except Exception as e:
+                logger.error(f"공격 {attack_name} 실패: {str(e)}")
+        
+        logger.info(f"✅ 캠페인 완료: {len(results)}개 공격 실행")
+        return results
+    
+    def get_summary(self) -> Dict[str, Any]:
+        """결과 요약"""
+        if not self.results:
+            return {"message": "실행된 공격이 없습니다."}
+        
+        total = len(self.results)
+        successful = sum(1 for r in self.results if r.status == AttackStatus.SUCCESS)
+        detected = sum(1 for r in self.results if r.status == AttackStatus.DETECTED)
+        
+        return {
+            "total_attacks": total,
+            "successful_attacks": successful,
+            "detected_attacks": detected,
+            "success_rate": f"{(successful/total)*100:.1f}%",
+            "detection_rate": f"{(detected/total)*100:.1f}%",
+            "avg_response_time": f"{sum(r.response_time for r in self.results)/total:.2f}s"
+        }
+    
+    def export_results(self, filename: str = None) -> str:
+        """결과 내보내기"""
+        if filename is None:
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"results/dvd_lite_results_{timestamp}.json"
+        
+        # 결과 디렉토리 생성
+        Path(filename).parent.mkdir(parents=True, exist_ok=True)
+        
+        # 결과 데이터 구성
+        export_data = {
+            "metadata": {
+                "timestamp": datetime.now().isoformat(),
+                "config": self.config,
+                "summary": self.get_summary()
+            },
+            "results": [asdict(result) for result in self.results]
+        }
+        
+        # JSON 파일로 저장
+        with open(filename, 'w', encoding='utf-8') as f:
+            json.dump(export_data, f, indent=2, ensure_ascii=False, default=str)
+        
+        logger.info(f"📄 결과 저장: {filename}")
+        return filename
+    
+    def print_summary(self):
+        """결과 요약 출력"""
+        summary = self.get_summary()
+        
+        print("\\n" + "="*50)
+        print("🎯 DVD-Lite 실행 결과 요약")
+        print("="*50)
+        
+        if "message" in summary:
+            print(summary["message"])
+        else:
+            print(f"총 공격 수: {summary['total_attacks']}")
+            print(f"성공한 공격: {summary['successful_attacks']} ({summary['success_rate']})")
+            print(f"탐지된 공격: {summary['detected_attacks']} ({summary['detection_rate']})")
+            print(f"평균 응답 시간: {summary['avg_response_time']}")
+        
+        print("="*50)
+        
+        # 개별 결과 출력
+        if self.results:
+            print("\\n📋 개별 공격 결과:")
+            for i, result in enumerate(self.results, 1):
+                status_icon = "✅" if result.status == AttackStatus.SUCCESS else "❌"
+                print(f"{i}. {result.attack_name}: {status_icon} {result.status.value}")
+                print(f"   시간: {result.response_time:.2f}s, IOC: {len(result.iocs)}개")
+
+# =============================================================================
+# 기본 공격 베이스 클래스
+# =============================================================================
+
+class BaseAttack:
+    """공격 기본 클래스"""
+    
+    def __init__(self, target_ip: str = "10.13.0.2", **kwargs):
+        self.target_ip = target_ip
+        self.config = kwargs
+        self.attack_id = f"{self.__class__.__name__.lower()}_{int(time.time())}"
+    
+    async def execute(self) -> AttackResult:
+        """공격 실행"""
+        start_time = time.time()
+        
+        try:
+            # 실제 공격 로직 실행
+            success, iocs, details = await self._run_attack()
+            
+            # 결과 생성
+            result = AttackResult(
+                attack_id=self.attack_id,
+                attack_name=self.__class__.__name__,
+                attack_type=self._get_attack_type(),
+                status=AttackStatus.SUCCESS if success else AttackStatus.FAILED,
+                success_rate=details.get("success_rate", 0.7 if success else 0.0),
+                response_time=time.time() - start_time,
+                timestamp=time.time(),
+                target=self.target_ip,
+                iocs=iocs,
+                details=details
+            )
+            
+            return result
+            
+        except Exception as e:
+            return AttackResult(
+                attack_id=self.attack_id,
+                attack_name=self.__class__.__name__,
+                attack_type=self._get_attack_type(),
+                status=AttackStatus.FAILED,
+                success_rate=0.0,
+                response_time=time.time() - start_time,
+                timestamp=time.time(),
+                target=self.target_ip,
+                iocs=[],
+                details={"error": str(e)}
+            )
+    
+    async def _run_attack(self) -> tuple:
+        """실제 공격 로직 - 하위 클래스에서 구현"""
+        raise NotImplementedError
+    
+    def _get_attack_type(self) -> AttackType:
+        """공격 타입 반환 - 하위 클래스에서 구현"""
+        raise NotImplementedError
+'''
+    
+    file_path = Path("dvd_lite/main.py")
+    with open(file_path, 'w', encoding='utf-8') as f:
+        f.write(content)
+    print(f"✅ 업데이트: {file_path}")
+
+def create_component_modules():
+    """컴포넌트 모듈들 생성"""
+    
+    # 1. 핵심 컴포넌트 생성
+    create_core_modules()
+    
+    # 2. 공격 모듈 생성
+    create_attack_modules()
+    
+    # 3. 레지스트리 모듈 생성
+    create_registry_modules()
+
+def create_core_modules():
+    """핵심 컴포넌트 모듈 생성"""
+    
+    # enums.py
+    enums_content = '''# dvd_lite/dvd_attacks/core/enums.py
+"""
+DVD 공격 시스템 열거형 정의
+"""
+from enum import Enum
+
+class AttackType(Enum):
+    """공격 유형"""
+    RECONNAISSANCE = "reconnaissance"
+    PROTOCOL_TAMPERING = "protocol_tampering"
+    DOS = "denial_of_service"
+    INJECTION = "injection"
+    EXFILTRATION = "exfiltration"
+    FIRMWARE_ATTACKS = "firmware_attacks"
+
+class DVDAttackTactic(Enum):
+    """DVD 공격 전술 분류"""
+    RECONNAISSANCE = "reconnaissance"
+    PROTOCOL_TAMPERING = "protocol_tampering"
+    DENIAL_OF_SERVICE = "denial_of_service"
+    INJECTION = "injection"
+    EXFILTRATION = "exfiltration"
+    FIRMWARE_ATTACKS = "firmware_attacks"
+
+class DVDFlightState(Enum):
+    """드론 비행 상태"""
+    PRE_FLIGHT = "pre_flight"
+    TAKEOFF = "takeoff"
+    AUTOPILOT_FLIGHT = "autopilot_flight"
+    MANUAL_FLIGHT = "manual_flight"
+    EMERGENCY_RTL = "emergency_rtl"
+    POST_FLIGHT = "post_flight"
+
+class AttackDifficulty(Enum):
+    """공격 난이도"""
+    BEGINNER = "beginner"
+    INTERMEDIATE = "intermediate"
+    ADVANCED = "advanced"
+
+class AttackStatus(Enum):
+    """공격 상태"""
+    SUCCESS = "success"
+    FAILED = "failed"
+    DETECTED = "detected"
+    PARTIAL = "partial"
+'''
+    
+    Path("dvd_lite/dvd_attacks/core/enums.py").write_text(enums_content, encoding='utf-8')
+    print("✅ 생성: dvd_lite/dvd_attacks/core/enums.py")
+    
+    # scenario.py
+    scenario_content = '''# dvd_lite/dvd_attacks/core/scenario.py
+"""
+DVD 공격 시나리오 정의
+"""
+from dataclasses import dataclass
+from typing import List
+from .enums import DVDAttackTactic, DVDFlightState, AttackDifficulty
+
+@dataclass
+class DVDAttackScenario:
+    """DVD 공격 시나리오 정의"""
+    name: str
+    tactic: DVDAttackTactic
+    description: str
+    required_states: List[DVDFlightState]
+    difficulty: AttackDifficulty
+    prerequisites: List[str]
+    targets: List[str]
+    estimated_duration: float = 0.0
+    stealth_level: str = "medium"
+    impact_level: str = "medium"
+'''
+    
+    Path("dvd_lite/dvd_attacks/core/scenario.py").write_text(scenario_content, encoding='utf-8')
+    print("✅ 생성: dvd_lite/dvd_attacks/core/scenario.py")
+    
+    # attack_base.py
+    attack_base_content = '''# dvd_lite/dvd_attacks/core/attack_base.py
+"""
+공격 기본 클래스 정의
+"""
+import asyncio
+import time
+import logging
+from abc import ABC, abstractmethod
+from typing import Tuple, List, Dict, Any, Optional
+from dataclasses import dataclass
+from .enums import AttackType, AttackStatus
+
+logger = logging.getLogger(__name__)
+
+@dataclass
+class AttackResult:
+    """공격 결과 데이터 클래스"""
+    attack_id: str
+    attack_name: str
+    attack_type: AttackType
+    status: AttackStatus
+    success_rate: float
+    response_time: float
+    timestamp: float
+    target: str
+    iocs: List[str]
+    details: Dict[str, Any]
+    scenario_info: Optional[Dict[str, Any]] = None
+
+class BaseAttack(ABC):
+    """DVD 공격 기본 클래스"""
+    
+    def __init__(self, target_ip: str = "10.13.0.2", **kwargs):
+        self.target_ip = target_ip
+        self.config = kwargs
+        self.attack_id = f"{self.__class__.__name__.lower()}_{int(time.time())}"
+        self.logger = logging.getLogger(f"attack.{self.__class__.__name__}")
+    
+    async def execute(self) -> AttackResult:
+        """공격 실행 메인 메서드"""
+        start_time = time.time()
+        self.logger.info(f"공격 시작: {self.__class__.__name__} -> {self.target_ip}")
+        
+        try:
+            success, iocs, details = await self._run_attack()
+            
+            result = AttackResult(
+                attack_id=self.attack_id,
+                attack_name=self.__class__.__name__,
+                attack_type=self._get_attack_type(),
+                status=AttackStatus.SUCCESS if success else AttackStatus.FAILED,
+                success_rate=details.get("success_rate", 0.7 if success else 0.0),
+                response_time=time.time() - start_time,
+                timestamp=time.time(),
+                target=self.target_ip,
+                iocs=iocs,
+                details=details
+            )
+            
+            self.logger.info(f"공격 완료: {result.status.value} ({result.response_time:.2f}초)")
+            return result
+            
+        except Exception as e:
+            self.logger.error(f"공격 실패: {str(e)}")
+            return AttackResult(
+                attack_id=self.attack_id,
+                attack_name=self.__class__.__name__,
+                attack_type=self._get_attack_type(),
+                status=AttackStatus.FAILED,
+                success_rate=0.0,
+                response_time=time.time() - start_time,
+                timestamp=time.time(),
+                target=self.target_ip,
+                iocs=[],
+                details={"error": str(e)}
+            )
+    
+    @abstractmethod
+    async def _run_attack(self) -> Tuple[bool, List[str], Dict[str, Any]]:
+        """실제 공격 로직 - 하위 클래스에서 반드시 구현"""
+        pass
+    
+    @abstractmethod
+    def _get_attack_type(self) -> AttackType:
+        """공격 타입 반환 - 하위 클래스에서 반드시 구현"""
+        pass
+'''
+    
+    Path("dvd_lite/dvd_attacks/core/attack_base.py").write_text(attack_base_content, encoding='utf-8')
+    print("✅ 생성: dvd_lite/dvd_attacks/core/attack_base.py")
+
+def create_attack_modules():
+    """공격 모듈들 생성"""
+    
+    # 각 공격 카테고리별로 기본 모듈 생성
+    categories = [
+        "reconnaissance", "protocol_tampering", "denial_of_service", 
+        "injection", "exfiltration", "firmware_attacks"
+    ]
+    
+    for category in categories:
+        # 기본 공격 모듈 생성 (간단한 예시)
+        if category == "reconnaissance":
+            create_reconnaissance_modules()
+        elif category == "protocol_tampering":
+            create_protocol_tampering_modules()
+        # 다른 카테고리들은 기본 파일만 생성
+        else:
+            create_basic_category_file(category)
+
+def create_reconnaissance_modules():
+    """정찰 모듈 생성"""
+    
+    # wifi_discovery.py
+    wifi_content = '''# dvd_lite/dvd_attacks/reconnaissance/wifi_discovery.py
+"""
+WiFi 네트워크 발견 공격
+"""
+import asyncio
+import random
+from typing import Tuple, List, Dict, Any
+from ..core.attack_base import BaseAttack
+from ..core.enums import AttackType
+
+class WiFiNetworkDiscovery(BaseAttack):
+    """WiFi 네트워크 발견 및 열거"""
+    
+    def _get_attack_type(self) -> AttackType:
+        return AttackType.RECONNAISSANCE
+    
+    async def _run_attack(self) -> Tuple[bool, List[str], Dict[str, Any]]:
+        """WiFi 네트워크 스캔 및 드론 네트워크 식별"""
+        await asyncio.sleep(2.5)
+        
+        networks = [
+            {"ssid": "Drone_WiFi", "bssid": "aa:bb:cc:dd:ee:01", "encryption": "WPA2"},
+            {"ssid": "DJI_MAVIC_123456", "bssid": "aa:bb:cc:dd:ee:02", "encryption": "WPA"},
+            {"ssid": "ArduPilot_AP", "bssid": "aa:bb:cc:dd:ee:03", "encryption": "Open"},
+        ]
+        
+        discovered = random.sample(networks, k=random.randint(1, 3))
+        
+        iocs = []
+        for network in discovered:
+            iocs.append(f"WIFI_SSID:{network['ssid']}")
+            iocs.append(f"WIFI_BSSID:{network['bssid']}")
+        
+        success = len(discovered) > 0
+        
+        details = {
+            "discovered_networks": discovered,
+            "scan_method": "passive_monitor",
+            "success_rate": 0.85 if success else 0.3
+        }
+        
+        return success, iocs, details
+'''
+    
+    Path("dvd_lite/dvd_attacks/reconnaissance/wifi_discovery.py").write_text(wifi_content, encoding='utf-8')
+    print("✅ 생성: dvd_lite/dvd_attacks/reconnaissance/wifi_discovery.py")
+    
+    # mavlink_discovery.py
+    mavlink_content = '''# dvd_lite/dvd_attacks/reconnaissance/mavlink_discovery.py
+"""
+MAVLink 서비스 발견 공격
+"""
+import asyncio
+import random
+from typing import Tuple, List, Dict, Any
+from ..core.attack_base import BaseAttack
+from ..core.enums import AttackType
+
+class MAVLinkServiceDiscovery(BaseAttack):
+    """MAVLink 서비스 발견 및 열거"""
+    
+    def _get_attack_type(self) -> AttackType:
+        return AttackType.RECONNAISSANCE
+    
+    async def _run_attack(self) -> Tuple[bool, List[str], Dict[str, Any]]:
+        """네트워크에서 MAVLink 서비스 스캔"""
+        await asyncio.sleep(3.2)
+        
+        services = []
+        hosts = [f"192.168.13.{i}" for i in range(1, 11)]
+        
+        for host in hosts:
+            if random.random() > 0.7:
+                service = {
+                    "host": host,
+                    "port": random.choice([14550, 14551, 5760]),
+                    "service": "MAVLink"
+                }
+                services.append(service)
+        
+        iocs = [f"MAVLINK_SERVICE:{s['host']}:{s['port']}" for s in services]
+        success = len(services) > 0
+        
+        details = {
+            "discovered_services": services,
+            "scan_method": "port_scan",
+            "success_rate": 0.75 if success else 0.1
+        }
+        
+        return success, iocs, details
+'''
+    
+    Path("dvd_lite/dvd_attacks/reconnaissance/mavlink_discovery.py").write_text(mavlink_content, encoding='utf-8')
+    print("✅ 생성: dvd_lite/dvd_attacks/reconnaissance/mavlink_discovery.py")
+
+def create_protocol_tampering_modules():
+    """프로토콜 변조 모듈 생성"""
+    
+    # GPS 스푸핑은 이미 존재하므로 건너뛰기
+    pass
+
+def create_basic_category_file(category: str):
+    """기본 카테고리 파일 생성"""
+    
+    content = f'''# dvd_lite/dvd_attacks/{category}/basic.py
+"""
+{category} 기본 공격 모듈
+"""
+import asyncio
+import random
+from typing import Tuple, List, Dict, Any
+from ..core.attack_base import BaseAttack
+from ..core.enums import AttackType
+
+class BasicAttack(BaseAttack):
+    """기본 공격 클래스"""
+    
+    def _get_attack_type(self) -> AttackType:
+        return AttackType.RECONNAISSANCE  # 기본값
+    
+    async def _run_attack(self) -> Tuple[bool, List[str], Dict[str, Any]]:
+        """기본 공격 로직"""
+        await asyncio.sleep(2.0)
+        
+        success = random.random() > 0.5
+        iocs = [f"BASIC_IOC:test_indicator"]
+        details = {{"success_rate": 0.5}}
+        
+        return success, iocs, details
+'''
+    
+    Path(f"dvd_lite/dvd_attacks/{category}/basic.py").write_text(content, encoding='utf-8')
+    print(f"✅ 생성: dvd_lite/dvd_attacks/{category}/basic.py")
+
+def create_registry_modules():
+    """레지스트리 모듈 생성"""
+    
+    # management.py
+    management_content = '''# dvd_lite/dvd_attacks/registry/management.py
+"""
+DVD 공격 시나리오 통합 관리
+"""
+import logging
+from typing import List, Dict, Any
+
+logger = logging.getLogger(__name__)
+
+# 기본 공격 시나리오 등록
+def register_all_dvd_attacks():
+    """모든 DVD 공격 시나리오 등록"""
+    registered_attacks = []
+    
+    # 기본 공격들 등록
+    basic_attacks = [
+        "wifi_network_discovery",
+        "mavlink_service_discovery",
+        "gps_spoofing",
+        "telemetry_exfiltration"
+    ]
+    
+    for attack in basic_attacks:
+        registered_attacks.append(attack)
+    
+    logger.info(f"✅ {len(registered_attacks)}개 공격 등록 완료")
+    return registered_attacks
+
+def get_attacks_by_tactic(tactic) -> List[str]:
+    """전술별 공격 목록 반환"""
+    # 기본 구현
+    return ["wifi_network_discovery", "mavlink_service_discovery"]
+
+def get_attacks_by_difficulty(difficulty) -> List[str]:
+    """난이도별 공격 목록 반환"""
+    # 기본 구현
+    return ["wifi_network_discovery"]
+
+def get_attacks_by_flight_state(state) -> List[str]:
+    """비행 상태별 공격 목록 반환"""
+    # 기본 구현
+    return ["wifi_network_discovery"]
+
+def get_attack_info(attack_name: str) -> Dict[str, Any]:
+    """공격 정보 반환"""
+    # 기본 구현
+    return {
+        "name": attack_name,
+        "description": f"{attack_name} 공격",
+        "difficulty": "beginner",
+        "tactic": "reconnaissance",
+        "targets": ["network"],
+        "estimated_duration": 2.5,
+        "stealth_level": "medium",
+        "impact_level": "low"
+    }
+'''
+    
+    Path("dvd_lite/dvd_attacks/registry/management.py").write_text(management_content, encoding='utf-8')
+    print("✅ 생성: dvd_lite/dvd_attacks/registry/management.py")
+
+def main():
+    """메인 함수"""
+    print("🔧 누락된 핵심 모듈 생성 중...")
+    print("=" * 50)
+    
+    # 1. CTI 모듈 생성
+    create_cti_module()
+    
+    # 2. 기본 attacks 모듈 생성
+    create_attacks_module()
+    
+    # 3. 메인 모듈 업데이트
+    create_main_module()
+    
+    # 4. 컴포넌트 모듈들 생성
+    create_component_modules()
+    
+    print("\n" + "=" * 50)
+    print("🎉 모든 핵심 모듈이 생성되었습니다!")
+    print("\n🚀 이제 다음 명령을 실행해보세요:")
+    print("   python3 advanced_start.py")
+    print("   또는")
+    print("   python3 quick_start.py")
+
+if __name__ == "__main__":
+    main()
