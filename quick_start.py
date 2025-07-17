@@ -102,7 +102,12 @@ async def run_single_attack_demo():
     # DVD-Lite 인스턴스 생성
     dvd = DVDLite()
     cti = SimpleCTI()
-    dvd.register_cti_collector(cti)
+    try:
+        dvd.register_cti_collector(cti)
+    except AttributeError:
+        # CTI 수집기가 없는 경우 무시
+        logger.warning("CTI 수집기 등록을 건너뜁니다 (메서드 없음)")
+        pass
     
     # 공격 등록
     registered_attacks = register_all_dvd_attacks()
@@ -148,7 +153,12 @@ async def run_multiple_attacks_demo():
     
     dvd = DVDLite()
     cti = SimpleCTI()
-    dvd.register_cti_collector(cti)
+    try:
+        dvd.register_cti_collector(cti)
+    except AttributeError:
+        # CTI 수집기가 없는 경우 무시
+        logger.warning("CTI 수집기 등록을 건너뜁니다 (메서드 없음)")
+        pass
     
     register_all_dvd_attacks()
     
@@ -241,7 +251,12 @@ async def run_tactic_based_demo():
     
     dvd = DVDLite()
     cti = SimpleCTI()
-    dvd.register_cti_collector(cti)
+    try:
+        dvd.register_cti_collector(cti)
+    except AttributeError:
+        # CTI 수집기가 없는 경우 무시
+        logger.warning("CTI 수집기 등록을 건너뜁니다 (메서드 없음)")
+        pass
     
     register_all_dvd_attacks()
     
@@ -307,7 +322,12 @@ async def run_difficulty_based_demo():
     
     dvd = DVDLite()
     cti = SimpleCTI()
-    dvd.register_cti_collector(cti)
+    try:
+        dvd.register_cti_collector(cti)
+    except AttributeError:
+        # CTI 수집기가 없는 경우 무시
+        logger.warning("CTI 수집기 등록을 건너뜁니다 (메서드 없음)")
+        pass
     
     register_all_dvd_attacks()
     
@@ -417,7 +437,12 @@ async def interactive_mode():
     
     dvd = DVDLite()
     cti = SimpleCTI()
-    dvd.register_cti_collector(cti)
+    try:
+        dvd.register_cti_collector(cti)
+    except AttributeError:
+        # CTI 수집기가 없는 경우 무시
+        logger.warning("CTI 수집기 등록을 건너뜁니다 (메서드 없음)")
+        pass
     
     register_all_dvd_attacks()
     

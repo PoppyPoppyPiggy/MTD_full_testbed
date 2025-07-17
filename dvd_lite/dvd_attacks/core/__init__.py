@@ -1,4 +1,4 @@
-# dvd_attacks/core/__init__.py
+# dvd_lite/dvd_attacks/core/__init__.py
 """
 DVD 공격 시스템 핵심 컴포넌트
 """

@@ -1,4 +1,4 @@
-# dvd_attacks/core/scenario.py
+# dvd_lite/dvd_attacks/core/scenario.py
 """
 DVD 공격 시나리오 정의
 """
@@ -15,7 +15,7 @@ class DVDAttackScenario:
     required_states: List[DVDFlightState]
     difficulty: AttackDifficulty
     prerequisites: List[str]
-    targets: List[str]  # "flight_controller", "companion_computer", "gcs", "network"
-    estimated_duration: float = 0.0  # seconds
-    stealth_level: str = "medium"  # "low", "medium", "high"
-    impact_level: str = "medium"  # "low", "medium", "high", "critical"
+    targets: List[str]
+    estimated_duration: float = 0.0
+    stealth_level: str = "medium"
+    impact_level: str = "medium"

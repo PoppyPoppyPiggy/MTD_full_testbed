@@ -1,4 +1,4 @@
-# dvd_attacks/core/attack_base.py
+# dvd_lite/dvd_attacks/core/attack_base.py
 """
 공격 기본 클래스 정의
 """
@@ -42,17 +42,8 @@ class BaseAttack(ABC):
         self.logger.info(f"공격 시작: {self.__class__.__name__} -> {self.target_ip}")
         
         try:
-            # 사전 검증
-            if not await self._pre_attack_validation():
-                raise ValueError("사전 검증 실패")
-            
-            # 실제 공격 로직 실행
             success, iocs, details = await self._run_attack()
             
-            # 후처리
-            await self._post_attack_cleanup()
-            
-            # 결과 생성
             result = AttackResult(
                 attack_id=self.attack_id,
                 attack_name=self.__class__.__name__,
@@ -84,14 +75,6 @@ class BaseAttack(ABC):
                 details={"error": str(e)}
             )
     
-    async def _pre_attack_validation(self) -> bool:
-        """공격 전 검증 (오버라이드 가능)"""
-        return True
-    
-    async def _post_attack_cleanup(self) -> None:
-        """공격 후 정리 작업 (오버라이드 가능)"""
-        pass
-    
     @abstractmethod
     async def _run_attack(self) -> Tuple[bool, List[str], Dict[str, Any]]:
         """실제 공격 로직 - 하위 클래스에서 반드시 구현"""
@@ -101,12 +84,3 @@ class BaseAttack(ABC):
     def _get_attack_type(self) -> AttackType:
         """공격 타입 반환 - 하위 클래스에서 반드시 구현"""
         pass
-    
-    def get_attack_info(self) -> Dict[str, Any]:
-        """공격 정보 반환"""
-        return {
-            "name": self.__class__.__name__,
-            "type": self._get_attack_type().value,
-            "target": self.target_ip,
-            "config": self.config
-        }
