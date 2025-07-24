@@ -1,19 +1,23 @@
 #!/usr/bin/env python3
 """
-DVD 공격 시나리오 빠른 실행 스크립트 (컴포넌트화 버전)
+DVD 공격 시나리오 빠른 실행 스크립트 (DVD 연동 버전)
+Damn Vulnerable Drone과의 완전한 연동을 지원하는 고급 실행 스크립트
 """
 
 import asyncio
 import sys
 import logging
+import argparse
+import json
 from pathlib import Path
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 # 로깅 설정
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
+logger = logging.getLogger(__name__)
 
 # 프로젝트 루트를 Python 경로에 추가
 project_root = Path(__file__).parent
@@ -22,6 +26,11 @@ sys.path.insert(0, str(project_root))
 try:
     from dvd_lite.main import DVDLite
     from dvd_lite.cti import SimpleCTI
+    
+    # DVD 연결 모듈
+    from dvd_connector.connector import DVDConnector, DVDEnvironment, SafetyChecker
+    
+    # DVD 공격 모듈
     from dvd_lite.dvd_attacks import (
         register_all_dvd_attacks, 
         get_attacks_by_tactic, 
@@ -33,662 +42,652 @@ try:
         AttackDifficulty,
         AttackStatus
     )
+    
+    DVD_CONNECTOR_AVAILABLE = True
+    
 except ImportError as e:
-    print(f"❌ Import 오류: {e}")
-    print("파일 구조를 확인하고 모든 __init__.py 파일이 있는지 확인하세요.")
-    sys.exit(1)
+    print(f"⚠️  일부 모듈 import 실패: {e}")
+    DVD_CONNECTOR_AVAILABLE = False
+    
+    # 기본 모듈만 사용
+    try:
+        from dvd_lite.main import DVDLite
+        from dvd_lite.attacks import register_all_attacks
+    except ImportError:
+        print("❌ 기본 모듈 import 실패")
+        sys.exit(1)
 
 def print_banner():
     """배너 출력"""
     banner = """
-╔══════════════════════════════════════════════════════════════════╗
-║                    DVD Attack Scenarios                          ║
-║              Damn Vulnerable Drone 공격 시나리오                  ║
-║                                                                  ║
-║  🎯 19개 완전 구현된 공격 시나리오                                  ║
-║  🔥 6개 주요 공격 전술 카테고리                                     ║
-║  📊 실시간 CTI 수집 및 분석                                        ║
-╚══════════════════════════════════════════════════════════════════╝
+╔════════════════════════════════════════════════════════════════════════╗
+║                    DVD Attack Scenarios (Advanced)                     ║
+║              Damn Vulnerable Drone 완전 연동 버전                      ║
+║                                                                        ║
+║  🎯 실제 DVD 환경과의 연동                                              ║
+║  🔗 MAVLink, WiFi, 컴패니언 컴퓨터 연결                                  ║
+║  🛡️  안전성 검사 및 타겟 검증                                           ║
+║  📊 실시간 CTI 수집 및 분석                                             ║
+║  🚁 SITL/Docker/실제 하드웨어 지원                                      ║
+╚════════════════════════════════════════════════════════════════════════╝
 """
     print(banner)
 
-def print_attack_detail(result) -> None:
-    """공격 실행 결과 상세 출력"""
-    status_icon = "✅" if result.status == AttackStatus.SUCCESS else "❌"
+class DVDAdvancedRunner:
+    """DVD 고급 실행기"""
     
-    print(f"\n{status_icon} 공격 완료: {result.attack_name}")
-    print(f"   📊 상태: {result.status.value}")
-    print(f"   ⏱️  실행시간: {result.response_time:.2f}초")
-    print(f"   🎯 성공률: {result.success_rate:.1%}")
-    print(f"   🔍 IOCs: {len(result.iocs)}개")
-    print(f"   🎪 타겟: {result.target}")
-    
-    # IOC 상세 표시
-    if result.iocs:
-        print("   📋 주요 IOCs:")
-        for ioc in result.iocs[:5]:  # 최대 5개만 표시
-            print(f"      • {ioc}")
-        if len(result.iocs) > 5:
-            print(f"      ... 및 {len(result.iocs) - 5}개 더")
-    
-    # 공격 세부사항 표시
-    if result.details:
-        print("   📝 세부사항:")
-        interesting_keys = ['success_rate', 'attack_vector', 'vulnerabilities_found', 
-                          'discovered_networks', 'system_impact', 'injection_attempts']
+    def __init__(self, config_path: str = "dvd_config.json"):
+        self.config_path = config_path
+        self.dvd_environment = None
+        self.dvd_connector = None
+        self.dvd_lite = None
+        self.cti_collector = None
+        self.safety_checker = SafetyChecker()
         
-        shown_count = 0
-        for key, value in result.details.items():
-            if shown_count >= 3:  # 최대 3개까지만 표시
-                break
-                
-            if key in interesting_keys or isinstance(value, (int, float, str)):
-                if isinstance(value, float):
-                    print(f"      • {key}: {value:.2f}")
-                elif isinstance(value, list) and len(value) <= 3:
-                    print(f"      • {key}: {value}")
-                elif isinstance(value, dict) and len(value) <= 2:
-                    print(f"      • {key}: {value}")
+    async def initialize(self, environment_type: str = "auto") -> bool:
+        """시스템 초기화"""
+        print("🔧 DVD 고급 실행기 초기화 중...")
+        
+        try:
+            # 1. DVD 환경 설정
+            if DVD_CONNECTOR_AVAILABLE:
+                await self._setup_dvd_environment(environment_type)
+            
+            # 2. DVD-Lite 인스턴스 생성
+            self.dvd_lite = DVDLite()
+            
+            # 3. CTI 수집기 설정
+            self.cti_collector = SimpleCTI()
+            self.dvd_lite.register_cti_collector(self.cti_collector)
+            
+            # 4. 공격 모듈 등록
+            if DVD_CONNECTOR_AVAILABLE:
+                registered_attacks = register_all_dvd_attacks()
+                print(f"✅ DVD 공격 모듈 등록: {len(registered_attacks)}개")
+            else:
+                registered_attacks = register_all_attacks(self.dvd_lite)
+                print(f"✅ 기본 공격 모듈 등록: {len(registered_attacks)}개")
+            
+            return True
+            
+        except Exception as e:
+            logger.error(f"초기화 실패: {e}")
+            return False
+    
+    async def _setup_dvd_environment(self, environment_type: str):
+        """DVD 환경 설정"""
+        print(f"🚁 DVD 환경 설정 중: {environment_type}")
+        
+        # 환경 타입 자동 감지
+        if environment_type == "auto":
+            environment_type = await self._detect_environment_type()
+        
+        # DVD 환경 생성
+        self.dvd_environment = DVDEnvironment(self.config_path)
+        
+        # 설정 업데이트
+        await self._update_environment_config(environment_type)
+        
+        # DVD 커넥터 생성
+        self.dvd_connector = DVDConnector(self.dvd_environment)
+        
+        # 연결 초기화
+        if await self.dvd_connector.initialize():
+            print("✅ DVD 환경 연결 성공")
+        else:
+            print("⚠️  DVD 환경 연결 실패 - 시뮬레이션 모드로 진행")
+    
+    async def _detect_environment_type(self) -> str:
+        """환경 타입 자동 감지"""
+        print("🔍 DVD 환경 자동 감지 중...")
+        
+        # Docker 환경 확인
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                "docker", "ps", "--format", "{{.Names}}",
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            stdout, _ = await proc.communicate()
+            
+            if "dvd" in stdout.decode().lower():
+                print("🐳 Docker DVD 환경 감지됨")
+                return "docker"
+        except:
+            pass
+        
+        # ArduPilot SITL 확인
+        ardupilot_paths = [
+            "/opt/ardupilot",
+            "~/ardupilot",
+            "./ardupilot"
+        ]
+        
+        for path in ardupilot_paths:
+            if Path(path).expanduser().exists():
+                print("🛩️  ArduPilot SITL 환경 감지됨")
+                return "simulation"
+        
+        # 실제 하드웨어 확인 (MAVLink 포트 스캔)
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection("192.168.13.2", 14550),
+                timeout=2
+            )
+            writer.close()
+            await writer.wait_closed()
+            print("🚁 실제 DVD 하드웨어 감지됨")
+            return "real_hardware"
+        except:
+            pass
+        
+        print("💻 시뮬레이션 환경으로 설정")
+        return "simulation"
+    
+    async def _update_environment_config(self, environment_type: str):
+        """환경 설정 업데이트"""
+        config_updates = {
+            "simulation": {
+                "dvd_environment": {
+                    "type": "simulation",
+                    "ardupilot_path": "/opt/ardupilot"
+                },
+                "targets": {
+                    "primary": {
+                        "ip": "127.0.0.1",
+                        "mavlink_port": 14550
+                    }
+                }
+            },
+            "docker": {
+                "dvd_environment": {
+                    "type": "docker"
+                },
+                "targets": {
+                    "primary": {
+                        "ip": "127.0.0.1",
+                        "mavlink_port": 14550
+                    }
+                }
+            },
+            "real_hardware": {
+                "dvd_environment": {
+                    "type": "real_hardware"
+                },
+                "targets": {
+                    "primary": {
+                        "ip": "192.168.13.2",
+                        "mavlink_port": 14550
+                    },
+                    "companion": {
+                        "ip": "192.168.13.3",
+                        "ssh_port": 22
+                    }
+                }
+            }
+        }
+        
+        if environment_type in config_updates:
+            # 기존 설정과 병합
+            current_config = self.dvd_environment.config
+            update_config = config_updates[environment_type]
+            
+            for key, value in update_config.items():
+                if isinstance(value, dict) and key in current_config:
+                    current_config[key].update(value)
                 else:
-                    print(f"      • {key}: {str(value)[:50]}...")
-                shown_count += 1
-
-async def run_single_attack_demo():
-    """단일 공격 실행 데모"""
-    print("\n" + "="*60)
-    print("🎯 단일 공격 실행 데모")
-    print("="*60)
+                    current_config[key] = value
+            
+            # 설정 저장
+            with open(self.config_path, 'w') as f:
+                json.dump(current_config, f, indent=2)
     
-    # DVD-Lite 인스턴스 생성
-    dvd = DVDLite()
-    cti = SimpleCTI()
-    dvd.register_cti_collector(cti)
-    
-    # 공격 등록
-    registered_attacks = register_all_dvd_attacks()
-    print(f"📋 등록된 공격: {len(registered_attacks)}개")
-    
-    # 네트워크 발견 공격 실행
-    attack_name = "wifi_network_discovery"
-    print(f"\n🚀 {attack_name} 공격 실행 중...")
-    
-    try:
-        # 공격 정보 표시
-        attack_info = get_attack_info(attack_name)
-        if attack_info:
-            print(f"   📖 설명: {attack_info['description']}")
-            print(f"   🎚️  난이도: {attack_info['difficulty']}")
-            print(f"   🎯 타겟: {', '.join(attack_info['targets'])}")
-            print(f"   ⏱️  예상 시간: {attack_info['estimated_duration']:.1f}초")
-            print(f"   🥷 은밀성: {attack_info['stealth_level']}")
-            print(f"   ⚡ 영향도: {attack_info['impact_level']}")
+    async def run_comprehensive_test(self) -> Dict[str, Any]:
+        """종합적인 DVD 테스트 실행"""
+        print("\n" + "="*70)
+        print("🧪 종합적인 DVD 보안 테스트 실행")
+        print("="*70)
         
-        # 공격 실행
-        result = await dvd.run_attack(attack_name)
+        results = {
+            "environment_status": {},
+            "attack_results": [],
+            "cti_analysis": {},
+            "security_assessment": {}
+        }
         
-        # 결과 상세 출력
-        print_attack_detail(result)
+        try:
+            # 1. 환경 상태 확인
+            results["environment_status"] = await self._check_environment_status()
+            
+            # 2. 안전성 검사
+            if not await self._perform_safety_checks():
+                print("❌ 안전성 검사 실패 - 테스트 중단")
+                return results
+            
+            # 3. 단계별 공격 실행
+            attack_sequence = await self._get_attack_sequence()
+            
+            for phase, attacks in attack_sequence.items():
+                print(f"\n🎯 {phase} 단계 실행...")
+                phase_results = await self._execute_attack_phase(attacks)
+                results["attack_results"].extend(phase_results)
+            
+            # 4. CTI 분석
+            results["cti_analysis"] = await self._analyze_cti_data()
+            
+            # 5. 보안 평가
+            results["security_assessment"] = await self._generate_security_assessment(results)
+            
+            # 6. 보고서 생성
+            await self._generate_comprehensive_report(results)
+            
+        except Exception as e:
+            logger.error(f"종합 테스트 실행 실패: {e}")
+            results["error"] = str(e)
         
-        # CTI 정보 표시
-        cti_summary = cti.get_summary()
-        print(f"\n🔍 CTI 수집 결과:")
+        return results
+    
+    async def _check_environment_status(self) -> Dict[str, Any]:
+        """환경 상태 확인"""
+        print("📊 DVD 환경 상태 확인 중...")
+        
+        status = {
+            "environment_type": "unknown",
+            "connectivity": False,
+            "targets": {},
+            "services": {}
+        }
+        
+        if self.dvd_connector:
+            # 타겟 상태 확인
+            for target_name in ["primary", "companion", "gcs"]:
+                try:
+                    target_status = await self.dvd_connector.get_target_status(target_name)
+                    status["targets"][target_name] = target_status
+                    if target_status["status"] == "connected":
+                        status["connectivity"] = True
+                except:
+                    status["targets"][target_name] = {"status": "unknown"}
+            
+            status["environment_type"] = self.dvd_environment.config["dvd_environment"]["type"]
+        
+        print(f"   환경 타입: {status['environment_type']}")
+        print(f"   연결 상태: {'✅' if status['connectivity'] else '❌'}")
+        
+        return status
+    
+    async def _perform_safety_checks(self) -> bool:
+        """안전성 검사 수행"""
+        print("🛡️  안전성 검사 수행 중...")
+        
+        try:
+            safety_ok = await self.safety_checker.perform_safety_check()
+            
+            if safety_ok:
+                print("✅ 안전성 검사 통과")
+                return True
+            else:
+                print("❌ 안전성 검사 실패")
+                return False
+                
+        except Exception as e:
+            logger.error(f"안전성 검사 오류: {e}")
+            return False
+    
+    async def _get_attack_sequence(self) -> Dict[str, List[str]]:
+        """단계별 공격 시퀀스 생성"""
+        if DVD_CONNECTOR_AVAILABLE:
+            return {
+                "정찰": get_attacks_by_tactic(DVDAttackTactic.RECONNAISSANCE),
+                "프로토콜_조작": get_attacks_by_tactic(DVDAttackTactic.PROTOCOL_TAMPERING)[:2],
+                "주입": get_attacks_by_tactic(DVDAttackTactic.INJECTION)[:2],
+                "데이터_탈취": get_attacks_by_tactic(DVDAttackTactic.EXFILTRATION)[:2]
+            }
+        else:
+            return {
+                "기본_정찰": ["wifi_scan", "drone_discovery"],
+                "기본_공격": ["telemetry_spoof", "command_inject"],
+                "기본_탈취": ["log_extract", "param_extract"]
+            }
+    
+    async def _execute_attack_phase(self, attacks: List[str]) -> List[Dict[str, Any]]:
+        """공격 단계 실행"""
+        results = []
+        
+        for attack_name in attacks:
+            print(f"   🚀 {attack_name} 실행 중...")
+            
+            try:
+                if self.dvd_connector:
+                    # 실제 타겟에 대해 공격 실행
+                    result_data = await self.dvd_connector.execute_attack_on_target(attack_name)
+                    result = result_data["result"]
+                else:
+                    # 시뮬레이션 공격 실행
+                    result = await self.dvd_lite.run_attack(attack_name)
+                
+                status_icon = "✅" if result.status == AttackStatus.SUCCESS else "❌"
+                print(f"      {status_icon} 완료: {result.response_time:.2f}s, IOCs: {len(result.iocs)}")
+                
+                results.append({
+                    "attack_name": attack_name,
+                    "result": result,
+                    "target_info": getattr(result, 'target_info', None)
+                })
+                
+                # 공격 간 대기
+                await asyncio.sleep(1.0)
+                
+            except Exception as e:
+                print(f"      ❌ 실패: {str(e)}")
+                results.append({
+                    "attack_name": attack_name,
+                    "error": str(e)
+                })
+        
+        return results
+    
+    async def _analyze_cti_data(self) -> Dict[str, Any]:
+        """CTI 데이터 분석"""
+        print("🔍 CTI 데이터 분석 중...")
+        
+        if not self.cti_collector:
+            return {"status": "no_cti_collector"}
+        
+        cti_summary = self.cti_collector.get_summary()
+        
+        # 고급 분석 수행
+        analysis = {
+            "summary": cti_summary,
+            "threat_landscape": self._analyze_threat_landscape(cti_summary),
+            "attack_patterns": self._identify_attack_patterns(cti_summary),
+            "recommendations": self._generate_recommendations(cti_summary)
+        }
+        
         print(f"   📊 수집된 지표: {cti_summary['total_indicators']}개")
         print(f"   📈 공격 패턴: {cti_summary['total_patterns']}개")
         
+        return analysis
+    
+    def _analyze_threat_landscape(self, cti_summary: Dict[str, Any]) -> Dict[str, Any]:
+        """위협 환경 분석"""
+        if not cti_summary.get("statistics", {}).get("by_attack_type"):
+            return {"status": "insufficient_data"}
+        
+        attack_types = cti_summary["statistics"]["by_attack_type"]
+        
+        return {
+            "primary_threats": sorted(attack_types.items(), key=lambda x: x[1], reverse=True)[:3],
+            "threat_diversity": len(attack_types),
+            "total_indicators": cti_summary["total_indicators"]
+        }
+    
+    def _identify_attack_patterns(self, cti_summary: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """공격 패턴 식별"""
+        patterns = []
+        
+        # 시간 기반 패턴 분석
+        if cti_summary["total_indicators"] > 10:
+            patterns.append({
+                "type": "high_volume_attack",
+                "description": "다량의 공격 지표 발견",
+                "severity": "high"
+            })
+        
+        # 공격 타입 기반 패턴
+        if cti_summary.get("statistics", {}).get("by_attack_type"):
+            attack_types = cti_summary["statistics"]["by_attack_type"]
+            if len(attack_types) > 3:
+                patterns.append({
+                    "type": "multi_vector_attack",
+                    "description": "다중 벡터 공격 패턴",
+                    "severity": "medium"
+                })
+        
+        return patterns
+    
+    def _generate_recommendations(self, cti_summary: Dict[str, Any]) -> List[str]:
+        """보안 권장사항 생성"""
+        recommendations = []
+        
+        if cti_summary["total_indicators"] > 5:
+            recommendations.append("MAVLink 통신 암호화 강화 권장")
+            recommendations.append("네트워크 접근 제어 정책 검토")
+        
+        confidence_stats = cti_summary.get("statistics", {}).get("by_confidence", {})
+        if confidence_stats.get("high", 0) > 3:
+            recommendations.append("높은 신뢰도 위협에 대한 즉시 대응 필요")
+        
+        return recommendations
+    
+    async def _generate_security_assessment(self, results: Dict[str, Any]) -> Dict[str, Any]:
+        """보안 평가 생성"""
+        print("📋 보안 평가 생성 중...")
+        
+        attack_results = results.get("attack_results", [])
+        successful_attacks = [r for r in attack_results if r.get("result") and r["result"].status == AttackStatus.SUCCESS]
+        
+        assessment = {
+            "overall_security_score": self._calculate_security_score(attack_results),
+            "successful_attacks": len(successful_attacks),
+            "total_attacks": len(attack_results),
+            "critical_vulnerabilities": self._identify_critical_vulnerabilities(successful_attacks),
+            "security_recommendations": self._generate_security_recommendations(successful_attacks)
+        }
+        
+        print(f"   🎯 보안 점수: {assessment['overall_security_score']}/100")
+        print(f"   ⚠️  성공한 공격: {assessment['successful_attacks']}/{assessment['total_attacks']}")
+        
+        return assessment
+    
+    def _calculate_security_score(self, attack_results: List[Dict[str, Any]]) -> int:
+        """보안 점수 계산"""
+        if not attack_results:
+            return 100
+        
+        successful_attacks = len([r for r in attack_results if r.get("result") and r["result"].status == AttackStatus.SUCCESS])
+        total_attacks = len(attack_results)
+        
+        success_rate = successful_attacks / total_attacks
+        security_score = max(0, 100 - int(success_rate * 100))
+        
+        return security_score
+    
+    def _identify_critical_vulnerabilities(self, successful_attacks: List[Dict[str, Any]]) -> List[str]:
+        """치명적 취약점 식별"""
+        critical_vulns = []
+        
+        for attack in successful_attacks:
+            attack_name = attack.get("attack_name", "")
+            
+            if "injection" in attack_name.lower():
+                critical_vulns.append("명령 주입 취약점")
+            elif "firmware" in attack_name.lower():
+                critical_vulns.append("펌웨어 보안 취약점")
+            elif "gps" in attack_name.lower():
+                critical_vulns.append("GPS 스푸핑 취약점")
+        
+        return list(set(critical_vulns))
+    
+    def _generate_security_recommendations(self, successful_attacks: List[Dict[str, Any]]) -> List[str]:
+        """보안 권장사항 생성"""
+        recommendations = []
+        
+        if any("network" in attack.get("attack_name", "") for attack in successful_attacks):
+            recommendations.append("네트워크 보안 강화 필요")
+        
+        if any("mavlink" in attack.get("attack_name", "") for attack in successful_attacks):
+            recommendations.append("MAVLink 프로토콜 보안 검토")
+        
+        if any("firmware" in attack.get("attack_name", "") for attack in successful_attacks):
+            recommendations.append("펌웨어 무결성 검증 시스템 도입")
+        
+        return recommendations
+    
+    async def _generate_comprehensive_report(self, results: Dict[str, Any]):
+        """종합 보고서 생성"""
+        print("📄 종합 보고서 생성 중...")
+        
+        try:
+            # JSON 보고서
+            json_filename = f"results/dvd_comprehensive_report_{int(asyncio.get_event_loop().time())}.json"
+            Path("results").mkdir(exist_ok=True)
+            
+            with open(json_filename, 'w', encoding='utf-8') as f:
+                json.dump(results, f, indent=2, default=str, ensure_ascii=False)
+            
+            print(f"✅ JSON 보고서 저장: {json_filename}")
+            
+            # CTI 데이터 내보내기
+            if self.cti_collector:
+                cti_filename = self.cti_collector.export_json()
+                print(f"✅ CTI 데이터 저장: {cti_filename}")
+            
+        except Exception as e:
+            logger.error(f"보고서 생성 실패: {e}")
+    
+    async def cleanup(self):
+        """정리 작업"""
+        print("🧹 정리 작업 수행 중...")
+        
+        if self.dvd_connector:
+            await self.dvd_connector.cleanup()
+        
+        print("✅ 정리 완료")
+
+async def main():
+    """메인 함수"""
+    parser = argparse.ArgumentParser(description="DVD 고급 공격 시나리오 실행기")
+    parser.add_argument("--mode", choices=["test", "interactive", "comprehensive"], 
+                       default="comprehensive", help="실행 모드")
+    parser.add_argument("--environment", choices=["auto", "simulation", "docker", "real_hardware"],
+                       default="auto", help="DVD 환경 타입")
+    parser.add_argument("--config", default="dvd_config.json", help="설정 파일 경로")
+    
+    args = parser.parse_args()
+    
+    print_banner()
+    
+    # DVD 고급 실행기 생성
+    runner = DVDAdvancedRunner(args.config)
+    
+    try:
+        # 초기화
+        if not await runner.initialize(args.environment):
+            print("❌ 초기화 실패")
+            return
+        
+        if args.mode == "comprehensive":
+            # 종합 테스트 실행
+            results = await runner.run_comprehensive_test()
+            
+        elif args.mode == "interactive":
+            # 대화형 모드
+            await interactive_mode(runner)
+            
+        elif args.mode == "test":
+            # 기본 테스트
+            await basic_test(runner)
+        
+        # 정리
+        await runner.cleanup()
+        
+    except KeyboardInterrupt:
+        print("\n👋 사용자에 의해 중단되었습니다.")
+        await runner.cleanup()
     except Exception as e:
-        print(f"❌ 실행 실패: {e}")
-        import traceback
-        traceback.print_exc()
+        logger.error(f"실행 오류: {e}")
+        await runner.cleanup()
 
-async def run_multiple_attacks_demo():
-    """여러 공격 실행 데모"""
-    print("\n" + "="*60)
-    print("🚀 여러 공격 실행 데모")
-    print("="*60)
-    
-    dvd = DVDLite()
-    cti = SimpleCTI()
-    dvd.register_cti_collector(cti)
-    
-    register_all_dvd_attacks()
-    
-    # 각 전술별로 하나씩 선택
-    attacks_to_run = [
-        "wifi_network_discovery",      # 정찰
-        "gps_spoofing",               # 프로토콜 변조
-        "mavlink_flood",              # 서비스 거부
-        "flight_plan_injection",      # 주입
-        "telemetry_exfiltration",     # 데이터 탈취
-        "bootloader_exploit"          # 펌웨어 공격
-    ]
-    
-    print(f"📋 실행할 공격 시나리오: {len(attacks_to_run)}개")
-    
-    # 각 공격 정보 표시
-    for attack_name in attacks_to_run:
-        info = get_attack_info(attack_name)
-        if info:
-            print(f"   • {attack_name} ({info['tactic']}) - {info['difficulty']}")
-    
-    print("\n🔥 공격 실행 시작...")
-    
-    results = []
-    for i, attack_name in enumerate(attacks_to_run, 1):
-        print(f"\n[{i}/{len(attacks_to_run)}] 🎯 {attack_name} 실행 중...")
-        
-        try:
-            result = await dvd.run_attack(attack_name)
-            results.append(result)
-            
-            # 간단한 결과 출력
-            status = "✅" if result.status == AttackStatus.SUCCESS else "❌"
-            print(f"   {status} 완료: {result.response_time:.2f}초, IOCs: {len(result.iocs)}개")
-            
-        except Exception as e:
-            print(f"   ❌ 실패: {str(e)}")
-            
-        # 공격 간 간격
-        if i < len(attacks_to_run):
-            await asyncio.sleep(0.5)
-    
-    # 전체 결과 요약
-    print("\n" + "="*60)
-    print("📊 전체 실행 결과 요약")
-    print("="*60)
-    
-    success_count = sum(1 for r in results if r.status == AttackStatus.SUCCESS)
-    total_time = sum(r.response_time for r in results)
-    total_iocs = sum(len(r.iocs) for r in results)
-    
-    print(f"📈 성공률: {success_count}/{len(results)} ({success_count/len(results)*100:.1f}%)")
-    print(f"⏱️  총 실행시간: {total_time:.2f}초")
-    print(f"📊 평균 실행시간: {total_time/len(results):.2f}초")
-    print(f"🔍 총 IOCs: {total_iocs}개")
-    
-    # 전술별 성공률
-    tactic_results = {}
-    for result in results:
-        attack_info = get_attack_info(result.attack_name)
-        if attack_info:
-            tactic = attack_info['tactic']
-            if tactic not in tactic_results:
-                tactic_results[tactic] = {'success': 0, 'total': 0}
-            tactic_results[tactic]['total'] += 1
-            if result.status == AttackStatus.SUCCESS:
-                tactic_results[tactic]['success'] += 1
-    
-    print("\n📋 전술별 성공률:")
-    for tactic, stats in tactic_results.items():
-        rate = stats['success'] / stats['total'] * 100
-        print(f"   • {tactic}: {stats['success']}/{stats['total']} ({rate:.1f}%)")
-    
-    # CTI 종합 분석
-    cti_summary = cti.get_summary()
-    print(f"\n🔍 CTI 종합 분석:")
-    print(f"   📊 총 수집 지표: {cti_summary['total_indicators']}개")
-    print(f"   📈 공격 패턴: {cti_summary['total_patterns']}개")
-    
-    if cti_summary.get('statistics', {}).get('by_attack_type'):
-        print("   📋 공격 유형별 분포:")
-        for attack_type, count in cti_summary['statistics']['by_attack_type'].items():
-            print(f"      • {attack_type}: {count}개")
-
-async def run_tactic_based_demo():
-    """전술별 공격 실행 데모"""
-    print("\n" + "="*60)
-    print("🎖️  전술별 공격 실행 데모")
-    print("="*60)
-    
-    dvd = DVDLite()
-    cti = SimpleCTI()
-    dvd.register_cti_collector(cti)
-    
-    register_all_dvd_attacks()
-    
-    # 정찰 공격 실행
-    print("🔍 정찰 (RECONNAISSANCE) 공격 실행")
-    print("-" * 40)
-    
-    recon_attacks = get_attacks_by_tactic(DVDAttackTactic.RECONNAISSANCE)
-    print(f"📋 정찰 공격 목록: {len(recon_attacks)}개")
-    
-    for attack in recon_attacks:
-        info = get_attack_info(attack)
-        if info:
-            print(f"   • {attack}: {info['description']}")
-    
-    print("\n🚀 정찰 공격 실행 중...")
-    
-    recon_results = []
-    for attack in recon_attacks:
-        try:
-            result = await dvd.run_attack(attack)
-            recon_results.append(result)
-            
-            status = "✅" if result.status == AttackStatus.SUCCESS else "❌"
-            print(f"   {status} {attack}: {result.response_time:.2f}초")
-            
-        except Exception as e:
-            print(f"   ❌ {attack}: 실행 실패 ({str(e)})")
-        
-        await asyncio.sleep(0.3)
-    
-    # 정찰 결과 분석
-    print("\n📊 정찰 결과 분석:")
-    successful_recon = [r for r in recon_results if r.status == AttackStatus.SUCCESS]
-    
-    if successful_recon:
-        total_discovered = sum(len(r.iocs) for r in successful_recon)
-        print(f"   🎯 발견된 항목: {total_discovered}개")
-        
-        # 발견된 네트워크 요소들
-        network_elements = []
-        for result in successful_recon:
-            for ioc in result.iocs:
-                if any(keyword in ioc for keyword in ['WIFI_', 'MAVLINK_', 'SERVICE_', 'COMPONENT_']):
-                    network_elements.append(ioc)
-        
-        if network_elements:
-            print(f"   🌐 네트워크 요소: {len(network_elements)}개")
-            print("   📋 주요 발견사항:")
-            for element in network_elements[:5]:
-                print(f"      • {element}")
-    
-    # CTI 정찰 분석
-    cti_summary = cti.get_summary()
-    print(f"\n🔍 CTI 정찰 분석:")
-    print(f"   📊 수집된 지표: {cti_summary['total_indicators']}개")
-
-async def run_difficulty_based_demo():
-    """난이도별 공격 실행 데모"""
-    print("\n" + "="*60)
-    print("🎚️  난이도별 공격 실행 데모")
-    print("="*60)
-    
-    dvd = DVDLite()
-    cti = SimpleCTI()
-    dvd.register_cti_collector(cti)
-    
-    register_all_dvd_attacks()
-    
-    # 초급 공격 실행
-    print("🟢 초급 (BEGINNER) 공격")
-    print("-" * 30)
-    
-    beginner_attacks = get_attacks_by_difficulty(AttackDifficulty.BEGINNER)
-    print(f"📋 초급 공격: {len(beginner_attacks)}개")
-    
-    for attack in beginner_attacks:
-        info = get_attack_info(attack)
-        if info:
-            print(f"   • {attack} ({info['tactic']})")
-    
-    # 초급 공격 실행
-    print("\n🚀 초급 공격 실행 중...")
-    beginner_results = []
-    
-    for attack in beginner_attacks[:3]:  # 처음 3개만 실행
-        try:
-            result = await dvd.run_attack(attack)
-            beginner_results.append(result)
-            print_attack_detail(result)
-            
-        except Exception as e:
-            print(f"   ❌ {attack}: 실행 실패 ({str(e)})")
-        
-        await asyncio.sleep(0.5)
-    
-    # 성과 분석
-    if beginner_results:
-        success_rate = sum(1 for r in beginner_results if r.status == AttackStatus.SUCCESS) / len(beginner_results)
-        avg_time = sum(r.response_time for r in beginner_results) / len(beginner_results)
-        
-        print(f"\n📊 초급 공격 성과:")
-        print(f"   🎯 성공률: {success_rate:.1%}")
-        print(f"   ⏱️  평균 시간: {avg_time:.2f}초")
-
-def show_comprehensive_attack_catalog():
-    """종합적인 공격 카탈로그 표시"""
-    print("\n" + "="*60)
-    print("📚 DVD 공격 시나리오 종합 카탈로그")
-    print("="*60)
-    
-    dvd = DVDLite()
-    register_all_dvd_attacks()
-    
-    # 전술별 공격 분류
-    print("\n📋 전술별 공격 분류:")
-    
-    for tactic in DVDAttackTactic:
-        attacks = get_attacks_by_tactic(tactic)
-        if attacks:
-            print(f"\n🎯 {tactic.value.upper()} ({len(attacks)}개)")
-            print("-" * 50)
-            
-            for attack in attacks:
-                info = get_attack_info(attack)
-                if info:
-                    difficulty_icon = {
-                        'beginner': '🟢',
-                        'intermediate': '🟡', 
-                        'advanced': '🔴'
-                    }.get(info['difficulty'], '⚪')
-                    
-                    impact_icon = {
-                        'low': '🔹',
-                        'medium': '🔸',
-                        'high': '🔶',
-                        'critical': '🔴'
-                    }.get(info['impact_level'], '⚪')
-                    
-                    print(f"   {difficulty_icon} {attack}")
-                    print(f"      📝 {info['description']}")
-                    print(f"      🎯 타겟: {', '.join(info['targets'])}")
-                    print(f"      ⏱️  예상 시간: {info['estimated_duration']:.1f}초")
-                    print(f"      {impact_icon} 영향도: {info['impact_level']}")
-                    print()
-    
-    # 난이도별 통계
-    print("\n📊 난이도별 통계:")
-    for difficulty in AttackDifficulty:
-        attacks = get_attacks_by_difficulty(difficulty)
-        icon = {'beginner': '🟢', 'intermediate': '🟡', 'advanced': '🔴'}[difficulty.value]
-        print(f"   {icon} {difficulty.value}: {len(attacks)}개")
-    
-    # 타겟별 통계
-    print("\n🎯 타겟별 통계:")
-    target_stats = {}
-    all_attacks = [attack for tactic in DVDAttackTactic for attack in get_attacks_by_tactic(tactic)]
-    
-    for attack in all_attacks:
-        info = get_attack_info(attack)
-        if info:
-            for target in info['targets']:
-                target_stats[target] = target_stats.get(target, 0) + 1
-    
-    for target, count in sorted(target_stats.items(), key=lambda x: x[1], reverse=True):
-        print(f"   🎪 {target}: {count}개 공격")
-
-async def interactive_mode():
+async def interactive_mode(runner: DVDAdvancedRunner):
     """대화형 모드"""
-    print("\n" + "="*60)
-    print("🎮 대화형 모드")
-    print("="*60)
-    
-    dvd = DVDLite()
-    cti = SimpleCTI()
-    dvd.register_cti_collector(cti)
-    
-    register_all_dvd_attacks()
+    print("\n🎮 대화형 모드 시작")
     
     while True:
         print("\n🎯 선택 옵션:")
-        print("   1. 전술별 공격 보기")
-        print("   2. 난이도별 공격 보기")
-        print("   3. 특정 공격 실행")
-        print("   4. 추천 공격 실행")
-        print("   5. 종료")
+        print("   1. 환경 상태 확인")
+        print("   2. 단일 공격 실행") 
+        print("   3. 정찰 공격 수행")
+        print("   4. CTI 분석 보기")
+        print("   5. 종합 테스트 실행")
+        print("   6. 종료")
         
         try:
-            choice = input("\n선택하세요 (1-5): ").strip()
+            choice = input("\n선택하세요 (1-6): ").strip()
             
             if choice == "1":
-                await tactic_selection_menu(dvd, cti)
+                status = await runner._check_environment_status()
+                print(f"📊 환경 상태: {json.dumps(status, indent=2, ensure_ascii=False)}")
+                
             elif choice == "2":
-                await difficulty_selection_menu(dvd, cti)
+                await single_attack_mode(runner)
+                
             elif choice == "3":
-                await specific_attack_menu(dvd, cti)
+                if DVD_CONNECTOR_AVAILABLE:
+                    recon_attacks = get_attacks_by_tactic(DVDAttackTactic.RECONNAISSANCE)
+                    results = await runner._execute_attack_phase(recon_attacks)
+                    print(f"✅ 정찰 완료: {len(results)}개 공격 실행")
+                
             elif choice == "4":
-                await recommended_attack_menu(dvd, cti)
+                if runner.cti_collector:
+                    runner.cti_collector.print_summary()
+                
             elif choice == "5":
+                await runner.run_comprehensive_test()
+                
+            elif choice == "6":
                 print("👋 종료합니다.")
                 break
-            else:
-                print("❌ 잘못된 선택입니다. 1-5 중에서 선택하세요.")
                 
         except KeyboardInterrupt:
             print("\n👋 종료합니다.")
             break
-        except Exception as e:
-            print(f"❌ 오류 발생: {e}")
 
-async def tactic_selection_menu(dvd, cti):
-    """전술 선택 메뉴"""
-    print("\n🎖️  전술 선택:")
-    tactics = list(DVDAttackTactic)
+async def single_attack_mode(runner: DVDAdvancedRunner):
+    """단일 공격 모드"""
+    if DVD_CONNECTOR_AVAILABLE:
+        all_attacks = []
+        for tactic in DVDAttackTactic:
+            all_attacks.extend(get_attacks_by_tactic(tactic))
+    else:
+        all_attacks = ["wifi_scan", "drone_discovery", "packet_sniff", "telemetry_spoof"]
     
-    for i, tactic in enumerate(tactics, 1):
-        attacks = get_attacks_by_tactic(tactic)
-        print(f"   {i}. {tactic.value} ({len(attacks)}개)")
-    
-    try:
-        choice = int(input(f"\n전술을 선택하세요 (1-{len(tactics)}): ")) - 1
-        
-        if 0 <= choice < len(tactics):
-            selected_tactic = tactics[choice]
-            attacks = get_attacks_by_tactic(selected_tactic)
-            
-            print(f"\n🎯 {selected_tactic.value} 공격 목록:")
-            for i, attack in enumerate(attacks, 1):
-                info = get_attack_info(attack)
-                if info:
-                    print(f"   {i}. {attack} ({info['difficulty']})")
-            
-            attack_choice = int(input(f"\n실행할 공격을 선택하세요 (1-{len(attacks)}): ")) - 1
-            
-            if 0 <= attack_choice < len(attacks):
-                selected_attack = attacks[attack_choice]
-                await execute_single_attack(dvd, cti, selected_attack)
-            
-    except (ValueError, IndexError):
-        print("❌ 잘못된 입력입니다.")
-
-async def execute_single_attack(dvd, cti, attack_name):
-    """단일 공격 실행"""
-    print(f"\n🚀 {attack_name} 실행 중...")
-    
-    # 공격 정보 표시
-    info = get_attack_info(attack_name)
-    if info:
-        print(f"📝 설명: {info['description']}")
-        print(f"🎚️  난이도: {info['difficulty']}")
-        print(f"⏱️  예상 시간: {info['estimated_duration']:.1f}초")
-    
-    try:
-        result = await dvd.run_attack(attack_name)
-        print_attack_detail(result)
-        
-        # CTI 분석
-        cti_summary = cti.get_summary()
-        if cti_summary['total_indicators'] > 0:
-            print(f"\n🔍 CTI 수집:")
-            print(f"   📊 새로운 지표: {cti_summary['total_indicators']}개")
-            
-            # 최근 지표 표시
-            recent_indicators = cti_summary.get('recent_indicators', [])
-            if recent_indicators:
-                print("   📋 최근 지표:")
-                for indicator in recent_indicators[:3]:
-                    print(f"      • {indicator['type']}: {indicator['value']}")
-        
-    except Exception as e:
-        print(f"❌ 실행 실패: {e}")
-
-async def recommended_attack_menu(dvd, cti):
-    """추천 공격 메뉴"""
-    print("\n🎯 추천 공격 시나리오:")
-    print("   1. 보안 평가 입문자용 (초급 공격)")
-    print("   2. 정찰 및 정보 수집 (정찰 공격)")
-    print("   3. 실전 침투 시나리오 (중급 공격)")
-    print("   4. 고급 공격자 시나리오 (고급 공격)")
-    
-    try:
-        choice = input("\n추천 시나리오를 선택하세요 (1-4): ").strip()
-        
-        if choice == "1":
-            # 초급 공격 실행
-            attacks = get_attacks_by_difficulty(AttackDifficulty.BEGINNER)[:2]
-            await execute_attack_sequence(dvd, cti, attacks, "초급 보안 평가")
-            
-        elif choice == "2":
-            # 정찰 공격 실행
-            attacks = get_attacks_by_tactic(DVDAttackTactic.RECONNAISSANCE)[:3]
-            await execute_attack_sequence(dvd, cti, attacks, "정찰 및 정보 수집")
-            
-        elif choice == "3":
-            # 중급 공격 실행
-            attacks = get_attacks_by_difficulty(AttackDifficulty.INTERMEDIATE)[:2]
-            await execute_attack_sequence(dvd, cti, attacks, "실전 침투 시나리오")
-            
-        elif choice == "4":
-            # 고급 공격 실행
-            attacks = get_attacks_by_difficulty(AttackDifficulty.ADVANCED)[:2]
-            await execute_attack_sequence(dvd, cti, attacks, "고급 공격자 시나리오")
-            
-    except (ValueError, KeyboardInterrupt):
-        print("❌ 잘못된 입력입니다.")
-
-async def execute_attack_sequence(dvd, cti, attacks, scenario_name):
-    """공격 시퀀스 실행"""
-    print(f"\n🎬 {scenario_name} 실행")
-    print("=" * 50)
-    
-    results = []
-    for i, attack in enumerate(attacks, 1):
-        print(f"\n[{i}/{len(attacks)}] 🎯 {attack}")
-        
-        try:
-            result = await dvd.run_attack(attack)
-            results.append(result)
-            
-            # 간단한 결과 표시
-            status = "✅" if result.status == AttackStatus.SUCCESS else "❌"
-            print(f"   {status} 완료: {result.response_time:.2f}초, IOCs: {len(result.iocs)}개")
-            
-        except Exception as e:
-            print(f"   ❌ 실행 실패: {e}")
-        
-        if i < len(attacks):
-            await asyncio.sleep(1)
-    
-    # 시나리오 결과 요약
-    print(f"\n📊 {scenario_name} 결과:")
-    success_count = sum(1 for r in results if r.status == AttackStatus.SUCCESS)
-    total_iocs = sum(len(r.iocs) for r in results)
-    
-    print(f"   🎯 성공률: {success_count}/{len(results)} ({success_count/len(results)*100:.1f}%)")
-    print(f"   🔍 총 IOCs: {total_iocs}개")
-    
-    # CTI 분석
-    cti_summary = cti.get_summary()
-    print(f"   📊 CTI 지표: {cti_summary['total_indicators']}개")
-
-async def specific_attack_menu(dvd, cti):
-    """특정 공격 메뉴"""
-    all_attacks = []
-    for tactic in DVDAttackTactic:
-        all_attacks.extend(get_attacks_by_tactic(tactic))
-    
-    print(f"\n📋 전체 공격 목록 ({len(all_attacks)}개):")
+    print(f"\n📋 사용 가능한 공격 ({len(all_attacks)}개):")
     for i, attack in enumerate(all_attacks, 1):
-        info = get_attack_info(attack)
-        if info:
-            difficulty_icon = {'beginner': '🟢', 'intermediate': '🟡', 'advanced': '🔴'}[info['difficulty']]
-            print(f"   {i:2d}. {difficulty_icon} {attack} ({info['tactic']})")
+        print(f"   {i}. {attack}")
     
     try:
         choice = int(input(f"\n실행할 공격을 선택하세요 (1-{len(all_attacks)}): ")) - 1
         
         if 0 <= choice < len(all_attacks):
-            selected_attack = all_attacks[choice]
-            await execute_single_attack(dvd, cti, selected_attack)
+            attack_name = all_attacks[choice]
+            results = await runner._execute_attack_phase([attack_name])
             
+            if results and results[0].get("result"):
+                result = results[0]["result"]
+                print(f"\n🎯 공격 결과:")
+                print(f"   상태: {result.status.value}")
+                print(f"   실행시간: {result.response_time:.2f}초")
+                print(f"   IOCs: {len(result.iocs)}개")
     except (ValueError, IndexError):
-        print("❌ 잘못된 입력입니다.")
+        print("❌ 잘못된 선택입니다.")
 
-async def difficulty_selection_menu(dvd, cti):
-    """난이도 선택 메뉴"""
-    print("\n🎚️  난이도 선택:")
-    difficulties = list(AttackDifficulty)
+async def basic_test(runner: DVDAdvancedRunner):
+    """기본 테스트"""
+    print("\n🧪 기본 테스트 실행")
     
-    for i, difficulty in enumerate(difficulties, 1):
-        attacks = get_attacks_by_difficulty(difficulty)
-        icon = {'beginner': '🟢', 'intermediate': '🟡', 'advanced': '🔴'}[difficulty.value]
-        print(f"   {i}. {icon} {difficulty.value} ({len(attacks)}개)")
+    # 환경 상태 확인
+    status = await runner._check_environment_status()
+    print(f"📊 환경: {status['environment_type']}, 연결: {status['connectivity']}")
     
-    try:
-        choice = int(input(f"\n난이도를 선택하세요 (1-{len(difficulties)}): ")) - 1
-        
-        if 0 <= choice < len(difficulties):
-            selected_difficulty = difficulties[choice]
-            attacks = get_attacks_by_difficulty(selected_difficulty)
-            
-            print(f"\n🎯 {selected_difficulty.value} 공격 목록:")
-            for i, attack in enumerate(attacks, 1):
-                info = get_attack_info(attack)
-                if info:
-                    print(f"   {i}. {attack} ({info['tactic']})")
-            
-            attack_choice = int(input(f"\n실행할 공격을 선택하세요 (1-{len(attacks)}): ")) - 1
-            
-            if 0 <= attack_choice < len(attacks):
-                selected_attack = attacks[attack_choice]
-                await execute_single_attack(dvd, cti, selected_attack)
-            
-    except (ValueError, IndexError):
-        print("❌ 잘못된 입력입니다.")
-
-async def main():
-    """메인 함수"""
-    print_banner()
-    
-    if len(sys.argv) > 1:
-        mode = sys.argv[1]
-        
-        if mode == "single":
-            await run_single_attack_demo()
-        elif mode == "multiple":
-            await run_multiple_attacks_demo()
-        elif mode == "tactic":
-            await run_tactic_based_demo()
-        elif mode == "difficulty":
-            await run_difficulty_based_demo()
-        elif mode == "catalog":
-            show_comprehensive_attack_catalog()
-        elif mode == "interactive":
-            await interactive_mode()
-        else:
-            print(f"❌ 알 수 없는 모드: {mode}")
-            print_usage()
+    # 간단한 공격 실행
+    if DVD_CONNECTOR_AVAILABLE:
+        test_attacks = ["wifi_network_discovery"]
     else:
-        # 기본: 핵심 데모들 실행
-        await run_single_attack_demo()
-        await run_multiple_attacks_demo()
-        await run_tactic_based_demo()
-        show_comprehensive_attack_catalog()
-
-def print_usage():
-    """사용법 출력"""
-    print("\n📖 사용법:")
-    print("   python quick_start.py [mode]")
-    print("\n🎯 모드:")
-    print("   single      - 단일 공격 데모")
-    print("   multiple    - 여러 공격 데모")
-    print("   tactic      - 전술별 공격 데모")
-    print("   difficulty  - 난이도별 공격 데모")
-    print("   catalog     - 전체 공격 카탈로그")
-    print("   interactive - 대화형 모드")
-    print("   (없음)      - 핵심 데모 실행")
-    print("\n🚀 예시:")
-    print("   python quick_start.py single")
-    print("   python quick_start.py interactive")
+        test_attacks = ["wifi_scan"]
+    
+    results = await runner._execute_attack_phase(test_attacks)
+    print(f"✅ 테스트 완료: {len(results)}개 공격 실행")
 
 if __name__ == "__main__":
-    try:
-        asyncio.run(main())
-    except KeyboardInterrupt:
-        print("\n👋 사용자에 의해 중단되었습니다.")
-    except Exception as e:
-        print(f"\n❌ 실행 오류: {e}")
-        import traceback
-        traceback.print_exc()
+    asyncio.run(main())

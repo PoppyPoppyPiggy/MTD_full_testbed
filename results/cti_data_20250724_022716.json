@@ -1,0 +1,20 @@
+{
+  "metadata": {
+    "export_time": "2025-07-24T02:27:16.165355",
+    "total_indicators": 0,
+    "total_patterns": 0,
+    "source": "dvd-lite"
+  },
+  "statistics": {
+    "total_indicators": 0,
+    "by_attack_type": {},
+    "by_confidence": {
+      "high": 0,
+      "medium": 0,
+      "low": 0
+    },
+    "last_update": null
+  },
+  "indicators": [],
+  "attack_patterns": {}
+}

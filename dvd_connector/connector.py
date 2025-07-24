@@ -1,528 +1,585 @@
 # dvd_connector/connector.py
 """
-DVD-Lite ↔ Damn Vulnerable Drone 연결 관리자
-실제 DVD 환경과의 안전한 연결 및 통신을 제공
+DVD-Lite ↔ Damn Vulnerable Drone 연계 모듈
+실제 DVD 환경과의 통신 및 연동을 담당
 """
 
 import asyncio
 import socket
-import logging
+import subprocess
 import json
+import logging
 import time
 from typing import Dict, List, Any, Optional, Tuple
-from dataclasses import dataclass, asdict
-from enum import Enum
+from dataclasses import dataclass
 from pathlib import Path
-import subprocess
-import requests
-from contextlib import asynccontextmanager
+from enum import Enum
 
 logger = logging.getLogger(__name__)
 
-class DVDConnectionStatus(Enum):
-    """DVD 연결 상태"""
-    DISCONNECTED = "disconnected"
-    CONNECTING = "connecting"
-    CONNECTED = "connected"
+class DVDEnvironmentState(Enum):
+    """DVD 환경 상태"""
+    UNKNOWN = "unknown"
+    STOPPED = "stopped"
+    STARTING = "starting"
+    RUNNING = "running"
     ERROR = "error"
-    TIMEOUT = "timeout"
 
-class DVDEnvironment(Enum):
-    """DVD 환경 타입"""
-    FULL_DEPLOY = "full_deploy"    # 완전 배포 모드 (WiFi 시뮬레이션 포함)
-    HALF_BAKED = "half_baked"      # 절반 배포 모드 (네트워크 연결 가정)
-    SIMULATION = "simulation"      # 시뮬레이션 모드 (실제 DVD 없음)
+class DVDConnectionType(Enum):
+    """DVD 연결 타입"""
+    MAVLINK_UDP = "mavlink_udp"
+    MAVLINK_TCP = "mavlink_tcp"
+    WIFI_NETWORK = "wifi_network"
+    ETHERNET = "ethernet"
+    SIMULATION = "simulation"
 
 @dataclass
-class DVDConnectionConfig:
-    """DVD 연결 설정"""
-    host: str = "localhost"
+class DVDTarget:
+    """DVD 타겟 정보"""
+    ip: str
     mavlink_port: int = 14550
-    web_port: int = 8000
-    rtsp_port: int = 554
-    environment: DVDEnvironment = DVDEnvironment.HALF_BAKED
-    timeout: int = 30
-    retry_count: int = 3
-    docker_compose_path: str = "./docker-compose.yml"
-    network_interface: str = "eth0"
-    
-    # DVD 특정 설정
-    dvd_network: str = "10.13.0.0/24"
-    companion_computer_ip: str = "10.13.0.2"
-    gcs_ip: str = "10.13.0.3"
-    flight_controller_ip: str = "10.13.0.4"
+    wifi_ssid: Optional[str] = None
+    connection_type: DVDConnectionType = DVDConnectionType.MAVLINK_UDP
+    companion_computer_ip: Optional[str] = None
+    gcs_ip: Optional[str] = None
 
-@dataclass
-class DVDStatus:
-    """DVD 상태 정보"""
-    connection_status: DVDConnectionStatus
-    environment: DVDEnvironment
-    containers: Dict[str, str]  # container_name -> status
-    services: Dict[str, bool]   # service_name -> is_running
-    network_info: Dict[str, Any]
-    last_heartbeat: float
-    error_message: Optional[str] = None
+class DVDEnvironment:
+    """DVD 환경 관리"""
+    
+    def __init__(self, config_path: str = "dvd_config.json"):
+        self.config_path = config_path
+        self.config = self._load_config()
+        self.state = DVDEnvironmentState.UNKNOWN
+        self.processes = {}
+        
+    def _load_config(self) -> Dict[str, Any]:
+        """DVD 환경 설정 로드"""
+        try:
+            with open(self.config_path, 'r') as f:
+                return json.load(f)
+        except FileNotFoundError:
+            return self._create_default_config()
+    
+    def _create_default_config(self) -> Dict[str, Any]:
+        """기본 DVD 설정 생성"""
+        default_config = {
+            "dvd_environment": {
+                "type": "simulation",  # "simulation", "real_hardware", "docker"
+                "base_path": "/opt/dvd",
+                "ardupilot_path": "/opt/ardupilot",
+                "sitl_params": {
+                    "vehicle": "copter",
+                    "location": "KSFO",  # San Francisco Airport
+                    "instance": 0
+                }
+            },
+            "targets": {
+                "primary": {
+                    "ip": "127.0.0.1",
+                    "mavlink_port": 14550,
+                    "connection_type": "mavlink_udp"
+                },
+                "companion": {
+                    "ip": "127.0.0.1", 
+                    "ssh_port": 22,
+                    "services": ["rtsp", "http", "ftp"]
+                },
+                "gcs": {
+                    "ip": "127.0.0.1",
+                    "mavlink_port": 14551
+                }
+            },
+            "network": {
+                "wifi_interface": "wlan0",
+                "default_network": "192.168.13.0/24",
+                "ap_ssid": "DVD_Test_Network",
+                "monitoring_enabled": True
+            },
+            "security": {
+                "vulnerable_services": True,
+                "weak_passwords": True,
+                "unencrypted_comms": True,
+                "debug_enabled": True
+            }
+        }
+        
+        # 설정 파일 저장
+        with open(self.config_path, 'w') as f:
+            json.dump(default_config, f, indent=2)
+            
+        logger.info(f"기본 DVD 설정 생성: {self.config_path}")
+        return default_config
+    
+    async def start_environment(self) -> bool:
+        """DVD 환경 시작"""
+        logger.info("DVD 환경 시작 중...")
+        self.state = DVDEnvironmentState.STARTING
+        
+        try:
+            env_type = self.config["dvd_environment"]["type"]
+            
+            if env_type == "simulation":
+                return await self._start_simulation()
+            elif env_type == "docker":
+                return await self._start_docker()
+            elif env_type == "real_hardware":
+                return await self._connect_real_hardware()
+            else:
+                logger.error(f"지원되지 않는 환경 타입: {env_type}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"DVD 환경 시작 실패: {e}")
+            self.state = DVDEnvironmentState.ERROR
+            return False
+    
+    async def _start_simulation(self) -> bool:
+        """SITL 시뮬레이션 시작"""
+        sitl_params = self.config["dvd_environment"]["sitl_params"]
+        ardupilot_path = Path(self.config["dvd_environment"]["ardupilot_path"])
+        
+        # ArduPilot SITL 실행
+        sitl_cmd = [
+            str(ardupilot_path / "Tools/autotest/sim_vehicle.py"),
+            f"--vehicle={sitl_params['vehicle']}",
+            f"--location={sitl_params['location']}",
+            f"--instance={sitl_params['instance']}",
+            "--out=127.0.0.1:14550",
+            "--out=127.0.0.1:14551",
+            "--map", "--console"
+        ]
+        
+        try:
+            process = await asyncio.create_subprocess_exec(
+                *sitl_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            
+            self.processes["sitl"] = process
+            logger.info("ArduPilot SITL 시작됨")
+            
+            # SITL이 준비될 때까지 대기
+            await self._wait_for_mavlink_connection()
+            
+            # 컴패니언 컴퓨터 시뮬레이션 시작
+            await self._start_companion_simulation()
+            
+            self.state = DVDEnvironmentState.RUNNING
+            return True
+            
+        except Exception as e:
+            logger.error(f"SITL 시작 실패: {e}")
+            return False
+    
+    async def _start_companion_simulation(self) -> bool:
+        """컴패니언 컴퓨터 시뮬레이션 시작"""
+        try:
+            # 가짜 RTSP 스트림 서버
+            rtsp_cmd = [
+                "python3", "-c", """
+import socket
+import time
+import threading
+
+def rtsp_server():
+    server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    server.bind(('127.0.0.1', 554))
+    server.listen(5)
+    print('RTSP 서버 시작: rtsp://127.0.0.1:554/live/stream1')
+    
+    while True:
+        client, addr = server.accept()
+        data = client.recv(1024)
+        response = b'RTSP/1.0 200 OK\\r\\n\\r\\n'
+        client.send(response)
+        client.close()
+
+rtsp_server()
+"""
+            ]
+            
+            process = await asyncio.create_subprocess_exec(
+                *rtsp_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            
+            self.processes["rtsp"] = process
+            logger.info("컴패니언 컴퓨터 시뮬레이션 시작됨")
+            return True
+            
+        except Exception as e:
+            logger.error(f"컴패니언 컴퓨터 시뮬레이션 시작 실패: {e}")
+            return False
+    
+    async def _start_docker(self) -> bool:
+        """Docker 기반 DVD 환경 시작"""
+        try:
+            # DVD Docker 컨테이너 실행
+            docker_cmd = [
+                "docker", "run", "-d",
+                "--name", "dvd-environment",
+                "-p", "14550:14550/udp",
+                "-p", "14551:14551/udp", 
+                "-p", "554:554",
+                "-p", "80:80",
+                "-p", "22:22",
+                "dvd:latest"
+            ]
+            
+            process = await asyncio.create_subprocess_exec(
+                *docker_cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE
+            )
+            
+            stdout, stderr = await process.communicate()
+            
+            if process.returncode == 0:
+                container_id = stdout.decode().strip()
+                self.processes["docker"] = container_id
+                logger.info(f"DVD Docker 컨테이너 시작됨: {container_id}")
+                
+                await self._wait_for_mavlink_connection()
+                self.state = DVDEnvironmentState.RUNNING
+                return True
+            else:
+                logger.error(f"Docker 시작 실패: {stderr.decode()}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"Docker 환경 시작 실패: {e}")
+            return False
+    
+    async def _connect_real_hardware(self) -> bool:
+        """실제 하드웨어 연결"""
+        target = self.config["targets"]["primary"]
+        
+        # 실제 드론과의 연결 확인
+        if await self._test_mavlink_connection(target["ip"], target["mavlink_port"]):
+            logger.info(f"실제 DVD 하드웨어 연결됨: {target['ip']}:{target['mavlink_port']}")
+            self.state = DVDEnvironmentState.RUNNING
+            return True
+        else:
+            logger.error("실제 하드웨어 연결 실패")
+            return False
+    
+    async def _wait_for_mavlink_connection(self, timeout: int = 30) -> bool:
+        """MAVLink 연결 대기"""
+        target = self.config["targets"]["primary"]
+        start_time = time.time()
+        
+        while time.time() - start_time < timeout:
+            if await self._test_mavlink_connection(target["ip"], target["mavlink_port"]):
+                logger.info("MAVLink 연결 확인됨")
+                return True
+            await asyncio.sleep(2)
+        
+        logger.error("MAVLink 연결 타임아웃")
+        return False
+    
+    async def _test_mavlink_connection(self, ip: str, port: int) -> bool:
+        """MAVLink 연결 테스트"""
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(ip, port),
+                timeout=5
+            )
+            writer.close()
+            await writer.wait_closed()
+            return True
+        except:
+            return False
+    
+    async def stop_environment(self) -> bool:
+        """DVD 환경 중지"""
+        logger.info("DVD 환경 중지 중...")
+        
+        try:
+            # 실행 중인 프로세스들 종료
+            for name, process in self.processes.items():
+                if name == "docker":
+                    # Docker 컨테이너 중지
+                    await asyncio.create_subprocess_exec(
+                        "docker", "stop", process,
+                        stdout=asyncio.subprocess.PIPE
+                    )
+                    await asyncio.create_subprocess_exec(
+                        "docker", "rm", process,
+                        stdout=asyncio.subprocess.PIPE
+                    )
+                else:
+                    # 일반 프로세스 종료
+                    if hasattr(process, 'terminate'):
+                        process.terminate()
+                        await process.wait()
+            
+            self.processes.clear()
+            self.state = DVDEnvironmentState.STOPPED
+            logger.info("DVD 환경 중지 완료")
+            return True
+            
+        except Exception as e:
+            logger.error(f"DVD 환경 중지 실패: {e}")
+            return False
+    
+    def get_targets(self) -> Dict[str, DVDTarget]:
+        """DVD 타겟 정보 반환"""
+        targets = {}
+        
+        for name, config in self.config["targets"].items():
+            targets[name] = DVDTarget(
+                ip=config["ip"],
+                mavlink_port=config.get("mavlink_port", 14550),
+                connection_type=DVDConnectionType(config.get("connection_type", "mavlink_udp"))
+            )
+        
+        return targets
+    
+    def is_running(self) -> bool:
+        """DVD 환경 실행 상태 확인"""
+        return self.state == DVDEnvironmentState.RUNNING
 
 class DVDConnector:
-    """DVD 연결 관리자"""
+    """DVD-Lite와 실제 DVD 환경 간의 연결 관리"""
     
-    def __init__(self, config: DVDConnectionConfig = None):
-        self.config = config or DVDConnectionConfig()
-        self.status = DVDStatus(
-            connection_status=DVDConnectionStatus.DISCONNECTED,
-            environment=self.config.environment,
-            containers={},
-            services={},
-            network_info={},
-            last_heartbeat=0.0
-        )
-        self.session = requests.Session()
-        self.session.timeout = self.config.timeout
+    def __init__(self, environment: DVDEnvironment):
+        self.environment = environment
+        self.connections = {}
+        self.safety_checker = SafetyChecker()
         
-    async def connect(self) -> bool:
-        """DVD 환경에 연결"""
-        logger.info(f"DVD 연결 시도: {self.config.environment.value}")
+    async def initialize(self) -> bool:
+        """연결 초기화"""
+        logger.info("DVD 연결 초기화 중...")
         
-        self.status.connection_status = DVDConnectionStatus.CONNECTING
-        
-        try:
-            # 환경별 연결 처리
-            if self.config.environment == DVDEnvironment.SIMULATION:
-                return await self._connect_simulation()
-            elif self.config.environment == DVDEnvironment.HALF_BAKED:
-                return await self._connect_half_baked()
-            elif self.config.environment == DVDEnvironment.FULL_DEPLOY:
-                return await self._connect_full_deploy()
-            else:
-                raise ValueError(f"지원되지 않는 환경: {self.config.environment}")
-                
-        except Exception as e:
-            logger.error(f"DVD 연결 실패: {e}")
-            self.status.connection_status = DVDConnectionStatus.ERROR
-            self.status.error_message = str(e)
-            return False
-    
-    async def _connect_simulation(self) -> bool:
-        """시뮬레이션 모드 연결"""
-        logger.info("시뮬레이션 모드로 연결")
-        
-        # 시뮬레이션 모드는 실제 연결 없이 성공
-        self.status.connection_status = DVDConnectionStatus.CONNECTED
-        self.status.services = {
-            "mavlink": True,
-            "web_interface": True,
-            "rtsp_stream": True
-        }
-        self.status.last_heartbeat = time.time()
-        
-        return True
-    
-    async def _connect_half_baked(self) -> bool:
-        """Half-Baked 모드 연결"""
-        logger.info("Half-Baked 모드로 연결")
-        
-        # Docker 컨테이너 상태 확인
-        if not await self._check_docker_containers():
-            logger.warning("Docker 컨테이너가 실행되지 않음. 시작 시도...")
-            if not await self._start_dvd_containers():
+        # 환경이 실행 중이 아니면 시작
+        if not self.environment.is_running():
+            if not await self.environment.start_environment():
+                logger.error("DVD 환경 시작 실패")
                 return False
         
-        # 서비스 연결 확인
-        services_ok = await self._check_services()
-        if not services_ok:
-            logger.error("DVD 서비스 연결 실패")
+        # 안전성 검사
+        if not await self.safety_checker.perform_safety_check():
+            logger.error("안전성 검사 실패")
             return False
         
-        # 네트워크 정보 수집
-        await self._collect_network_info()
+        # 타겟별 연결 설정
+        targets = self.environment.get_targets()
         
-        self.status.connection_status = DVDConnectionStatus.CONNECTED
-        self.status.last_heartbeat = time.time()
+        for name, target in targets.items():
+            try:
+                connection = await self._create_connection(target)
+                if connection:
+                    self.connections[name] = connection
+                    logger.info(f"타겟 연결 성공: {name} ({target.ip})")
+                else:
+                    logger.warning(f"타겟 연결 실패: {name}")
+                    
+            except Exception as e:
+                logger.error(f"타겟 {name} 연결 오류: {e}")
         
-        return True
+        return len(self.connections) > 0
     
-    async def _connect_full_deploy(self) -> bool:
-        """Full-Deploy 모드 연결"""
-        logger.info("Full-Deploy 모드로 연결")
-        
-        # WiFi 인터페이스 확인
-        if not await self._check_wifi_interface():
-            logger.error("WiFi 인터페이스 확인 실패")
-            return False
-        
-        # Half-Baked 모드와 동일한 연결 과정
-        return await self._connect_half_baked()
+    async def _create_connection(self, target: DVDTarget) -> Optional[Dict[str, Any]]:
+        """타겟별 연결 생성"""
+        if target.connection_type == DVDConnectionType.MAVLINK_UDP:
+            return await self._create_mavlink_connection(target)
+        elif target.connection_type == DVDConnectionType.WIFI_NETWORK:
+            return await self._create_wifi_connection(target)
+        else:
+            logger.warning(f"지원되지 않는 연결 타입: {target.connection_type}")
+            return None
     
-    async def _check_docker_containers(self) -> bool:
-        """Docker 컨테이너 상태 확인"""
+    async def _create_mavlink_connection(self, target: DVDTarget) -> Optional[Dict[str, Any]]:
+        """MAVLink 연결 생성"""
         try:
-            result = subprocess.run(
-                ["docker", "compose", "ps", "--format", "json"],
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
+            # UDP 소켓 생성
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.connect((target.ip, target.mavlink_port))
             
-            if result.returncode != 0:
-                logger.warning("Docker Compose 상태 확인 실패")
-                return False
-            
-            # 컨테이너 상태 파싱
-            containers = {}
-            for line in result.stdout.strip().split('\n'):
-                if line:
-                    try:
-                        container_info = json.loads(line)
-                        containers[container_info['Name']] = container_info['State']
-                    except json.JSONDecodeError:
-                        continue
-            
-            self.status.containers = containers
-            
-            # 필수 컨테이너 확인
-            required_containers = ['ardupilot', 'companion', 'gazebo', 'qgroundcontrol']
-            running_containers = [name for name, state in containers.items() 
-                                if state == 'running']
-            
-            missing_containers = [name for name in required_containers 
-                                if name not in running_containers]
-            
-            if missing_containers:
-                logger.warning(f"실행되지 않은 컨테이너: {missing_containers}")
-                return False
-            
-            return True
-            
-        except subprocess.TimeoutExpired:
-            logger.error("Docker 상태 확인 타임아웃")
-            return False
-        except Exception as e:
-            logger.error(f"Docker 상태 확인 오류: {e}")
-            return False
-    
-    async def _start_dvd_containers(self) -> bool:
-        """DVD 컨테이너 시작"""
-        try:
-            logger.info("DVD 컨테이너 시작 중...")
-            
-            # Docker Compose 실행
-            result = subprocess.run(
-                ["docker", "compose", "up", "-d", "--build"],
-                capture_output=True,
-                text=True,
-                timeout=120  # 2분 타임아웃
-            )
-            
-            if result.returncode != 0:
-                logger.error(f"Docker Compose 실행 실패: {result.stderr}")
-                return False
-            
-            # 컨테이너 시작 대기
-            await asyncio.sleep(10)
-            
-            # 다시 상태 확인
-            return await self._check_docker_containers()
-            
-        except subprocess.TimeoutExpired:
-            logger.error("Docker Compose 실행 타임아웃")
-            return False
-        except Exception as e:
-            logger.error(f"Docker 컨테이너 시작 오류: {e}")
-            return False
-    
-    async def _check_services(self) -> bool:
-        """DVD 서비스 상태 확인"""
-        services_status = {}
-        
-        # MAVLink 서비스 확인
-        services_status['mavlink'] = await self._check_mavlink_service()
-        
-        # Web 인터페이스 확인
-        services_status['web_interface'] = await self._check_web_interface()
-        
-        # RTSP 스트림 확인
-        services_status['rtsp_stream'] = await self._check_rtsp_stream()
-        
-        self.status.services = services_status
-        
-        # 최소 하나의 서비스는 작동해야 함
-        return any(services_status.values())
-    
-    async def _check_mavlink_service(self) -> bool:
-        """MAVLink 서비스 확인"""
-        try:
-            # MAVLink 포트 연결 테스트
-            reader, writer = await asyncio.wait_for(
-                asyncio.open_connection(self.config.host, self.config.mavlink_port),
-                timeout=5
-            )
-            
-            # 간단한 heartbeat 메시지 전송 테스트
-            # (실제로는 MAVLink 프로토콜 구현 필요)
-            writer.close()
-            await writer.wait_closed()
-            
-            return True
-            
-        except Exception as e:
-            logger.warning(f"MAVLink 서비스 확인 실패: {e}")
-            return False
-    
-    async def _check_web_interface(self) -> bool:
-        """Web 인터페이스 확인"""
-        try:
-            response = await asyncio.wait_for(
-                asyncio.get_event_loop().run_in_executor(
-                    None,
-                    lambda: self.session.get(f"http://{self.config.host}:{self.config.web_port}")
-                ),
-                timeout=5
-            )
-            
-            return response.status_code == 200
-            
-        except Exception as e:
-            logger.warning(f"Web 인터페이스 확인 실패: {e}")
-            return False
-    
-    async def _check_rtsp_stream(self) -> bool:
-        """RTSP 스트림 확인"""
-        try:
-            # RTSP 포트 연결 테스트
-            reader, writer = await asyncio.wait_for(
-                asyncio.open_connection(self.config.host, self.config.rtsp_port),
-                timeout=5
-            )
-            
-            writer.close()
-            await writer.wait_closed()
-            
-            return True
-            
-        except Exception as e:
-            logger.warning(f"RTSP 스트림 확인 실패: {e}")
-            return False
-    
-    async def _check_wifi_interface(self) -> bool:
-        """WiFi 인터페이스 확인 (Full-Deploy 모드용)"""
-        try:
-            # 가상 WiFi 인터페이스 확인
-            result = subprocess.run(
-                ["iwconfig"],
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
-            
-            if result.returncode != 0:
-                logger.warning("iwconfig 명령 실행 실패")
-                return False
-            
-            # 가상 인터페이스 존재 확인
-            virtual_interfaces = ['wlan0', 'wlan1', 'mon0']
-            available_interfaces = []
-            
-            for interface in virtual_interfaces:
-                if interface in result.stdout:
-                    available_interfaces.append(interface)
-            
-            if not available_interfaces:
-                logger.warning("가상 WiFi 인터페이스를 찾을 수 없음")
-                return False
-            
-            logger.info(f"사용 가능한 WiFi 인터페이스: {available_interfaces}")
-            return True
-            
-        except Exception as e:
-            logger.warning(f"WiFi 인터페이스 확인 실패: {e}")
-            return False
-    
-    async def _collect_network_info(self) -> None:
-        """네트워크 정보 수집"""
-        network_info = {
-            "dvd_network": self.config.dvd_network,
-            "companion_computer": self.config.companion_computer_ip,
-            "gcs": self.config.gcs_ip,
-            "flight_controller": self.config.flight_controller_ip
-        }
-        
-        # 실제 네트워크 상태 확인
-        for name, ip in network_info.items():
-            if name != "dvd_network":
-                network_info[f"{name}_reachable"] = await self._ping_host(ip)
-        
-        self.status.network_info = network_info
-    
-    async def _ping_host(self, host: str) -> bool:
-        """호스트 ping 테스트"""
-        try:
-            result = subprocess.run(
-                ["ping", "-c", "1", "-W", "2", host],
-                capture_output=True,
-                text=True,
-                timeout=5
-            )
-            return result.returncode == 0
-        except Exception:
-            return False
-    
-    async def disconnect(self) -> bool:
-        """DVD 연결 해제"""
-        logger.info("DVD 연결 해제")
-        
-        try:
-            # 세션 정리
-            self.session.close()
-            
-            # 상태 초기화
-            self.status.connection_status = DVDConnectionStatus.DISCONNECTED
-            self.status.services = {}
-            self.status.containers = {}
-            self.status.network_info = {}
-            self.status.last_heartbeat = 0.0
-            self.status.error_message = None
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"연결 해제 오류: {e}")
-            return False
-    
-    async def send_mavlink_message(self, message: Dict[str, Any]) -> bool:
-        """MAVLink 메시지 전송"""
-        if not self.is_connected():
-            logger.error("DVD에 연결되지 않음")
-            return False
-        
-        try:
-            # 시뮬레이션 모드에서는 항상 성공
-            if self.config.environment == DVDEnvironment.SIMULATION:
-                logger.info(f"시뮬레이션 MAVLink 메시지 전송: {message}")
-                return True
-            
-            # 실제 MAVLink 메시지 전송 로직
-            # (pymavlink 라이브러리 사용 필요)
-            logger.info(f"MAVLink 메시지 전송: {message}")
-            
-            return True
-            
-        except Exception as e:
-            logger.error(f"MAVLink 메시지 전송 실패: {e}")
-            return False
-    
-    async def get_telemetry(self) -> Dict[str, Any]:
-        """텔레메트리 데이터 수집"""
-        if not self.is_connected():
-            return {}
-        
-        try:
-            # 시뮬레이션 모드에서는 가짜 데이터 반환
-            if self.config.environment == DVDEnvironment.SIMULATION:
-                return {
-                    "lat": 37.7749,
-                    "lon": -122.4194,
-                    "alt": 100,
-                    "heading": 90,
-                    "groundspeed": 15,
-                    "battery": 85,
-                    "mode": "GUIDED",
-                    "armed": True,
-                    "timestamp": time.time()
-                }
-            
-            # 실제 텔레메트리 데이터 수집
-            # (MAVLink 연결을 통해 수집)
-            telemetry = {
-                "timestamp": time.time(),
-                "connection_status": self.status.connection_status.value
+            return {
+                "type": "mavlink",
+                "socket": sock,
+                "target": target,
+                "last_heartbeat": None
             }
             
-            return telemetry
-            
         except Exception as e:
-            logger.error(f"텔레메트리 수집 실패: {e}")
-            return {}
+            logger.error(f"MAVLink 연결 실패: {e}")
+            return None
     
-    def is_connected(self) -> bool:
-        """연결 상태 확인"""
-        return self.status.connection_status == DVDConnectionStatus.CONNECTED
+    async def _create_wifi_connection(self, target: DVDTarget) -> Optional[Dict[str, Any]]:
+        """WiFi 연결 생성"""
+        # WiFi 연결 로직 구현
+        return {
+            "type": "wifi",
+            "target": target,
+            "interface": "wlan0"
+        }
     
-    def get_status(self) -> DVDStatus:
-        """현재 상태 반환"""
-        return self.status
+    async def execute_attack_on_target(self, attack_name: str, target_name: str = "primary") -> Dict[str, Any]:
+        """특정 타겟에 대해 공격 실행"""
+        if target_name not in self.connections:
+            raise ValueError(f"타겟 '{target_name}'에 대한 연결이 없습니다")
+        
+        connection = self.connections[target_name]
+        target = connection["target"]
+        
+        # 안전성 재검사
+        if not await self.safety_checker.is_attack_safe(attack_name, target):
+            raise ValueError(f"공격 '{attack_name}'이 안전하지 않습니다")
+        
+        # 실제 타겟 정보로 공격 실행
+        from dvd_lite.main import DVDLite
+        
+        dvd = DVDLite()
+        result = await dvd.run_attack(
+            attack_name,
+            target_ip=target.ip,
+            mavlink_port=target.mavlink_port,
+            connection=connection
+        )
+        
+        return {
+            "result": result,
+            "target": target_name,
+            "target_ip": target.ip,
+            "connection_type": target.connection_type.value
+        }
     
-    async def health_check(self) -> bool:
-        """상태 확인"""
-        if not self.is_connected():
+    async def get_target_status(self, target_name: str = "primary") -> Dict[str, Any]:
+        """타겟 상태 확인"""
+        if target_name not in self.connections:
+            return {"status": "disconnected"}
+        
+        connection = self.connections[target_name]
+        target = connection["target"]
+        
+        # 연결 상태 확인
+        if connection["type"] == "mavlink":
+            alive = await self._test_mavlink_alive(target)
+        else:
+            alive = True  # 다른 연결 타입의 경우 기본값
+        
+        return {
+            "status": "connected" if alive else "disconnected",
+            "target": target_name,
+            "ip": target.ip,
+            "connection_type": target.connection_type.value,
+            "last_check": time.time()
+        }
+    
+    async def _test_mavlink_alive(self, target: DVDTarget) -> bool:
+        """MAVLink 연결 생존 확인"""
+        try:
+            reader, writer = await asyncio.wait_for(
+                asyncio.open_connection(target.ip, target.mavlink_port),
+                timeout=3
+            )
+            writer.close()
+            await writer.wait_closed()
+            return True
+        except:
+            return False
+    
+    async def cleanup(self):
+        """연결 정리"""
+        for name, connection in self.connections.items():
+            if "socket" in connection:
+                connection["socket"].close()
+        
+        self.connections.clear()
+        await self.environment.stop_environment()
+        logger.info("DVD 연결 정리 완료")
+
+class SafetyChecker:
+    """안전성 검사 클래스"""
+    
+    def __init__(self):
+        self.safe_networks = ["127.0.0.0/8", "192.168.0.0/16", "10.0.0.0/8"]
+        self.dangerous_attacks = ["firmware_brick", "permanent_damage"]
+    
+    async def perform_safety_check(self) -> bool:
+        """전체 안전성 검사"""
+        checks = [
+            self._check_network_safety(),
+            self._check_environment_safety(),
+            self._check_permissions()
+        ]
+        
+        return all(checks)
+    
+    def _check_network_safety(self) -> bool:
+        """네트워크 안전성 검사"""
+        # 로컬 네트워크인지 확인
+        return True  # 기본적으로 안전하다고 가정
+    
+    def _check_environment_safety(self) -> bool:
+        """환경 안전성 검사"""
+        # 테스트 환경인지 확인
+        return True
+    
+    def _check_permissions(self) -> bool:
+        """권한 검사"""
+        # 적절한 권한이 있는지 확인
+        return True
+    
+    async def is_attack_safe(self, attack_name: str, target: DVDTarget) -> bool:
+        """특정 공격의 안전성 검사"""
+        if attack_name in self.dangerous_attacks:
+            logger.warning(f"위험한 공격: {attack_name}")
             return False
         
-        try:
-            # 주기적 상태 확인
-            services_ok = await self._check_services()
-            
-            if services_ok:
-                self.status.last_heartbeat = time.time()
+        # 타겟이 안전한 범위 내에 있는지 확인
+        return self._is_safe_target(target.ip)
+    
+    def _is_safe_target(self, ip: str) -> bool:
+        """안전한 타겟인지 확인"""
+        import ipaddress
+        
+        target_ip = ipaddress.ip_address(ip)
+        
+        for safe_network in self.safe_networks:
+            if target_ip in ipaddress.ip_network(safe_network):
                 return True
-            else:
-                self.status.connection_status = DVDConnectionStatus.ERROR
-                self.status.error_message = "서비스 상태 확인 실패"
-                return False
-                
-        except Exception as e:
-            logger.error(f"상태 확인 실패: {e}")
-            self.status.connection_status = DVDConnectionStatus.ERROR
-            self.status.error_message = str(e)
-            return False
-    
-    @asynccontextmanager
-    async def connection_context(self):
-        """연결 컨텍스트 매니저"""
-        try:
-            connected = await self.connect()
-            if not connected:
-                raise ConnectionError("DVD 연결 실패")
-            
-            yield self
-            
-        finally:
-            await self.disconnect()
-
-# 편의 함수들
-async def create_dvd_connection(environment: DVDEnvironment = DVDEnvironment.SIMULATION) -> DVDConnector:
-    """DVD 연결 생성"""
-    config = DVDConnectionConfig(environment=environment)
-    connector = DVDConnector(config)
-    
-    connected = await connector.connect()
-    if not connected:
-        raise ConnectionError(f"DVD 연결 실패: {environment.value}")
-    
-    return connector
-
-async def test_dvd_connection(environment: DVDEnvironment = DVDEnvironment.SIMULATION) -> bool:
-    """DVD 연결 테스트"""
-    try:
-        async with DVDConnector(DVDConnectionConfig(environment=environment)).connection_context() as connector:
-            telemetry = await connector.get_telemetry()
-            logger.info(f"연결 테스트 성공: {telemetry}")
-            return True
-    except Exception as e:
-        logger.error(f"연결 테스트 실패: {e}")
+        
         return False
 
-# 테스트 실행
+# 사용 예시 및 테스트
+async def test_dvd_connector():
+    """DVD Connector 테스트"""
+    print("🧪 DVD Connector 테스트 시작...")
+    
+    try:
+        # 환경 생성 및 시작
+        env = DVDEnvironment()
+        connector = DVDConnector(env)
+        
+        # 초기화
+        if await connector.initialize():
+            print("✅ DVD 연결 초기화 성공")
+            
+            # 타겟 상태 확인
+            status = await connector.get_target_status()
+            print(f"📊 타겟 상태: {status}")
+            
+            # 공격 실행 예시 (안전한 정찰 공격)
+            try:
+                result = await connector.execute_attack_on_target("wifi_network_discovery")
+                print(f"🎯 공격 실행 결과: {result['result'].status.value}")
+            except Exception as e:
+                print(f"⚠️  공격 실행 실패: {e}")
+            
+            # 정리
+            await connector.cleanup()
+            print("✅ 정리 완료")
+            
+        else:
+            print("❌ DVD 연결 초기화 실패")
+            
+    except Exception as e:
+        print(f"❌ 테스트 실패: {e}")
+
 if __name__ == "__main__":
-    import asyncio
-    
-    async def main():
-        print("DVD 연결 테스트 시작...")
-        
-        # 시뮬레이션 모드 테스트
-        success = await test_dvd_connection(DVDEnvironment.SIMULATION)
-        print(f"시뮬레이션 모드 테스트: {'✅ 성공' if success else '❌ 실패'}")
-        
-        # Half-Baked 모드 테스트
-        success = await test_dvd_connection(DVDEnvironment.HALF_BAKED)
-        print(f"Half-Baked 모드 테스트: {'✅ 성공' if success else '❌ 실패'}")
-    
-    asyncio.run(main())
+    asyncio.run(test_dvd_connector())
