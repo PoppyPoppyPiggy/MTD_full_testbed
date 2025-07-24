@@ -1,0 +1,63 @@
+{
+  "environment_status": {
+    "environment_type": "unknown",
+    "connectivity": false,
+    "targets": {},
+    "services": {}
+  },
+  "attack_results": [
+    {
+      "attack_name": "wifi_scan",
+      "error": "name 'AttackStatus' is not defined"
+    },
+    {
+      "attack_name": "drone_discovery",
+      "error": "name 'AttackStatus' is not defined"
+    },
+    {
+      "attack_name": "telemetry_spoof",
+      "error": "name 'AttackStatus' is not defined"
+    },
+    {
+      "attack_name": "command_inject",
+      "error": "name 'AttackStatus' is not defined"
+    },
+    {
+      "attack_name": "log_extract",
+      "error": "name 'AttackStatus' is not defined"
+    },
+    {
+      "attack_name": "param_extract",
+      "error": "name 'AttackStatus' is not defined"
+    }
+  ],
+  "cti_analysis": {
+    "summary": {
+      "total_indicators": 0,
+      "total_patterns": 0,
+      "statistics": {
+        "total_indicators": 0,
+        "by_attack_type": {},
+        "by_confidence": {
+          "high": 0,
+          "medium": 0,
+          "low": 0
+        },
+        "last_update": null
+      },
+      "recent_indicators": []
+    },
+    "threat_landscape": {
+      "status": "insufficient_data"
+    },
+    "attack_patterns": [],
+    "recommendations": []
+  },
+  "security_assessment": {
+    "overall_security_score": 100,
+    "successful_attacks": 0,
+    "total_attacks": 6,
+    "critical_vulnerabilities": [],
+    "security_recommendations": []
+  }
+}
