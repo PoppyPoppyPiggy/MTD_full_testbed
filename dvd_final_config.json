@@ -1,0 +1,78 @@
+{
+  "timestamp": 1753341746.689832,
+  "working_services": {
+    "10.13.0.5": [
+      8000,
+      8080
+    ]
+  },
+  "detailed_results": {
+    "flight-controller": {
+      "ip": "10.13.0.2",
+      "ping": true,
+      "ports": {
+        "5000": false,
+        "8000": false,
+        "8080": false,
+        "14550": false,
+        "14551": false,
+        "9000": false
+      },
+      "logs": "Flight Controller Build Complete.",
+      "status": "starting"
+    },
+    "simulator": {
+      "ip": "10.13.0.5",
+      "ping": true,
+      "ports": {
+        "5000": false,
+        "8000": true,
+        "8080": true,
+        "14550": false,
+        "14551": false,
+        "9000": false
+      },
+      "logs": "",
+      "status": "ready"
+    },
+    "companion-computer": {
+      "ip": "10.13.0.3",
+      "ping": true,
+      "ports": {
+        "5000": false,
+        "8000": false,
+        "8080": false,
+        "14550": false,
+        "14551": false,
+        "9000": false
+      },
+      "logs": "Listening to MAVLink messages\n * Serving Flask app 'app'\n * Debug mode: on",
+      "status": "starting"
+    },
+    "ground-control-station": {
+      "ip": "10.13.0.4",
+      "ping": true,
+      "ports": {
+        "5000": false,
+        "8000": false,
+        "8080": false,
+        "14550": false,
+        "14551": false,
+        "9000": false
+      },
+      "logs": "Telemetry log: mav.tlog\nWaiting for heartbeat from 0.0.0.0:14550\nMAV> link 1 down",
+      "status": "starting"
+    }
+  },
+  "container_mapping": {
+    "flight-controller": "10.13.0.2",
+    "simulator": "10.13.0.5",
+    "companion-computer": "10.13.0.3",
+    "ground-control-station": "10.13.0.4"
+  },
+  "recommended_connections": {
+    "primary_ip": "10.13.0.5",
+    "web_interface": "http://10.13.0.5:8000",
+    "mavlink_connection": null
+  }
+}
