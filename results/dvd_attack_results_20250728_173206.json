@@ -1,0 +1,161 @@
+{
+  "execution_info": {
+    "timestamp": "20250728_173206",
+    "total_scripts": 7,
+    "successful_attacks": 1,
+    "total_execution_time": 0.07271027565002441,
+    "base_path": "/home/kali/MTD/MTD_full_testbed",
+    "dvd_attacks_path": "/home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks"
+  },
+  "script_results": [
+    {
+      "tactic": "denial_of_service",
+      "script_path": "/home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/denial_of_service/run_denial_of_service.sh",
+      "success": false,
+      "exit_code": 1,
+      "execution_time": 0.012453079223632812,
+      "stdout": "\u001b[H\u001b[2J\u001b[3J\u001b[1m\u001b[0;31m\n╔═══════════════════════════════════════════════════════════════════════════╗\n║                    ⚡ DVD Denial of Service Attack Suite ⚡                 ║\n╚═══════════════════════════════════════════════════════════════════════════╝\n\u001b[0m\n\u001b[0;34mAvailable Modules: Communication Jamming, Service Disruption\u001b[0m\n\u001b[0;34mExecution Mode: Interactive Selection\u001b[0m\n\u001b[0;34mOutput: Operational Impact Assessment\u001b[0m\n\n\u001b[0;31m[!] This suite requires root privileges\u001b[0m\n\u001b[1;33m[*] Please run: sudo /home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/denial_of_service/run_denial_of_service.sh\u001b[0m\n",
+      "stderr": "",
+      "iocs": [],
+      "timestamp": "2025-07-28T17:31:54.320466",
+      "pid": 1872685
+    },
+    {
+      "tactic": "protocol_tampering",
+      "script_path": "/home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/protocol_tampering/run_protocol_tampering.sh",
+      "success": false,
+      "exit_code": 1,
+      "execution_time": 0.014461517333984375,
+      "stdout": "\u001b[H\u001b[2J\u001b[3J\u001b[1m\u001b[0;31m\n╔═══════════════════════════════════════════════════════════════════════════╗\n║                🔄 DVD Protocol Tampering Attack Suite 🔄                  ║\n╚═══════════════════════════════════════════════════════════════════════════╝\n\u001b[0m\n\u001b[0;34mAvailable Modules: MAVLink, GPS, RF, WiFi, Telemetry, Parameter\u001b[0m\n\u001b[0;34mExecution Mode: Interactive Selection\u001b[0m\n\u001b[0;34mOutput: Protocol Security Assessment\u001b[0m\n\n\u001b[0;31m[!] This suite requires root privileges\u001b[0m\n\u001b[1;33m[*] Please run: sudo /home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/protocol_tampering/run_protocol_tampering.sh\u001b[0m\n",
+      "stderr": "",
+      "iocs": [],
+      "timestamp": "2025-07-28T17:31:56.336250",
+      "pid": 1872780
+    },
+    {
+      "tactic": "common",
+      "script_path": "/home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/common/color.sh",
+      "success": true,
+      "exit_code": 0,
+      "execution_time": 0.002292633056640625,
+      "stdout": "",
+      "stderr": "",
+      "iocs": [],
+      "timestamp": "2025-07-28T17:31:58.353131",
+      "pid": 1872854
+    },
+    {
+      "tactic": "reconnaissance",
+      "script_path": "/home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/reconnaissance/run_reconnaissance.sh",
+      "success": false,
+      "exit_code": 1,
+      "execution_time": 0.010218143463134766,
+      "stdout": "\u001b[H\u001b[2J\u001b[3J\u001b[1m\u001b[0;36m\n╔═══════════════════════════════════════════════════════════════════════════╗\n║                   🔍 DVD Reconnaissance Attack Suite 🔍                ║\n╚═══════════════════════════════════════════════════════════════════════════╝\n\u001b[0m\n\u001b[0;34mAvailable Modules: WiFi, MAVLink, Components, Camera, Network\u001b[0m\n\u001b[0;34mExecution Mode: Interactive Selection\u001b[0m\n\u001b[0;34mOutput: Intelligence Gathering & IOC Collection\u001b[0m\n\n\u001b[0;31m[!] This suite requires root privileges\u001b[0m\n\u001b[1;33m[*] Please run: sudo /home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/reconnaissance/run_reconnaissance.sh\u001b[0m\n",
+      "stderr": "",
+      "iocs": [],
+      "timestamp": "2025-07-28T17:32:00.359641",
+      "pid": 1872871
+    },
+    {
+      "tactic": "exfiltration",
+      "script_path": "/home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/exfiltration/run_exfiltration.sh",
+      "success": false,
+      "exit_code": 1,
+      "execution_time": 0.010292530059814453,
+      "stdout": "\u001b[H\u001b[2J\u001b[3J\u001b[1m\u001b[0;31m\n╔═══════════════════════════════════════════════════════════════════════════╗\n║                    📤 DVD Exfiltration Attack Suite 📤                    ║\n╚═══════════════════════════════════════════════════════════════════════════╝\n\u001b[0m\n\u001b[0;34mAvailable Modules: Telemetry, Flight Logs, Video Streams\u001b[0m\n\u001b[0;34mExecution Mode: Interactive Selection\u001b[0m\n\u001b[0;34mOutput: Integrated Intelligence Reports\u001b[0m\n\n\u001b[0;31m[!] This suite requires root privileges\u001b[0m\n\u001b[1;33m[*] Please run: sudo /home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/exfiltration/run_exfiltration.sh\u001b[0m\n",
+      "stderr": "",
+      "iocs": [],
+      "timestamp": "2025-07-28T17:32:02.372248",
+      "pid": 1872938
+    },
+    {
+      "tactic": "injection",
+      "script_path": "/home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/injection/run_injection_attacks.sh",
+      "success": false,
+      "exit_code": 1,
+      "execution_time": 0.013689041137695312,
+      "stdout": "\u001b[H\u001b[2J\u001b[3J\u001b[1m\u001b[0;31m\n╔═══════════════════════════════════════════════════════════════════════════╗\n║                     💉 DVD Injection Attack Suite 💉                      ║\n╚═══════════════════════════════════════════════════════════════════════════╝\n\u001b[0m\n\u001b[0;34mAvailable Modules: MAVLink, GPS, Command, Sensor, Data\u001b[0m\n\u001b[0;34mExecution Mode: Interactive Selection\u001b[0m\n\u001b[0;34mOutput: Flight Control Impact Assessment\u001b[0m\n\n\u001b[0;31m[!] This suite requires root privileges\u001b[0m\n\u001b[1;33m[*] Please run: sudo /home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/injection/run_injection_attacks.sh\u001b[0m\n",
+      "stderr": "",
+      "iocs": [],
+      "timestamp": "2025-07-28T17:32:04.385613",
+      "pid": 1872989
+    },
+    {
+      "tactic": "firmware_attacks",
+      "script_path": "/home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/firmware_attacks/run_firmware_attacks.sh",
+      "success": false,
+      "exit_code": 1,
+      "execution_time": 0.00930333137512207,
+      "stdout": "\u001b[H\u001b[2J\u001b[3J\u001b[1m\u001b[0;31m\n╔═══════════════════════════════════════════════════════════════════════════╗\n║                    🔓 DVD Firmware Attack Suite 🔓                        ║\n╚═══════════════════════════════════════════════════════════════════════════╝\n\u001b[0m\n\u001b[0;34mAvailable Modules: Secure Boot, Firmware Mod, Bootloader, Flash Dump\u001b[0m\n\u001b[0;34mExecution Mode: Interactive Selection\u001b[0m\n\u001b[0;34mOutput: Integrated Security Assessment\u001b[0m\n\n\u001b[0;31m[!] This suite requires root privileges\u001b[0m\n\u001b[1;33m[*] Please run: sudo /home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/firmware_attacks/run_firmware_attacks.sh\u001b[0m\n",
+      "stderr": "",
+      "iocs": [],
+      "timestamp": "2025-07-28T17:32:06.400799",
+      "pid": 1873034
+    }
+  ],
+  "tactics_summary": {
+    "denial_of_service": {
+      "success": false,
+      "execution_time": 0.012453079223632812,
+      "ioc_count": 0,
+      "exit_code": 1,
+      "script_path": "/home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/denial_of_service/run_denial_of_service.sh"
+    },
+    "protocol_tampering": {
+      "success": false,
+      "execution_time": 0.014461517333984375,
+      "ioc_count": 0,
+      "exit_code": 1,
+      "script_path": "/home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/protocol_tampering/run_protocol_tampering.sh"
+    },
+    "common": {
+      "success": true,
+      "execution_time": 0.002292633056640625,
+      "ioc_count": 0,
+      "exit_code": 0,
+      "script_path": "/home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/common/color.sh"
+    },
+    "reconnaissance": {
+      "success": false,
+      "execution_time": 0.010218143463134766,
+      "ioc_count": 0,
+      "exit_code": 1,
+      "script_path": "/home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/reconnaissance/run_reconnaissance.sh"
+    },
+    "exfiltration": {
+      "success": false,
+      "execution_time": 0.010292530059814453,
+      "ioc_count": 0,
+      "exit_code": 1,
+      "script_path": "/home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/exfiltration/run_exfiltration.sh"
+    },
+    "injection": {
+      "success": false,
+      "execution_time": 0.013689041137695312,
+      "ioc_count": 0,
+      "exit_code": 1,
+      "script_path": "/home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/injection/run_injection_attacks.sh"
+    },
+    "firmware_attacks": {
+      "success": false,
+      "execution_time": 0.00930333137512207,
+      "ioc_count": 0,
+      "exit_code": 1,
+      "script_path": "/home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/firmware_attacks/run_firmware_attacks.sh"
+    }
+  },
+  "ioc_summary": {
+    "total_iocs": 0,
+    "unique_iocs": 0,
+    "ioc_types": {},
+    "iocs_by_tactic": {
+      "denial_of_service": 0,
+      "protocol_tampering": 0,
+      "common": 0,
+      "reconnaissance": 0,
+      "exfiltration": 0,
+      "injection": 0,
+      "firmware_attacks": 0
+    }
+  }
+}

@@ -37,7 +37,7 @@ print_header() {
     clear
     echo -e "${BOLD}${RED}"
     echo "╔═══════════════════════════════════════════════════════════════════════════╗"
-    echo "║                    🔓 DVD Firmware Attack Suite 🔓                     ║"
+    echo "║                    🔓 DVD Firmware Attack Suite 🔓                        ║"
     echo "╚═══════════════════════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
     echo -e "${BLUE}Available Modules: Secure Boot, Firmware Mod, Bootloader, Flash Dump${NC}"

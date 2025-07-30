@@ -38,7 +38,7 @@ print_header() {
     clear
     echo -e "${BOLD}${RED}"
     echo "╔═══════════════════════════════════════════════════════════════════════════╗"
-    echo "║                🔄 DVD Protocol Tampering Attack Suite 🔄               ║"
+    echo "║                🔄 DVD Protocol Tampering Attack Suite 🔄                  ║"
     echo "╚═══════════════════════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
     echo -e "${BLUE}Available Modules: MAVLink, GPS, RF, WiFi, Telemetry, Parameter${NC}"

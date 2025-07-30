@@ -1,0 +1,38 @@
+{
+    "attack_info": {
+        "name": "GPS Spoofing Attack",
+        "type": "PROTOCOL_TAMPERING",
+        "timestamp": "2025-07-28T17:52:24-04:00",
+        "duration": 206,
+        "status": "completed"
+    },
+    "target_details": {
+        "target_ip": "10.13.0.6",
+        "target_port": "14550",
+        "protocol": "MAVLink over UDP",
+        "attack_method": "GPS Coordinate Spoofing"
+    },
+    "spoofing_parameters": {
+        "fake_coordinates": {
+            "latitude": "47.3566100",
+            "longitude": "85.4619300", 
+            "altitude": "1500m"
+        },
+        "attack_vectors": [
+            "GPS_RAW_INT message injection",
+            "GLOBAL_POSITION_INT manipulation",
+            "Multi-location coordinate spoofing"
+        ],
+        "tools_used": ["pymavlink", "scapy", "python3"]
+    },
+    "impact_assessment": {
+        "navigation_integrity": "COMPROMISED",
+        "position_accuracy": "UNRELIABLE",
+        "flight_safety": "AT_RISK",
+        "mission_success": "THREATENED",
+        "detection_probability": "MEDIUM"
+    },
+    "iocs_generated": 24,
+    "log_file": "/home/kali/MTD/MTD_full_testbed/attack_logs/protocol_tampering/gps_spoofing_20250728_174858.log",
+    "ioc_file": "/tmp/gps_spoofing_iocs.txt"
+}

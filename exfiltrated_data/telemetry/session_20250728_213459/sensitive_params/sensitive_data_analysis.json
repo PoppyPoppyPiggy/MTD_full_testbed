@@ -1,0 +1,1192 @@
+{
+  "analysis_timestamp": "2025-07-28T21:36:17.951497",
+  "sensitive_findings": {
+    "critical": [
+      {
+        "message_type": "GLOBAL_POSITION_INT",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:09.140667",
+        "system_id": 171,
+        "component_id": 243
+      },
+      {
+        "message_type": "GLOBAL_POSITION_INT",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:09.541770",
+        "system_id": 206,
+        "component_id": 113
+      },
+      {
+        "message_type": "GLOBAL_POSITION_INT",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:09.646179",
+        "system_id": 134,
+        "component_id": 227
+      },
+      {
+        "message_type": "GLOBAL_POSITION_INT",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:09.947643",
+        "system_id": 67,
+        "component_id": 34
+      },
+      {
+        "message_type": "GPS_RAW_INT",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:10.148885",
+        "system_id": 34,
+        "component_id": 237
+      },
+      {
+        "message_type": "GPS_RAW_INT",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:10.450586",
+        "system_id": 87,
+        "component_id": 10
+      },
+      {
+        "message_type": "GPS_RAW_INT",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:10.651884",
+        "system_id": 127,
+        "component_id": 74
+      },
+      {
+        "message_type": "GLOBAL_POSITION_INT",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:11.259805",
+        "system_id": 109,
+        "component_id": 142
+      },
+      {
+        "message_type": "GLOBAL_POSITION_INT",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:12.070816",
+        "system_id": 203,
+        "component_id": 139
+      },
+      {
+        "message_type": "GLOBAL_POSITION_INT",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:12.474896",
+        "system_id": 185,
+        "component_id": 5
+      },
+      {
+        "message_type": "GPS_RAW_INT",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:12.775856",
+        "system_id": 36,
+        "component_id": 39
+      },
+      {
+        "message_type": "GLOBAL_POSITION_INT",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:13.178132",
+        "system_id": 15,
+        "component_id": 44
+      },
+      {
+        "message_type": "GLOBAL_POSITION_INT",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:13.580042",
+        "system_id": 83,
+        "component_id": 198
+      },
+      {
+        "message_type": "GLOBAL_POSITION_INT",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:13.680771",
+        "system_id": 143,
+        "component_id": 131
+      },
+      {
+        "message_type": "GPS_RAW_INT",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:39.117767",
+        "system_id": 243,
+        "component_id": 151
+      },
+      {
+        "message_type": "GPS_RAW_INT",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:39.522287",
+        "system_id": 64,
+        "component_id": 177
+      },
+      {
+        "message_type": "GPS_RAW_INT",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:39.723958",
+        "system_id": 213,
+        "component_id": 151
+      },
+      {
+        "message_type": "GPS_RAW_INT",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:39.929280",
+        "system_id": 245,
+        "component_id": 13
+      },
+      {
+        "message_type": "GLOBAL_POSITION_INT",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:40.029522",
+        "system_id": 201,
+        "component_id": 16
+      },
+      {
+        "message_type": "GPS_RAW_INT",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:40.433078",
+        "system_id": 105,
+        "component_id": 157
+      },
+      {
+        "message_type": "GPS_RAW_INT",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:40.736361",
+        "system_id": 163,
+        "component_id": 124
+      },
+      {
+        "message_type": "GLOBAL_POSITION_INT",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:40.937840",
+        "system_id": 48,
+        "component_id": 111
+      },
+      {
+        "message_type": "GLOBAL_POSITION_INT",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:41.038855",
+        "system_id": 55,
+        "component_id": 110
+      },
+      {
+        "message_type": "GLOBAL_POSITION_INT",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:41.139343",
+        "system_id": 39,
+        "component_id": 84
+      },
+      {
+        "message_type": "GLOBAL_POSITION_INT",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:41.240046",
+        "system_id": 248,
+        "component_id": 233
+      },
+      {
+        "message_type": "GPS_RAW_INT",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:41.550217",
+        "system_id": 205,
+        "component_id": 151
+      },
+      {
+        "message_type": "GLOBAL_POSITION_INT",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:41.651472",
+        "system_id": 205,
+        "component_id": 123
+      },
+      {
+        "message_type": "GLOBAL_POSITION_INT",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:41.751806",
+        "system_id": 229,
+        "component_id": 112
+      },
+      {
+        "message_type": "GPS_RAW_INT",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:41.852399",
+        "system_id": 96,
+        "component_id": 11
+      },
+      {
+        "message_type": "GLOBAL_POSITION_INT",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:42.255704",
+        "system_id": 66,
+        "component_id": 126
+      },
+      {
+        "message_type": "GLOBAL_POSITION_INT",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:42.356626",
+        "system_id": 85,
+        "component_id": 235
+      },
+      {
+        "message_type": "GLOBAL_POSITION_INT",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:42.962436",
+        "system_id": 59,
+        "component_id": 55
+      },
+      {
+        "message_type": "GPS_RAW_INT",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:43.667622",
+        "system_id": 182,
+        "component_id": 218
+      },
+      {
+        "message_type": "GPS_RAW_INT",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:43.767918",
+        "system_id": 201,
+        "component_id": 93
+      },
+      {
+        "message_type": "GPS_RAW_INT",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:43.968759",
+        "system_id": 242,
+        "component_id": 78
+      }
+    ],
+    "high": [
+      {
+        "message_type": "SYS_STATUS",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:09.341245",
+        "system_id": 73,
+        "component_id": 165
+      },
+      {
+        "message_type": "SYS_STATUS",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:10.752487",
+        "system_id": 125,
+        "component_id": 20
+      },
+      {
+        "message_type": "SYS_STATUS",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:10.852678",
+        "system_id": 249,
+        "component_id": 239
+      },
+      {
+        "message_type": "SYS_STATUS",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:11.360118",
+        "system_id": 175,
+        "component_id": 247
+      },
+      {
+        "message_type": "SYS_STATUS",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:11.460553",
+        "system_id": 39,
+        "component_id": 226
+      },
+      {
+        "message_type": "SYS_STATUS",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:12.876682",
+        "system_id": 240,
+        "component_id": 95
+      },
+      {
+        "message_type": "SYS_STATUS",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:13.077846",
+        "system_id": 153,
+        "component_id": 99
+      },
+      {
+        "message_type": "SYS_STATUS",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:13.479858",
+        "system_id": 196,
+        "component_id": 113
+      },
+      {
+        "message_type": "SYS_STATUS",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:39.017320",
+        "system_id": 105,
+        "component_id": 240
+      },
+      {
+        "message_type": "SYS_STATUS",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:39.219918",
+        "system_id": 116,
+        "component_id": 54
+      },
+      {
+        "message_type": "SYS_STATUS",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:39.320851",
+        "system_id": 74,
+        "component_id": 118
+      },
+      {
+        "message_type": "SYS_STATUS",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:40.534002",
+        "system_id": 15,
+        "component_id": 222
+      },
+      {
+        "message_type": "SYS_STATUS",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:41.340795",
+        "system_id": 78,
+        "component_id": 184
+      },
+      {
+        "message_type": "SYS_STATUS",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:41.441638",
+        "system_id": 251,
+        "component_id": 215
+      },
+      {
+        "message_type": "SYS_STATUS",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:41.952521",
+        "system_id": 8,
+        "component_id": 13
+      },
+      {
+        "message_type": "SYS_STATUS",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:42.558516",
+        "system_id": 79,
+        "component_id": 196
+      }
+    ],
+    "medium": [
+      {
+        "message_type": "ATTITUDE",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:08.936384",
+        "system_id": 108,
+        "component_id": 210
+      },
+      {
+        "message_type": "BATTERY_STATUS",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:09.039831",
+        "system_id": 108,
+        "component_id": 123
+      },
+      {
+        "message_type": "BATTERY_STATUS",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:09.240979",
+        "system_id": 88,
+        "component_id": 62
+      },
+      {
+        "message_type": "ATTITUDE",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:09.441469",
+        "system_id": 199,
+        "component_id": 224
+      },
+      {
+        "message_type": "BATTERY_STATUS",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:09.746501",
+        "system_id": 224,
+        "component_id": 57
+      },
+      {
+        "message_type": "ATTITUDE",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:10.048292",
+        "system_id": 32,
+        "component_id": 199
+      },
+      {
+        "message_type": "BATTERY_STATUS",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:10.249539",
+        "system_id": 78,
+        "component_id": 168
+      },
+      {
+        "message_type": "BATTERY_STATUS",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:10.349859",
+        "system_id": 243,
+        "component_id": 28
+      },
+      {
+        "message_type": "BATTERY_STATUS",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:10.551017",
+        "system_id": 128,
+        "component_id": 182
+      },
+      {
+        "message_type": "ATTITUDE",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:10.953698",
+        "system_id": 201,
+        "component_id": 208
+      },
+      {
+        "message_type": "ATTITUDE",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:11.053873",
+        "system_id": 25,
+        "component_id": 11
+      },
+      {
+        "message_type": "BATTERY_STATUS",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:11.154342",
+        "system_id": 9,
+        "component_id": 109
+      },
+      {
+        "message_type": "ATTITUDE",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:11.568482",
+        "system_id": 14,
+        "component_id": 18
+      },
+      {
+        "message_type": "ATTITUDE",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:11.668964",
+        "system_id": 116,
+        "component_id": 10
+      },
+      {
+        "message_type": "BATTERY_STATUS",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:11.769410",
+        "system_id": 194,
+        "component_id": 140
+      },
+      {
+        "message_type": "ATTITUDE",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:11.869997",
+        "system_id": 27,
+        "component_id": 82
+      },
+      {
+        "message_type": "BATTERY_STATUS",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:11.970410",
+        "system_id": 225,
+        "component_id": 89
+      },
+      {
+        "message_type": "ATTITUDE",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:12.171641",
+        "system_id": 176,
+        "component_id": 79
+      },
+      {
+        "message_type": "ATTITUDE",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:12.272068",
+        "system_id": 126,
+        "component_id": 252
+      },
+      {
+        "message_type": "ATTITUDE",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:12.675666",
+        "system_id": 135,
+        "component_id": 219
+      },
+      {
+        "message_type": "ATTITUDE",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:12.976878",
+        "system_id": 189,
+        "component_id": 239
+      },
+      {
+        "message_type": "BATTERY_STATUS",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:13.278540",
+        "system_id": 160,
+        "component_id": 31
+      },
+      {
+        "message_type": "BATTERY_STATUS",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:13.379646",
+        "system_id": 55,
+        "component_id": 178
+      },
+      {
+        "message_type": "BATTERY_STATUS",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:13.781361",
+        "system_id": 76,
+        "component_id": 239
+      },
+      {
+        "message_type": "ATTITUDE",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:39.623273",
+        "system_id": 247,
+        "component_id": 49
+      },
+      {
+        "message_type": "ATTITUDE",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:39.824466",
+        "system_id": 125,
+        "component_id": 81
+      },
+      {
+        "message_type": "ATTITUDE",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:40.129835",
+        "system_id": 249,
+        "component_id": 65
+      },
+      {
+        "message_type": "ATTITUDE",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:40.230780",
+        "system_id": 29,
+        "component_id": 200
+      },
+      {
+        "message_type": "BATTERY_STATUS",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:40.331786",
+        "system_id": 67,
+        "component_id": 114
+      },
+      {
+        "message_type": "BATTERY_STATUS",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:40.635367",
+        "system_id": 241,
+        "component_id": 60
+      },
+      {
+        "message_type": "ATTITUDE",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:40.837020",
+        "system_id": 126,
+        "component_id": 155
+      },
+      {
+        "message_type": "ATTITUDE",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:42.053251",
+        "system_id": 89,
+        "component_id": 200
+      },
+      {
+        "message_type": "BATTERY_STATUS",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:42.154261",
+        "system_id": 237,
+        "component_id": 212
+      },
+      {
+        "message_type": "BATTERY_STATUS",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:42.457020",
+        "system_id": 201,
+        "component_id": 222
+      },
+      {
+        "message_type": "ATTITUDE",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:43.163424",
+        "system_id": 230,
+        "component_id": 130
+      },
+      {
+        "message_type": "ATTITUDE",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:43.263826",
+        "system_id": 27,
+        "component_id": 202
+      },
+      {
+        "message_type": "BATTERY_STATUS",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:43.364372",
+        "system_id": 200,
+        "component_id": 228
+      },
+      {
+        "message_type": "BATTERY_STATUS",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:43.868364",
+        "system_id": 239,
+        "component_id": 98
+      }
+    ],
+    "low": [
+      {
+        "message_type": "HEARTBEAT",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:08.836133",
+        "system_id": 121,
+        "component_id": 254
+      },
+      {
+        "message_type": "HEARTBEAT",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:09.846789",
+        "system_id": 170,
+        "component_id": 154
+      },
+      {
+        "message_type": "HEARTBEAT",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:12.373749",
+        "system_id": 79,
+        "component_id": 68
+      },
+      {
+        "message_type": "HEARTBEAT",
+        "source_file": "parsed_192.168.13.1_14550_213508.json",
+        "timestamp": "2025-07-28T21:35:12.575495",
+        "system_id": 2,
+        "component_id": 82
+      },
+      {
+        "message_type": "HEARTBEAT",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:39.421190",
+        "system_id": 213,
+        "component_id": 114
+      },
+      {
+        "message_type": "HEARTBEAT",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:42.660125",
+        "system_id": 129,
+        "component_id": 239
+      },
+      {
+        "message_type": "HEARTBEAT",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:42.760672",
+        "system_id": 47,
+        "component_id": 72
+      },
+      {
+        "message_type": "HEARTBEAT",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:42.861994",
+        "system_id": 63,
+        "component_id": 58
+      },
+      {
+        "message_type": "HEARTBEAT",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:43.063089",
+        "system_id": 53,
+        "component_id": 25
+      },
+      {
+        "message_type": "HEARTBEAT",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:43.466348",
+        "system_id": 75,
+        "component_id": 89
+      },
+      {
+        "message_type": "HEARTBEAT",
+        "source_file": "parsed_192.168.13.1_14551_213538.json",
+        "timestamp": "2025-07-28T21:35:43.567245",
+        "system_id": 210,
+        "component_id": 146
+      }
+    ]
+  },
+  "location_data": [
+    {
+      "timestamp": "2025-07-28T21:35:09.140667",
+      "coordinates": {
+        "lat": 37.713205009100456,
+        "lon": 126.4735773589599,
+        "alt": 400.8279080212221
+      },
+      "message_type": "GLOBAL_POSITION_INT"
+    },
+    {
+      "timestamp": "2025-07-28T21:35:09.541770",
+      "coordinates": {
+        "lat": 37.09791908443536,
+        "lon": 126.01782432869297,
+        "alt": 496.12318031873906
+      },
+      "message_type": "GLOBAL_POSITION_INT"
+    },
+    {
+      "timestamp": "2025-07-28T21:35:09.646179",
+      "coordinates": {
+        "lat": 37.08483401499765,
+        "lon": 126.67324157240695,
+        "alt": 475.38299723026535
+      },
+      "message_type": "GLOBAL_POSITION_INT"
+    },
+    {
+      "timestamp": "2025-07-28T21:35:09.947643",
+      "coordinates": {
+        "lat": 37.42665664191359,
+        "lon": 126.31901540807135,
+        "alt": 321.4327627162228
+      },
+      "message_type": "GLOBAL_POSITION_INT"
+    },
+    {
+      "timestamp": "2025-07-28T21:35:10.148885",
+      "coordinates": {
+        "lat": 37.9910494390126,
+        "lon": 126.56245832659165,
+        "alt": 18.549175685497964
+      },
+      "message_type": "GPS_RAW_INT"
+    },
+    {
+      "timestamp": "2025-07-28T21:35:10.450586",
+      "coordinates": {
+        "lat": 37.13351402643093,
+        "lon": 126.5801669570507,
+        "alt": 110.39642649556997
+      },
+      "message_type": "GPS_RAW_INT"
+    },
+    {
+      "timestamp": "2025-07-28T21:35:10.651884",
+      "coordinates": {
+        "lat": 37.27435349835222,
+        "lon": 126.50140111021399,
+        "alt": 7.518656156230874
+      },
+      "message_type": "GPS_RAW_INT"
+    },
+    {
+      "timestamp": "2025-07-28T21:35:11.259805",
+      "coordinates": {
+        "lat": 37.564141702685944,
+        "lon": 126.53683966194978,
+        "alt": 167.92288285893403
+      },
+      "message_type": "GLOBAL_POSITION_INT"
+    },
+    {
+      "timestamp": "2025-07-28T21:35:12.070816",
+      "coordinates": {
+        "lat": 37.86293766676303,
+        "lon": 126.68366309160015,
+        "alt": 391.27321955228314
+      },
+      "message_type": "GLOBAL_POSITION_INT"
+    },
+    {
+      "timestamp": "2025-07-28T21:35:12.474896",
+      "coordinates": {
+        "lat": 37.17104993166151,
+        "lon": 126.4044090294688,
+        "alt": 483.1687904886636
+      },
+      "message_type": "GLOBAL_POSITION_INT"
+    },
+    {
+      "timestamp": "2025-07-28T21:35:12.775856",
+      "coordinates": {
+        "lat": 37.1083425225815,
+        "lon": 126.0953657132402,
+        "alt": 406.6233840819773
+      },
+      "message_type": "GPS_RAW_INT"
+    },
+    {
+      "timestamp": "2025-07-28T21:35:13.178132",
+      "coordinates": {
+        "lat": 37.02075704197613,
+        "lon": 126.46048126147902,
+        "alt": 3.7203983276942743
+      },
+      "message_type": "GLOBAL_POSITION_INT"
+    },
+    {
+      "timestamp": "2025-07-28T21:35:13.580042",
+      "coordinates": {
+        "lat": 37.837116752077165,
+        "lon": 126.59010393946825,
+        "alt": 353.90375866914303
+      },
+      "message_type": "GLOBAL_POSITION_INT"
+    },
+    {
+      "timestamp": "2025-07-28T21:35:13.680771",
+      "coordinates": {
+        "lat": 37.80448990862374,
+        "lon": 126.06317537419152,
+        "alt": 52.07555682056375
+      },
+      "message_type": "GLOBAL_POSITION_INT"
+    },
+    {
+      "timestamp": "2025-07-28T21:35:39.117767",
+      "coordinates": {
+        "lat": 37.771695302972134,
+        "lon": 126.53449051165357,
+        "alt": 98.04884291404447
+      },
+      "message_type": "GPS_RAW_INT"
+    },
+    {
+      "timestamp": "2025-07-28T21:35:39.522287",
+      "coordinates": {
+        "lat": 37.57788762213787,
+        "lon": 126.68706800397783,
+        "alt": 397.2470417536193
+      },
+      "message_type": "GPS_RAW_INT"
+    },
+    {
+      "timestamp": "2025-07-28T21:35:39.723958",
+      "coordinates": {
+        "lat": 37.79267676152768,
+        "lon": 126.7865020770802,
+        "alt": 447.8500945210318
+      },
+      "message_type": "GPS_RAW_INT"
+    },
+    {
+      "timestamp": "2025-07-28T21:35:39.929280",
+      "coordinates": {
+        "lat": 37.23234080532749,
+        "lon": 126.20121718785275,
+        "alt": 248.5316034826977
+      },
+      "message_type": "GPS_RAW_INT"
+    },
+    {
+      "timestamp": "2025-07-28T21:35:40.029522",
+      "coordinates": {
+        "lat": 37.74624058379043,
+        "lon": 126.11729780514943,
+        "alt": 121.22015363405303
+      },
+      "message_type": "GLOBAL_POSITION_INT"
+    },
+    {
+      "timestamp": "2025-07-28T21:35:40.433078",
+      "coordinates": {
+        "lat": 37.73113243988271,
+        "lon": 126.49665501378587,
+        "alt": 412.6365399216885
+      },
+      "message_type": "GPS_RAW_INT"
+    },
+    {
+      "timestamp": "2025-07-28T21:35:40.736361",
+      "coordinates": {
+        "lat": 37.711943744664325,
+        "lon": 126.1292043578846,
+        "alt": 53.87247124263761
+      },
+      "message_type": "GPS_RAW_INT"
+    },
+    {
+      "timestamp": "2025-07-28T21:35:40.937840",
+      "coordinates": {
+        "lat": 37.55593667163204,
+        "lon": 126.4559104393669,
+        "alt": 104.0001958314622
+      },
+      "message_type": "GLOBAL_POSITION_INT"
+    },
+    {
+      "timestamp": "2025-07-28T21:35:41.038855",
+      "coordinates": {
+        "lat": 37.85595447243109,
+        "lon": 126.42235279645304,
+        "alt": 452.2575377993633
+      },
+      "message_type": "GLOBAL_POSITION_INT"
+    },
+    {
+      "timestamp": "2025-07-28T21:35:41.139343",
+      "coordinates": {
+        "lat": 37.97395013435469,
+        "lon": 126.55006404394622,
+        "alt": 425.2095360012365
+      },
+      "message_type": "GLOBAL_POSITION_INT"
+    },
+    {
+      "timestamp": "2025-07-28T21:35:41.240046",
+      "coordinates": {
+        "lat": 37.51641243388025,
+        "lon": 126.74828393887171,
+        "alt": 348.13980040933694
+      },
+      "message_type": "GLOBAL_POSITION_INT"
+    },
+    {
+      "timestamp": "2025-07-28T21:35:41.550217",
+      "coordinates": {
+        "lat": 37.63029827387702,
+        "lon": 126.62361947042233,
+        "alt": 139.17360426984214
+      },
+      "message_type": "GPS_RAW_INT"
+    },
+    {
+      "timestamp": "2025-07-28T21:35:41.651472",
+      "coordinates": {
+        "lat": 37.75835098153876,
+        "lon": 126.77686609058877,
+        "alt": 325.7176413025711
+      },
+      "message_type": "GLOBAL_POSITION_INT"
+    },
+    {
+      "timestamp": "2025-07-28T21:35:41.751806",
+      "coordinates": {
+        "lat": 37.28570560080952,
+        "lon": 126.24909406967936,
+        "alt": 277.8957893385941
+      },
+      "message_type": "GLOBAL_POSITION_INT"
+    },
+    {
+      "timestamp": "2025-07-28T21:35:41.852399",
+      "coordinates": {
+        "lat": 37.94169129239963,
+        "lon": 126.32585876692659,
+        "alt": 101.53284605432128
+      },
+      "message_type": "GPS_RAW_INT"
+    },
+    {
+      "timestamp": "2025-07-28T21:35:42.255704",
+      "coordinates": {
+        "lat": 37.84573315796307,
+        "lon": 126.64409433440413,
+        "alt": 97.25048566067734
+      },
+      "message_type": "GLOBAL_POSITION_INT"
+    },
+    {
+      "timestamp": "2025-07-28T21:35:42.356626",
+      "coordinates": {
+        "lat": 37.73111296429048,
+        "lon": 126.77350675794935,
+        "alt": 433.3267176186585
+      },
+      "message_type": "GLOBAL_POSITION_INT"
+    },
+    {
+      "timestamp": "2025-07-28T21:35:42.962436",
+      "coordinates": {
+        "lat": 37.77997408215193,
+        "lon": 126.33148455307675,
+        "alt": 464.79792743812516
+      },
+      "message_type": "GLOBAL_POSITION_INT"
+    },
+    {
+      "timestamp": "2025-07-28T21:35:43.667622",
+      "coordinates": {
+        "lat": 37.454026506353856,
+        "lon": 126.48432620276759,
+        "alt": 486.2191198507117
+      },
+      "message_type": "GPS_RAW_INT"
+    },
+    {
+      "timestamp": "2025-07-28T21:35:43.767918",
+      "coordinates": {
+        "lat": 37.69851947744713,
+        "lon": 126.41994494978206,
+        "alt": 61.02868006944784
+      },
+      "message_type": "GPS_RAW_INT"
+    },
+    {
+      "timestamp": "2025-07-28T21:35:43.968759",
+      "coordinates": {
+        "lat": 37.17442776789816,
+        "lon": 126.93626745599316,
+        "alt": 274.2549746688923
+      },
+      "message_type": "GPS_RAW_INT"
+    }
+  ],
+  "system_information": [
+    {
+      "timestamp": "2025-07-28T21:35:09.341245",
+      "system_data": {
+        "voltage": 11.498562232451693,
+        "current": 6.758781511166562,
+        "battery_remaining": 24
+      },
+      "system_id": 73
+    },
+    {
+      "timestamp": "2025-07-28T21:35:10.752487",
+      "system_data": {
+        "voltage": 11.562804794822181,
+        "current": 6.932841306274872,
+        "battery_remaining": 83
+      },
+      "system_id": 125
+    },
+    {
+      "timestamp": "2025-07-28T21:35:10.852678",
+      "system_data": {
+        "voltage": 11.221045004008975,
+        "current": 8.82721140892256,
+        "battery_remaining": 43
+      },
+      "system_id": 249
+    },
+    {
+      "timestamp": "2025-07-28T21:35:11.360118",
+      "system_data": {
+        "voltage": 11.352242041121846,
+        "current": 11.470900738189275,
+        "battery_remaining": 63
+      },
+      "system_id": 175
+    },
+    {
+      "timestamp": "2025-07-28T21:35:11.460553",
+      "system_data": {
+        "voltage": 12.528832982265914,
+        "current": 5.185863362795428,
+        "battery_remaining": 43
+      },
+      "system_id": 39
+    },
+    {
+      "timestamp": "2025-07-28T21:35:12.876682",
+      "system_data": {
+        "voltage": 11.001006615458305,
+        "current": 11.429777481602068,
+        "battery_remaining": 44
+      },
+      "system_id": 240
+    },
+    {
+      "timestamp": "2025-07-28T21:35:13.077846",
+      "system_data": {
+        "voltage": 11.325290441347143,
+        "current": 8.79442342278773,
+        "battery_remaining": 71
+      },
+      "system_id": 153
+    },
+    {
+      "timestamp": "2025-07-28T21:35:13.479858",
+      "system_data": {
+        "voltage": 12.197532125630811,
+        "current": 14.12420045353714,
+        "battery_remaining": 47
+      },
+      "system_id": 196
+    },
+    {
+      "timestamp": "2025-07-28T21:35:39.017320",
+      "system_data": {
+        "voltage": 11.196250943432137,
+        "current": 14.661860207728811,
+        "battery_remaining": 72
+      },
+      "system_id": 105
+    },
+    {
+      "timestamp": "2025-07-28T21:35:39.219918",
+      "system_data": {
+        "voltage": 11.519272168451181,
+        "current": 9.408259813538418,
+        "battery_remaining": 60
+      },
+      "system_id": 116
+    },
+    {
+      "timestamp": "2025-07-28T21:35:39.320851",
+      "system_data": {
+        "voltage": 11.589912337146817,
+        "current": 10.820404388994254,
+        "battery_remaining": 68
+      },
+      "system_id": 74
+    },
+    {
+      "timestamp": "2025-07-28T21:35:40.534002",
+      "system_data": {
+        "voltage": 11.845396474317358,
+        "current": 13.045436725024373,
+        "battery_remaining": 90
+      },
+      "system_id": 15
+    },
+    {
+      "timestamp": "2025-07-28T21:35:41.340795",
+      "system_data": {
+        "voltage": 12.284617723471447,
+        "current": 12.446118377243044,
+        "battery_remaining": 76
+      },
+      "system_id": 78
+    },
+    {
+      "timestamp": "2025-07-28T21:35:41.441638",
+      "system_data": {
+        "voltage": 12.459420844649442,
+        "current": 6.499088824206312,
+        "battery_remaining": 67
+      },
+      "system_id": 251
+    },
+    {
+      "timestamp": "2025-07-28T21:35:41.952521",
+      "system_data": {
+        "voltage": 11.57881860108441,
+        "current": 10.035311012691306,
+        "battery_remaining": 76
+      },
+      "system_id": 8
+    },
+    {
+      "timestamp": "2025-07-28T21:35:42.558516",
+      "system_data": {
+        "voltage": 11.15939657394631,
+        "current": 8.963123484948111,
+        "battery_remaining": 21
+      },
+      "system_id": 79
+    }
+  ],
+  "flight_parameters": [],
+  "security_concerns": [
+    "Critical data exposure: 35 messages",
+    "High-sensitivity data leakage: 16 messages",
+    "GPS location tracking possible: 35 coordinates",
+    "System information exposed: 16 entries"
+  ],
+  "intelligence_value": "high",
+  "statistics": {
+    "total_files_analyzed": 2,
+    "total_critical_messages": 35,
+    "total_high_messages": 16,
+    "location_points_extracted": 35,
+    "system_info_entries": 16,
+    "security_risk_level": "high"
+  }
+}

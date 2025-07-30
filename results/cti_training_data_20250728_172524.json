@@ -1,0 +1,316 @@
+{
+  "metadata": {
+    "dataset_name": "drone_mtd_cti_dataset",
+    "version": "1.0",
+    "created_at": "2025-07-28T17:25:24.737724",
+    "total_samples": 14,
+    "features": [
+      "execution_time",
+      "ioc_count",
+      "severity_score",
+      "network_packets",
+      "error_count",
+      "success_rate"
+    ],
+    "target_classes": [
+      "injection",
+      "exfiltration",
+      "denial_of_service",
+      "protocol_tampering",
+      "firmware_attacks",
+      "reconnaissance"
+    ]
+  },
+  "samples": [
+    {
+      "id": "recon_003",
+      "features": {
+        "execution_time": 0.011176586151123047,
+        "success": 0,
+        "ioc_count": 0,
+        "severity_score": 2,
+        "network_packets": 0,
+        "error_count": 0,
+        "technique_id": "T1056.001"
+      },
+      "label": "reconnaissance",
+      "technique_id": "T1056.001",
+      "timestamp": "2025-07-28T17:24:19.636161",
+      "iocs": [],
+      "metadata": {
+        "attack_name": "Drone GPS Telemetry Capture",
+        "description": "드론 GPS 및 텔레메트리 데이터 수집"
+      }
+    },
+    {
+      "id": "recon_002",
+      "features": {
+        "execution_time": 0.01487278938293457,
+        "success": 0,
+        "ioc_count": 0,
+        "severity_score": 2,
+        "network_packets": 0,
+        "error_count": 0,
+        "technique_id": "T1040"
+      },
+      "label": "reconnaissance",
+      "technique_id": "T1040",
+      "timestamp": "2025-07-28T17:24:19.639352",
+      "iocs": [],
+      "metadata": {
+        "attack_name": "MAVLink Service Discovery",
+        "description": "MAVLink 프로토콜 서비스 발견"
+      }
+    },
+    {
+      "id": "recon_001",
+      "features": {
+        "execution_time": 0.017351150512695312,
+        "success": 0,
+        "ioc_count": 0,
+        "severity_score": 1,
+        "network_packets": 0,
+        "error_count": 0,
+        "technique_id": "T1595.002"
+      },
+      "label": "reconnaissance",
+      "technique_id": "T1595.002",
+      "timestamp": "2025-07-28T17:24:19.641077",
+      "iocs": [],
+      "metadata": {
+        "attack_name": "WiFi Network Discovery",
+        "description": "드론 네트워크 탐지 및 WiFi 스캐닝"
+      }
+    },
+    {
+      "id": "proto_001",
+      "features": {
+        "execution_time": 0.009671449661254883,
+        "success": 0,
+        "ioc_count": 0,
+        "severity_score": 3,
+        "network_packets": 0,
+        "error_count": 0,
+        "technique_id": "T1071.004"
+      },
+      "label": "protocol_tampering",
+      "technique_id": "T1071.004",
+      "timestamp": "2025-07-28T17:24:29.658758",
+      "iocs": [],
+      "metadata": {
+        "attack_name": "MAVLink Packet Injection",
+        "description": "MAVLink 패킷 조작 및 주입"
+      }
+    },
+    {
+      "id": "proto_002",
+      "features": {
+        "execution_time": 0.008998632431030273,
+        "success": 0,
+        "ioc_count": 0,
+        "severity_score": 3,
+        "network_packets": 0,
+        "error_count": 0,
+        "technique_id": "T1499.004"
+      },
+      "label": "protocol_tampering",
+      "technique_id": "T1499.004",
+      "timestamp": "2025-07-28T17:24:29.658924",
+      "iocs": [],
+      "metadata": {
+        "attack_name": "Protocol Fuzzing Attack",
+        "description": "드론 통신 프로토콜 퍼징"
+      }
+    },
+    {
+      "id": "dos_003",
+      "features": {
+        "execution_time": 0.009276151657104492,
+        "success": 0,
+        "ioc_count": 0,
+        "severity_score": 3,
+        "network_packets": 0,
+        "error_count": 0,
+        "technique_id": "T1499.003"
+      },
+      "label": "denial_of_service",
+      "technique_id": "T1499.003",
+      "timestamp": "2025-07-28T17:24:39.678553",
+      "iocs": [],
+      "metadata": {
+        "attack_name": "MAVLink Flooding Attack",
+        "description": "MAVLink 패킷 플러딩"
+      }
+    },
+    {
+      "id": "dos_001",
+      "features": {
+        "execution_time": 0.011181354522705078,
+        "success": 0,
+        "ioc_count": 0,
+        "severity_score": 4,
+        "network_packets": 0,
+        "error_count": 0,
+        "technique_id": "T1499.001"
+      },
+      "label": "denial_of_service",
+      "technique_id": "T1499.001",
+      "timestamp": "2025-07-28T17:24:39.678935",
+      "iocs": [],
+      "metadata": {
+        "attack_name": "GPS Jamming Attack",
+        "description": "GPS 신호 재밍을 통한 서비스 거부"
+      }
+    },
+    {
+      "id": "dos_002",
+      "features": {
+        "execution_time": 0.011784791946411133,
+        "success": 0,
+        "ioc_count": 0,
+        "severity_score": 3,
+        "network_packets": 0,
+        "error_count": 0,
+        "technique_id": "T1499.002"
+      },
+      "label": "denial_of_service",
+      "technique_id": "T1499.002",
+      "timestamp": "2025-07-28T17:24:39.680445",
+      "iocs": [],
+      "metadata": {
+        "attack_name": "WiFi Deauthentication Attack",
+        "description": "WiFi 연결 해제 공격"
+      }
+    },
+    {
+      "id": "inject_002",
+      "features": {
+        "execution_time": 4.001577615737915,
+        "success": 0,
+        "ioc_count": 4,
+        "severity_score": 4,
+        "network_packets": 712,
+        "error_count": 1,
+        "technique_id": "T1565.001"
+      },
+      "label": "injection",
+      "technique_id": "T1565.001",
+      "timestamp": "2025-07-28T17:24:53.692179",
+      "iocs": [
+        "IP:192.168.62.0",
+        "IP:192.168.63.62",
+        "MAC:02:dc:6a:00:00:01",
+        "PORT:48636"
+      ],
+      "metadata": {
+        "attack_name": "Return-to-Home Hijacking",
+        "description": "귀환 명령 하이재킹"
+      }
+    },
+    {
+      "id": "inject_001",
+      "features": {
+        "execution_time": 5.0025599002838135,
+        "success": 1,
+        "ioc_count": 4,
+        "severity_score": 4,
+        "network_packets": 603,
+        "error_count": 0,
+        "technique_id": "T1059.004"
+      },
+      "label": "injection",
+      "technique_id": "T1059.004",
+      "timestamp": "2025-07-28T17:24:54.692891",
+      "iocs": [
+        "IP:192.168.43.0",
+        "IP:192.168.44.43",
+        "MAC:02:c7:76:00:00:01",
+        "PORT:3527"
+      ],
+      "metadata": {
+        "attack_name": "Command Injection Attack",
+        "description": "드론 시스템 명령 주입"
+      }
+    },
+    {
+      "id": "exfil_002",
+      "features": {
+        "execution_time": 0.00867462158203125,
+        "success": 0,
+        "ioc_count": 0,
+        "severity_score": 3,
+        "network_packets": 0,
+        "error_count": 0,
+        "technique_id": "T1025"
+      },
+      "label": "exfiltration",
+      "technique_id": "T1025",
+      "timestamp": "2025-07-28T17:25:04.709571",
+      "iocs": [],
+      "metadata": {
+        "attack_name": "Video Stream Exfiltration",
+        "description": "비디오 스트림 데이터 유출"
+      }
+    },
+    {
+      "id": "exfil_001",
+      "features": {
+        "execution_time": 0.009844064712524414,
+        "success": 0,
+        "ioc_count": 0,
+        "severity_score": 2,
+        "network_packets": 0,
+        "error_count": 0,
+        "technique_id": "T1041"
+      },
+      "label": "exfiltration",
+      "technique_id": "T1041",
+      "timestamp": "2025-07-28T17:25:04.710057",
+      "iocs": [],
+      "metadata": {
+        "attack_name": "Telemetry Data Exfiltration",
+        "description": "텔레메트리 데이터 유출"
+      }
+    },
+    {
+      "id": "firm_001",
+      "features": {
+        "execution_time": 0.009165048599243164,
+        "success": 0,
+        "ioc_count": 0,
+        "severity_score": 4,
+        "network_packets": 0,
+        "error_count": 0,
+        "technique_id": "T1542.001"
+      },
+      "label": "firmware_attacks",
+      "technique_id": "T1542.001",
+      "timestamp": "2025-07-28T17:25:14.727562",
+      "iocs": [],
+      "metadata": {
+        "attack_name": "Firmware Tampering",
+        "description": "드론 펌웨어 조작"
+      }
+    },
+    {
+      "id": "firm_002",
+      "features": {
+        "execution_time": 0.008729219436645508,
+        "success": 0,
+        "ioc_count": 0,
+        "severity_score": 4,
+        "network_packets": 0,
+        "error_count": 0,
+        "technique_id": "T1542.003"
+      },
+      "label": "firmware_attacks",
+      "technique_id": "T1542.003",
+      "timestamp": "2025-07-28T17:25:14.727771",
+      "iocs": [],
+      "metadata": {
+        "attack_name": "Bootloader Exploitation",
+        "description": "부트로더 취약점 악용"
+      }
+    }
+  ]
+}

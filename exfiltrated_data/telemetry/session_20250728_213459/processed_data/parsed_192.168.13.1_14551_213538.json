@@ -1,0 +1,706 @@
+{
+  "collection_info": {
+    "target": "192.168.13.1:14551",
+    "duration": 30,
+    "total_messages": 50,
+    "collection_time": "2025-07-28T21:36:08.551183"
+  },
+  "messages": [
+    {
+      "timestamp": "2025-07-28T21:35:39.017320",
+      "system_id": 105,
+      "component_id": 240,
+      "message_id": 1,
+      "message_type": "SYS_STATUS",
+      "sensitivity": "high",
+      "sequence": 78,
+      "simulated": true,
+      "contains_system_info": true,
+      "system_status": {
+        "voltage": 11.196250943432137,
+        "current": 14.661860207728811,
+        "battery_remaining": 72
+      }
+    },
+    {
+      "timestamp": "2025-07-28T21:35:39.117767",
+      "system_id": 243,
+      "component_id": 151,
+      "message_id": 24,
+      "message_type": "GPS_RAW_INT",
+      "sensitivity": "critical",
+      "sequence": 171,
+      "simulated": true,
+      "contains_location": true,
+      "gps_data": {
+        "lat": 37.771695302972134,
+        "lon": 126.53449051165357,
+        "alt": 98.04884291404447
+      }
+    },
+    {
+      "timestamp": "2025-07-28T21:35:39.219918",
+      "system_id": 116,
+      "component_id": 54,
+      "message_id": 1,
+      "message_type": "SYS_STATUS",
+      "sensitivity": "high",
+      "sequence": 60,
+      "simulated": true,
+      "contains_system_info": true,
+      "system_status": {
+        "voltage": 11.519272168451181,
+        "current": 9.408259813538418,
+        "battery_remaining": 60
+      }
+    },
+    {
+      "timestamp": "2025-07-28T21:35:39.320851",
+      "system_id": 74,
+      "component_id": 118,
+      "message_id": 1,
+      "message_type": "SYS_STATUS",
+      "sensitivity": "high",
+      "sequence": 202,
+      "simulated": true,
+      "contains_system_info": true,
+      "system_status": {
+        "voltage": 11.589912337146817,
+        "current": 10.820404388994254,
+        "battery_remaining": 68
+      }
+    },
+    {
+      "timestamp": "2025-07-28T21:35:39.421190",
+      "system_id": 213,
+      "component_id": 114,
+      "message_id": 0,
+      "message_type": "HEARTBEAT",
+      "sensitivity": "low",
+      "sequence": 79,
+      "simulated": true
+    },
+    {
+      "timestamp": "2025-07-28T21:35:39.522287",
+      "system_id": 64,
+      "component_id": 177,
+      "message_id": 24,
+      "message_type": "GPS_RAW_INT",
+      "sensitivity": "critical",
+      "sequence": 128,
+      "simulated": true,
+      "contains_location": true,
+      "gps_data": {
+        "lat": 37.57788762213787,
+        "lon": 126.68706800397783,
+        "alt": 397.2470417536193
+      }
+    },
+    {
+      "timestamp": "2025-07-28T21:35:39.623273",
+      "system_id": 247,
+      "component_id": 49,
+      "message_id": 30,
+      "message_type": "ATTITUDE",
+      "sensitivity": "medium",
+      "sequence": 35,
+      "simulated": true
+    },
+    {
+      "timestamp": "2025-07-28T21:35:39.723958",
+      "system_id": 213,
+      "component_id": 151,
+      "message_id": 24,
+      "message_type": "GPS_RAW_INT",
+      "sensitivity": "critical",
+      "sequence": 51,
+      "simulated": true,
+      "contains_location": true,
+      "gps_data": {
+        "lat": 37.79267676152768,
+        "lon": 126.7865020770802,
+        "alt": 447.8500945210318
+      }
+    },
+    {
+      "timestamp": "2025-07-28T21:35:39.824466",
+      "system_id": 125,
+      "component_id": 81,
+      "message_id": 30,
+      "message_type": "ATTITUDE",
+      "sensitivity": "medium",
+      "sequence": 54,
+      "simulated": true
+    },
+    {
+      "timestamp": "2025-07-28T21:35:39.929280",
+      "system_id": 245,
+      "component_id": 13,
+      "message_id": 24,
+      "message_type": "GPS_RAW_INT",
+      "sensitivity": "critical",
+      "sequence": 228,
+      "simulated": true,
+      "contains_location": true,
+      "gps_data": {
+        "lat": 37.23234080532749,
+        "lon": 126.20121718785275,
+        "alt": 248.5316034826977
+      }
+    },
+    {
+      "timestamp": "2025-07-28T21:35:40.029522",
+      "system_id": 201,
+      "component_id": 16,
+      "message_id": 33,
+      "message_type": "GLOBAL_POSITION_INT",
+      "sensitivity": "critical",
+      "sequence": 65,
+      "simulated": true,
+      "contains_location": true,
+      "gps_data": {
+        "lat": 37.74624058379043,
+        "lon": 126.11729780514943,
+        "alt": 121.22015363405303
+      }
+    },
+    {
+      "timestamp": "2025-07-28T21:35:40.129835",
+      "system_id": 249,
+      "component_id": 65,
+      "message_id": 30,
+      "message_type": "ATTITUDE",
+      "sensitivity": "medium",
+      "sequence": 142,
+      "simulated": true
+    },
+    {
+      "timestamp": "2025-07-28T21:35:40.230780",
+      "system_id": 29,
+      "component_id": 200,
+      "message_id": 30,
+      "message_type": "ATTITUDE",
+      "sensitivity": "medium",
+      "sequence": 195,
+      "simulated": true
+    },
+    {
+      "timestamp": "2025-07-28T21:35:40.331786",
+      "system_id": 67,
+      "component_id": 114,
+      "message_id": 147,
+      "message_type": "BATTERY_STATUS",
+      "sensitivity": "medium",
+      "sequence": 106,
+      "simulated": true
+    },
+    {
+      "timestamp": "2025-07-28T21:35:40.433078",
+      "system_id": 105,
+      "component_id": 157,
+      "message_id": 24,
+      "message_type": "GPS_RAW_INT",
+      "sensitivity": "critical",
+      "sequence": 133,
+      "simulated": true,
+      "contains_location": true,
+      "gps_data": {
+        "lat": 37.73113243988271,
+        "lon": 126.49665501378587,
+        "alt": 412.6365399216885
+      }
+    },
+    {
+      "timestamp": "2025-07-28T21:35:40.534002",
+      "system_id": 15,
+      "component_id": 222,
+      "message_id": 1,
+      "message_type": "SYS_STATUS",
+      "sensitivity": "high",
+      "sequence": 211,
+      "simulated": true,
+      "contains_system_info": true,
+      "system_status": {
+        "voltage": 11.845396474317358,
+        "current": 13.045436725024373,
+        "battery_remaining": 90
+      }
+    },
+    {
+      "timestamp": "2025-07-28T21:35:40.635367",
+      "system_id": 241,
+      "component_id": 60,
+      "message_id": 147,
+      "message_type": "BATTERY_STATUS",
+      "sensitivity": "medium",
+      "sequence": 221,
+      "simulated": true
+    },
+    {
+      "timestamp": "2025-07-28T21:35:40.736361",
+      "system_id": 163,
+      "component_id": 124,
+      "message_id": 24,
+      "message_type": "GPS_RAW_INT",
+      "sensitivity": "critical",
+      "sequence": 108,
+      "simulated": true,
+      "contains_location": true,
+      "gps_data": {
+        "lat": 37.711943744664325,
+        "lon": 126.1292043578846,
+        "alt": 53.87247124263761
+      }
+    },
+    {
+      "timestamp": "2025-07-28T21:35:40.837020",
+      "system_id": 126,
+      "component_id": 155,
+      "message_id": 30,
+      "message_type": "ATTITUDE",
+      "sensitivity": "medium",
+      "sequence": 124,
+      "simulated": true
+    },
+    {
+      "timestamp": "2025-07-28T21:35:40.937840",
+      "system_id": 48,
+      "component_id": 111,
+      "message_id": 33,
+      "message_type": "GLOBAL_POSITION_INT",
+      "sensitivity": "critical",
+      "sequence": 244,
+      "simulated": true,
+      "contains_location": true,
+      "gps_data": {
+        "lat": 37.55593667163204,
+        "lon": 126.4559104393669,
+        "alt": 104.0001958314622
+      }
+    },
+    {
+      "timestamp": "2025-07-28T21:35:41.038855",
+      "system_id": 55,
+      "component_id": 110,
+      "message_id": 33,
+      "message_type": "GLOBAL_POSITION_INT",
+      "sensitivity": "critical",
+      "sequence": 120,
+      "simulated": true,
+      "contains_location": true,
+      "gps_data": {
+        "lat": 37.85595447243109,
+        "lon": 126.42235279645304,
+        "alt": 452.2575377993633
+      }
+    },
+    {
+      "timestamp": "2025-07-28T21:35:41.139343",
+      "system_id": 39,
+      "component_id": 84,
+      "message_id": 33,
+      "message_type": "GLOBAL_POSITION_INT",
+      "sensitivity": "critical",
+      "sequence": 187,
+      "simulated": true,
+      "contains_location": true,
+      "gps_data": {
+        "lat": 37.97395013435469,
+        "lon": 126.55006404394622,
+        "alt": 425.2095360012365
+      }
+    },
+    {
+      "timestamp": "2025-07-28T21:35:41.240046",
+      "system_id": 248,
+      "component_id": 233,
+      "message_id": 33,
+      "message_type": "GLOBAL_POSITION_INT",
+      "sensitivity": "critical",
+      "sequence": 33,
+      "simulated": true,
+      "contains_location": true,
+      "gps_data": {
+        "lat": 37.51641243388025,
+        "lon": 126.74828393887171,
+        "alt": 348.13980040933694
+      }
+    },
+    {
+      "timestamp": "2025-07-28T21:35:41.340795",
+      "system_id": 78,
+      "component_id": 184,
+      "message_id": 1,
+      "message_type": "SYS_STATUS",
+      "sensitivity": "high",
+      "sequence": 70,
+      "simulated": true,
+      "contains_system_info": true,
+      "system_status": {
+        "voltage": 12.284617723471447,
+        "current": 12.446118377243044,
+        "battery_remaining": 76
+      }
+    },
+    {
+      "timestamp": "2025-07-28T21:35:41.441638",
+      "system_id": 251,
+      "component_id": 215,
+      "message_id": 1,
+      "message_type": "SYS_STATUS",
+      "sensitivity": "high",
+      "sequence": 11,
+      "simulated": true,
+      "contains_system_info": true,
+      "system_status": {
+        "voltage": 12.459420844649442,
+        "current": 6.499088824206312,
+        "battery_remaining": 67
+      }
+    },
+    {
+      "timestamp": "2025-07-28T21:35:41.550217",
+      "system_id": 205,
+      "component_id": 151,
+      "message_id": 24,
+      "message_type": "GPS_RAW_INT",
+      "sensitivity": "critical",
+      "sequence": 153,
+      "simulated": true,
+      "contains_location": true,
+      "gps_data": {
+        "lat": 37.63029827387702,
+        "lon": 126.62361947042233,
+        "alt": 139.17360426984214
+      }
+    },
+    {
+      "timestamp": "2025-07-28T21:35:41.651472",
+      "system_id": 205,
+      "component_id": 123,
+      "message_id": 33,
+      "message_type": "GLOBAL_POSITION_INT",
+      "sensitivity": "critical",
+      "sequence": 182,
+      "simulated": true,
+      "contains_location": true,
+      "gps_data": {
+        "lat": 37.75835098153876,
+        "lon": 126.77686609058877,
+        "alt": 325.7176413025711
+      }
+    },
+    {
+      "timestamp": "2025-07-28T21:35:41.751806",
+      "system_id": 229,
+      "component_id": 112,
+      "message_id": 33,
+      "message_type": "GLOBAL_POSITION_INT",
+      "sensitivity": "critical",
+      "sequence": 208,
+      "simulated": true,
+      "contains_location": true,
+      "gps_data": {
+        "lat": 37.28570560080952,
+        "lon": 126.24909406967936,
+        "alt": 277.8957893385941
+      }
+    },
+    {
+      "timestamp": "2025-07-28T21:35:41.852399",
+      "system_id": 96,
+      "component_id": 11,
+      "message_id": 24,
+      "message_type": "GPS_RAW_INT",
+      "sensitivity": "critical",
+      "sequence": 194,
+      "simulated": true,
+      "contains_location": true,
+      "gps_data": {
+        "lat": 37.94169129239963,
+        "lon": 126.32585876692659,
+        "alt": 101.53284605432128
+      }
+    },
+    {
+      "timestamp": "2025-07-28T21:35:41.952521",
+      "system_id": 8,
+      "component_id": 13,
+      "message_id": 1,
+      "message_type": "SYS_STATUS",
+      "sensitivity": "high",
+      "sequence": 78,
+      "simulated": true,
+      "contains_system_info": true,
+      "system_status": {
+        "voltage": 11.57881860108441,
+        "current": 10.035311012691306,
+        "battery_remaining": 76
+      }
+    },
+    {
+      "timestamp": "2025-07-28T21:35:42.053251",
+      "system_id": 89,
+      "component_id": 200,
+      "message_id": 30,
+      "message_type": "ATTITUDE",
+      "sensitivity": "medium",
+      "sequence": 155,
+      "simulated": true
+    },
+    {
+      "timestamp": "2025-07-28T21:35:42.154261",
+      "system_id": 237,
+      "component_id": 212,
+      "message_id": 147,
+      "message_type": "BATTERY_STATUS",
+      "sensitivity": "medium",
+      "sequence": 84,
+      "simulated": true
+    },
+    {
+      "timestamp": "2025-07-28T21:35:42.255704",
+      "system_id": 66,
+      "component_id": 126,
+      "message_id": 33,
+      "message_type": "GLOBAL_POSITION_INT",
+      "sensitivity": "critical",
+      "sequence": 20,
+      "simulated": true,
+      "contains_location": true,
+      "gps_data": {
+        "lat": 37.84573315796307,
+        "lon": 126.64409433440413,
+        "alt": 97.25048566067734
+      }
+    },
+    {
+      "timestamp": "2025-07-28T21:35:42.356626",
+      "system_id": 85,
+      "component_id": 235,
+      "message_id": 33,
+      "message_type": "GLOBAL_POSITION_INT",
+      "sensitivity": "critical",
+      "sequence": 101,
+      "simulated": true,
+      "contains_location": true,
+      "gps_data": {
+        "lat": 37.73111296429048,
+        "lon": 126.77350675794935,
+        "alt": 433.3267176186585
+      }
+    },
+    {
+      "timestamp": "2025-07-28T21:35:42.457020",
+      "system_id": 201,
+      "component_id": 222,
+      "message_id": 147,
+      "message_type": "BATTERY_STATUS",
+      "sensitivity": "medium",
+      "sequence": 233,
+      "simulated": true
+    },
+    {
+      "timestamp": "2025-07-28T21:35:42.558516",
+      "system_id": 79,
+      "component_id": 196,
+      "message_id": 1,
+      "message_type": "SYS_STATUS",
+      "sensitivity": "high",
+      "sequence": 3,
+      "simulated": true,
+      "contains_system_info": true,
+      "system_status": {
+        "voltage": 11.15939657394631,
+        "current": 8.963123484948111,
+        "battery_remaining": 21
+      }
+    },
+    {
+      "timestamp": "2025-07-28T21:35:42.660125",
+      "system_id": 129,
+      "component_id": 239,
+      "message_id": 0,
+      "message_type": "HEARTBEAT",
+      "sensitivity": "low",
+      "sequence": 19,
+      "simulated": true
+    },
+    {
+      "timestamp": "2025-07-28T21:35:42.760672",
+      "system_id": 47,
+      "component_id": 72,
+      "message_id": 0,
+      "message_type": "HEARTBEAT",
+      "sensitivity": "low",
+      "sequence": 153,
+      "simulated": true
+    },
+    {
+      "timestamp": "2025-07-28T21:35:42.861994",
+      "system_id": 63,
+      "component_id": 58,
+      "message_id": 0,
+      "message_type": "HEARTBEAT",
+      "sensitivity": "low",
+      "sequence": 238,
+      "simulated": true
+    },
+    {
+      "timestamp": "2025-07-28T21:35:42.962436",
+      "system_id": 59,
+      "component_id": 55,
+      "message_id": 33,
+      "message_type": "GLOBAL_POSITION_INT",
+      "sensitivity": "critical",
+      "sequence": 59,
+      "simulated": true,
+      "contains_location": true,
+      "gps_data": {
+        "lat": 37.77997408215193,
+        "lon": 126.33148455307675,
+        "alt": 464.79792743812516
+      }
+    },
+    {
+      "timestamp": "2025-07-28T21:35:43.063089",
+      "system_id": 53,
+      "component_id": 25,
+      "message_id": 0,
+      "message_type": "HEARTBEAT",
+      "sensitivity": "low",
+      "sequence": 122,
+      "simulated": true
+    },
+    {
+      "timestamp": "2025-07-28T21:35:43.163424",
+      "system_id": 230,
+      "component_id": 130,
+      "message_id": 30,
+      "message_type": "ATTITUDE",
+      "sensitivity": "medium",
+      "sequence": 228,
+      "simulated": true
+    },
+    {
+      "timestamp": "2025-07-28T21:35:43.263826",
+      "system_id": 27,
+      "component_id": 202,
+      "message_id": 30,
+      "message_type": "ATTITUDE",
+      "sensitivity": "medium",
+      "sequence": 138,
+      "simulated": true
+    },
+    {
+      "timestamp": "2025-07-28T21:35:43.364372",
+      "system_id": 200,
+      "component_id": 228,
+      "message_id": 147,
+      "message_type": "BATTERY_STATUS",
+      "sensitivity": "medium",
+      "sequence": 190,
+      "simulated": true
+    },
+    {
+      "timestamp": "2025-07-28T21:35:43.466348",
+      "system_id": 75,
+      "component_id": 89,
+      "message_id": 0,
+      "message_type": "HEARTBEAT",
+      "sensitivity": "low",
+      "sequence": 234,
+      "simulated": true
+    },
+    {
+      "timestamp": "2025-07-28T21:35:43.567245",
+      "system_id": 210,
+      "component_id": 146,
+      "message_id": 0,
+      "message_type": "HEARTBEAT",
+      "sensitivity": "low",
+      "sequence": 241,
+      "simulated": true
+    },
+    {
+      "timestamp": "2025-07-28T21:35:43.667622",
+      "system_id": 182,
+      "component_id": 218,
+      "message_id": 24,
+      "message_type": "GPS_RAW_INT",
+      "sensitivity": "critical",
+      "sequence": 33,
+      "simulated": true,
+      "contains_location": true,
+      "gps_data": {
+        "lat": 37.454026506353856,
+        "lon": 126.48432620276759,
+        "alt": 486.2191198507117
+      }
+    },
+    {
+      "timestamp": "2025-07-28T21:35:43.767918",
+      "system_id": 201,
+      "component_id": 93,
+      "message_id": 24,
+      "message_type": "GPS_RAW_INT",
+      "sensitivity": "critical",
+      "sequence": 197,
+      "simulated": true,
+      "contains_location": true,
+      "gps_data": {
+        "lat": 37.69851947744713,
+        "lon": 126.41994494978206,
+        "alt": 61.02868006944784
+      }
+    },
+    {
+      "timestamp": "2025-07-28T21:35:43.868364",
+      "system_id": 239,
+      "component_id": 98,
+      "message_id": 147,
+      "message_type": "BATTERY_STATUS",
+      "sensitivity": "medium",
+      "sequence": 243,
+      "simulated": true
+    },
+    {
+      "timestamp": "2025-07-28T21:35:43.968759",
+      "system_id": 242,
+      "component_id": 78,
+      "message_id": 24,
+      "message_type": "GPS_RAW_INT",
+      "sensitivity": "critical",
+      "sequence": 43,
+      "simulated": true,
+      "contains_location": true,
+      "gps_data": {
+        "lat": 37.17442776789816,
+        "lon": 126.93626745599316,
+        "alt": 274.2549746688923
+      }
+    }
+  ],
+  "statistics": {
+    "total_messages": 50,
+    "message_types": {
+      "SYS_STATUS": 8,
+      "GPS_RAW_INT": 11,
+      "HEARTBEAT": 7,
+      "ATTITUDE": 8,
+      "GLOBAL_POSITION_INT": 10,
+      "BATTERY_STATUS": 6
+    },
+    "sensitivity_breakdown": {
+      "low": 7,
+      "medium": 14,
+      "high": 8,
+      "critical": 21
+    },
+    "sensitive_data_found": {
+      "location_data": 21,
+      "system_info": 8,
+      "flight_parameters": 0
+    }
+  }
+}
