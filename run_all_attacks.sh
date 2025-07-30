@@ -48,8 +48,8 @@ print_header() {
     clear
     echo -e "${BOLD}${RED}"
     echo "╔═══════════════════════════════════════════════════════════════════════════╗"
-    echo "║                  🚁 DVD Complete Attack Automation 🚁                  ║"
-    echo "║                     Comprehensive Security Assessment                    ║"
+    echo "║                  🚁 DVD Complete Attack Automation 🚁                     ║"
+    echo "║                     Comprehensive Security Assessment                     ║"
     echo "╚═══════════════════════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
     echo -e "${BLUE}Execution Mode: ${EXECUTION_MODE}${NC}"

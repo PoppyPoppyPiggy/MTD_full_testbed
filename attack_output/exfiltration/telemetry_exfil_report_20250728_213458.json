@@ -1,0 +1,30 @@
+{
+    "attack_info": {
+        "name": "Telemetry Data Exfiltration",
+        "type": "EXFILTRATION",
+        "timestamp": "2025-07-28T21:36:20-04:00",
+        "duration": 81,
+        "status": "completed"
+    },
+    "target_details": {
+        "target_ips": ["192.168.13.1","192.168.13.10","192.168.13.50","127.0.0.1"],"
+        "mavlink_ports": [14550,14551,14552,5760,5762,5763],"
+        "collection_duration": 300
+    },
+    "exfiltration_results": {
+        "total_messages_collected": 3,
+        "data_categories": ["telemetry", "gps_coordinates", "system_status", "flight_parameters"],
+        "exfiltration_session": "/home/kali/MTD/MTD_full_testbed/exfiltrated_data/telemetry/session_20250728_213459",
+        "intelligence_value": "high"
+    },
+    "impact_assessment": {
+        "privacy_violation": "SEVERE",
+        "operational_security": "COMPROMISED",
+        "data_sensitivity": "HIGH",
+        "detection_difficulty": "MEDIUM"
+    },
+    "iocs_generated": 14,
+    "log_file": "/home/kali/MTD/MTD_full_testbed/attack_logs/exfiltration/telemetry_exfil_20250728_213458.log",
+    "ioc_file": "/tmp/telemetry_exfil_iocs.txt",
+    "exfiltrated_data_location": "/home/kali/MTD/MTD_full_testbed/exfiltrated_data/telemetry/session_20250728_213459"
+}

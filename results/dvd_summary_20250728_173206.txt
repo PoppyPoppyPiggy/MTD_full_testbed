@@ -1,0 +1,54 @@
+DVD 공격 스크립트 실행 요약
+==================================================
+
+실행 시간: 2025-07-28 17:32:06
+총 스크립트 수: 7
+성공한 공격: 1
+실패한 공격: 6
+총 실행 시간: 0.07초
+수집된 IOCs: 0개
+
+전술별 상세 결과:
+------------------------------
+
+denial_of_service: 실패
+  스크립트: /home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/denial_of_service/run_denial_of_service.sh
+  실행시간: 0.01초
+  종료코드: 1
+  IOCs: 0개
+
+protocol_tampering: 실패
+  스크립트: /home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/protocol_tampering/run_protocol_tampering.sh
+  실행시간: 0.01초
+  종료코드: 1
+  IOCs: 0개
+
+common: 성공
+  스크립트: /home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/common/color.sh
+  실행시간: 0.00초
+  종료코드: 0
+  IOCs: 0개
+
+reconnaissance: 실패
+  스크립트: /home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/reconnaissance/run_reconnaissance.sh
+  실행시간: 0.01초
+  종료코드: 1
+  IOCs: 0개
+
+exfiltration: 실패
+  스크립트: /home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/exfiltration/run_exfiltration.sh
+  실행시간: 0.01초
+  종료코드: 1
+  IOCs: 0개
+
+injection: 실패
+  스크립트: /home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/injection/run_injection_attacks.sh
+  실행시간: 0.01초
+  종료코드: 1
+  IOCs: 0개
+
+firmware_attacks: 실패
+  스크립트: /home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/firmware_attacks/run_firmware_attacks.sh
+  실행시간: 0.01초
+  종료코드: 1
+  IOCs: 0개

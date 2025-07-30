@@ -36,7 +36,7 @@ print_header() {
     clear
     echo -e "${BOLD}${RED}"
     echo "╔═══════════════════════════════════════════════════════════════════════════╗"
-    echo "║                    ⚡ DVD Denial of Service Attack Suite ⚡             ║"
+    echo "║                    ⚡ DVD Denial of Service Attack Suite ⚡                 ║"
     echo "╚═══════════════════════════════════════════════════════════════════════════╝"
     echo -e "${NC}"
     echo -e "${BLUE}Available Modules: Communication Jamming, Service Disruption${NC}"
