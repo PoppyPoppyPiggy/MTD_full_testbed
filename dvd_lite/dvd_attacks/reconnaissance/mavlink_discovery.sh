@@ -21,7 +21,7 @@ MAVLINK_PORTS=(14550 14551 14552 5760 5762 5763)
 
 print_attack_banner() {
     echo -e "${CYAN}╔═══════════════════════════════════════╗${NC}"
-    echo -e "${CYAN}║      MAVLink Service Discovery       ║${NC}"
+    echo -e "${CYAN}║      MAVLink Service Discovery        ║${NC}"
     echo -e "${CYAN}╚═══════════════════════════════════════╝${NC}"
 }
 
