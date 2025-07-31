@@ -806,4 +806,4 @@ trap cleanup EXIT
 trap 'echo -e "\n${RED}Attack interrupted${NC}"; cleanup; exit 1' INT TERM
 
 # Execute main function
-main "$@"
+main "$@"S

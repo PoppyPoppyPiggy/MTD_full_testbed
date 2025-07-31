@@ -182,7 +182,7 @@ interactive_attack_selection() {
                 ;;
         esac
     done
-    
+    a
     echo ""
     echo -e "${GREEN}[✓] Selected attacks: ${selected_attacks[*]}${NC}" | tee -a "$LOG_FILE"
     echo ""
