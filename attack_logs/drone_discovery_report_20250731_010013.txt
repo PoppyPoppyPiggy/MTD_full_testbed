@@ -1,0 +1,39 @@
+╔══════════════════════════════════════════════════╗
+║           Drone Network Discovery Report         ║
+╚══════════════════════════════════════════════════╝
+
+Date: Thu Jul 31 01:00:13 AM EDT 2025
+Target Networks: 192.168.13.0/24, 10.13.0.0/24
+Attack Duration: Wed Jul
+
+╔═══ SCAN RESULTS ═══╗
+
+[2025-07-30 11:25:38] [WARNING] No active hosts found
+[2025-07-30 11:25:38] [INFO] Scanning network: 10.13.0.0/24
+[2025-07-30 11:25:40] [SUCCESS] Discovered 3 active hosts
+[2025-07-30 11:25:40] [INFO] Generating discovery report...
+[2025-07-30 11:25:40] [SUCCESS] Report saved to: /home/kali/MTD/MTD_full_testbed/attack_logs/drone_discovery_report_20250730_112540.txt
+[2025-07-30 11:25:40] [INFO] Cleaning up temporary files...
+[2025-07-30 11:25:40] [SUCCESS] Drone discovery attack completed
+[2025-07-30 11:25:40] [INFO] Cleaning up temporary files...
+[2025-07-31 01:00:01] [INFO] Checking prerequisites...
+[2025-07-31 01:00:01] [SUCCESS] Prerequisites check completed
+[2025-07-31 01:00:01] [INFO] Starting drone network discovery attack...
+[2025-07-31 01:00:01] [INFO] Starting WiFi network scan...
+[2025-07-31 01:00:01] [INFO] Using interface: wlan3
+[2025-07-31 01:00:01] [WARNING] Failed to enable monitor mode
+[2025-07-31 01:00:11] [INFO] No obvious drone networks detected
+[2025-07-31 01:00:11] [INFO] Scanning network: 192.168.13.0/24
+[2025-07-31 01:00:11] [WARNING] No active hosts found
+[2025-07-31 01:00:11] [INFO] Scanning network: 10.13.0.0/24
+[2025-07-31 01:00:13] [SUCCESS] Discovered 3 active hosts
+[2025-07-31 01:00:13] [INFO] Generating discovery report...
+
+╔═══ RECOMMENDATIONS ═══╗
+
+1. 발견된 MAVLink 서비스에 대한 추가 정찰 수행
+2. 열린 포트에 대한 취약점 스캔 실시  
+3. 무선 네트워크 암호화 강도 점검
+4. 네트워크 분할 및 접근 제어 검토
+
+╚═══════════════════════╝
