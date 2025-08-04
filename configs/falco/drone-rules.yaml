@@ -1,0 +1,51 @@
+# FANET 드론 보안 규칙
+# 위치: ~/MTD/MTD_full_testbed/configs/falco/drone-rules.yaml
+
+- rule: Drone MAVLink Injection Attack
+  desc: MAVLink 패킷 주입 공격 탐지
+  condition: >
+    spawned_process and
+    container.image.repository contains "dvd" and
+    (proc.cmdline contains "mavlink" or 
+     fd.name contains ":14550" or 
+     fd.name contains ":14551")
+  output: >
+    MAVLink injection detected (user=%user.name command=%proc.cmdline 
+    container=%container.name image=%container.image.repository)
+  priority: CRITICAL
+  tags: [drone, attack, injection]
+
+- rule: Drone Container Privilege Escalation
+  desc: 드론 컨테이너에서 권한 상승 탐지
+  condition: >
+    container and
+    container.image.repository contains "dvd" and
+    (proc.name in (su, sudo, setuid) or
+     proc.cmdline contains "chmod +s")
+  output: >
+    Privilege escalation in drone container (user=%user.name command=%proc.cmdline 
+    container=%container.name)
+  priority: HIGH
+  tags: [drone, privilege-escalation]
+
+- rule: Suspicious Network Activity in FANET
+  desc: FANET 네트워크에서 의심스러운 활동 탐지
+  condition: >
+    container and
+    container.image.repository contains "ns3" and
+    (fd.net != "" and fd.sport > 60000)
+  output: >
+    Suspicious network activity in FANET (connection=%fd.name container=%container.name)
+  priority: MEDIUM
+  tags: [fanet, network, suspicious]
+
+- rule: MTD Strategy Execution
+  desc: MTD 전략 실행 모니터링
+  condition: >
+    container and
+    container.image.repository contains "mtd" and
+    proc.cmdline contains "migrate"
+  output: >
+    MTD strategy executed (strategy=%proc.cmdline container=%container.name)
+  priority: INFO
+  tags: [mtd, defense]

@@ -1,0 +1,31 @@
+{
+  "simulation": {
+    "duration": 300.0,
+    "nodes": 20,
+    "area": {
+      "x": 1000,
+      "y": 1000,
+      "z": 300
+    },
+    "communication_range": 250.0,
+    "mobility_model": "GaussMarkovMobilityModel"
+  },
+  "network": {
+    "protocol": "802.11p",
+    "frequency": 5.9e9,
+    "tx_power": 23.0,
+    "data_rate": "6Mbps"
+  },
+  "security": {
+    "attack_probability": 0.1,
+    "detection_rate": 0.8,
+    "mtd_enabled": true,
+    "trust_threshold": 0.5
+  },
+  "output": {
+    "animation": true,
+    "traces": true,
+    "flow_monitor": true,
+    "pcap": false
+  }
+}

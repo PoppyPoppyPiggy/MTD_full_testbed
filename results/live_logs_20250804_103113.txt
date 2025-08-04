@@ -1,0 +1,10 @@
+2025-08-04T13:01:30.057774946Z Ground Control Online…
+2025-08-04T13:01:30.057859929Z + echo 'Ground Control Online…'
+2025-08-04T13:01:30.057866270Z + /usr/bin/expect /init
+2025-08-04T13:01:30.061392366Z spawn mavproxy.py --master=udp:0.0.0.0:14550
+2025-08-04T13:01:30.286141735Z Connect udp:0.0.0.0:14550 source_system=255
+2025-08-04T13:01:30.319641194Z Failed to load module: No module named 'adsb'. Use 'set moddebug 3' in the MAVProxy console to enable traceback
+2025-08-04T13:01:30.320259150Z Log Directory: 
+2025-08-04T13:01:30.320266490Z Telemetry log: mav.tlog
+2025-08-04T13:01:30.320673437Z Waiting for heartbeat from 0.0.0.0:14550
+2025-08-04T13:01:33.322976936Z MAV> link 1 down

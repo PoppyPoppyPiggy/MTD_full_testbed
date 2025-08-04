@@ -1,0 +1,287 @@
+# 수정된 Docker Compose 설정
+# 위치: /home/kali/MTD/MTD_full_testbed/docker-compose-network-analysis.yml
+# 
+# 기존 Damn-Vulnerable-Drone을 변경하지 않고 네트워크 분석만 추가
+
+version: '3.8'
+
+services:
+  # ===========================================
+  # NS-3 FANET 네트워크 분석기
+  # ===========================================
+  
+  ns3-network-analyzer:
+    build:
+      context: ./docker/ns3-analyzer
+      dockerfile: Dockerfile
+    container_name: ns3-network-analyzer
+    volumes:
+      - ./ns-3.45:/ns3:rw
+      - ./results:/results:rw
+      - ./logs/ns3:/logs:rw
+      - /var/run/docker.sock:/var/run/docker.sock:ro  # Docker API 접근
+    environment:
+      - NS3_NODES=10
+      - NS3_SIM_TIME=300
+      - DVD_CONTAINER_NAME=dvd-companion
+      - LOG_LEVEL=INFO
+    networks:
+      - analysis-network
+      - dvd-monitor-network
+    depends_on:
+      - traffic-capture
+    command: >
+      bash -c "
+        cd /ns3/ns-3-dev &&
+        ./ns3 configure --enable-examples --enable-tests &&
+        ./ns3 build &&
+        ./ns3 run fanet-mtd-simulation --
+        --nNodes=10
+        --simTime=300
+        --dvdContainer=dvd-companion
+        --logLevel=INFO
+      "
+    restart: unless-stopped
+
+  # ===========================================
+  # 트래픽 캡처 및 분석 서비스
+  # ===========================================
+  
+  traffic-capture:
+    build:
+      context: ./docker/traffic-capture
+      dockerfile: Dockerfile
+    container_name: dvd-traffic-capture
+    volumes:
+      - ./results:/results:rw
+      - ./logs/capture:/logs:rw
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/lib/docker:/var/lib/docker:ro
+    environment:
+      - DVD_CONTAINER_NAME=dvd-companion
+      - CAPTURE_INTERFACE=eth0
+      - LOG_LEVEL=INFO
+    networks:
+      - analysis-network
+      - dvd-monitor-network
+    privileged: true  # 패킷 캡처를 위한 권한
+    command: python3 /app/dvd_network_bridge.py --container dvd-companion
+    restart: unless-stopped
+
+  # ===========================================
+  # 실시간 CTI 분석기
+  # ===========================================
+  
+  cti-analyzer:
+    build:
+      context: ./docker/cti-analyzer
+      dockerfile: Dockerfile
+    container_name: dvd-cti-analyzer
+    volumes:
+      - ./results:/results:rw
+      - ./logs/cti:/logs:rw
+      - ./models:/models:ro
+    environment:
+      - CTI_MODEL_PATH=/models
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - STIX_OUTPUT_ENABLED=true
+    networks:
+      - analysis-network
+      - monitoring-network
+    ports:
+      - "8090:8090"  # CTI API
+    depends_on:
+      - elasticsearch
+      - traffic-capture
+    command: python3 /app/enhanced_cti_analyzer.py
+    restart: unless-stopped
+
+  # ===========================================
+  # 모니터링 스택 (ELK)
+  # ===========================================
+  
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: dvd-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      - xpack.security.enabled=false
+      - xpack.security.enrollment.enabled=false
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+      - ./logs/elasticsearch:/usr/share/elasticsearch/logs
+    networks:
+      - monitoring-network
+    ports:
+      - "9200:9200"
+    restart: unless-stopped
+
+  kibana:
+    image: docker.elastic.co/kibana/kibana:8.11.0
+    container_name: dvd-kibana
+    environment:
+      - ELASTICSEARCH_HOSTS=http://elasticsearch:9200
+      - xpack.security.enabled=false
+    networks:
+      - monitoring-network
+    ports:
+      - "5601:5601"
+    depends_on:
+      - elasticsearch
+    restart: unless-stopped
+
+  # ===========================================
+  # 로그 수집기
+  # ===========================================
+  
+  fluentd:
+    build:
+      context: ./docker/fluentd
+      dockerfile: Dockerfile
+    container_name: dvd-fluentd
+    volumes:
+      - ./configs/fluentd:/fluentd/etc:ro
+      - ./logs/fluentd:/var/log/fluentd:rw
+    environment:
+      - FLUENTD_CONF=fluent.conf
+    networks:
+      - monitoring-network
+    ports:
+      - "24224:24224"
+      - "24224:24224/udp"
+    depends_on:
+      - elasticsearch
+    restart: unless-stopped
+
+  # ===========================================
+  # 네트워크 분석 도구
+  # ===========================================
+  
+  zeek-analyzer:
+    build:
+      context: ./docker/zeek
+      dockerfile: Dockerfile
+    container_name: dvd-zeek
+    volumes:
+      - ./configs/zeek:/opt/zeek/etc:ro
+      - ./logs/zeek:/opt/zeek/logs:rw
+      - ./zeek-scripts:/opt/zeek/share/zeek/policy/custom:ro
+    environment:
+      - ZEEK_INTERFACE=eth0
+    networks:
+      - analysis-network
+      - dvd-monitor-network
+    command: >
+      bash -c "
+        /opt/zeek/bin/zeek -i eth0 /opt/zeek/share/zeek/policy/custom/drone-security.zeek &&
+        tail -f /opt/zeek/logs/current/*.log
+      "
+    restart: unless-stopped
+
+  # ===========================================
+  # 대시보드 및 시각화
+  # ===========================================
+  
+  grafana:
+    image: grafana/grafana:latest
+    container_name: dvd-grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=dvdadmin
+      - GF_INSTALL_PLUGINS=grafana-elasticsearch-datasource
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./configs/grafana:/etc/grafana/provisioning:ro
+    networks:
+      - monitoring-network
+    ports:
+      - "3000:3000"
+    depends_on:
+      - elasticsearch
+    restart: unless-stopped
+
+  # ===========================================
+  # DVD 모니터링 어댑터
+  # ===========================================
+  
+  dvd-monitor:
+    build:
+      context: ./docker/dvd-monitor
+      dockerfile: Dockerfile
+    container_name: dvd-monitor
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - ./results:/results:rw
+      - ./logs/monitor:/logs:rw
+    environment:
+      - DVD_CONTAINERS=dvd-companion,dvd-flight-controller,dvd-ground-station
+      - MONITOR_INTERVAL=10
+    networks:
+      - dvd-monitor-network
+      - monitoring-network
+    command: python3 /app/dvd_container_monitor.py
+    restart: unless-stopped
+
+# ===========================================
+# 네트워크 정의
+# ===========================================
+
+networks:
+  # DVD 컨테이너 모니터링 네트워크
+  dvd-monitor-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.30.0.0/16
+    external: true  # 기존 DVD 네트워크와 연결
+    name: dvd_default  # 기존 DVD docker-compose 네트워크 사용
+
+  # 분석 도구 전용 네트워크
+  analysis-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.31.0.0/16
+    driver_opts:
+      com.docker.network.bridge.name: "analysis-br"
+
+  # 모니터링 스택 네트워크
+  monitoring-network:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.32.0.0/16
+    driver_opts:
+      com.docker.network.bridge.name: "monitor-br"
+
+# ===========================================
+# 볼륨 정의
+# ===========================================
+
+volumes:
+  elasticsearch-data:
+    driver: local
+  grafana-data:
+    driver: local
+
+# ===========================================
+# 확장 설정
+# ===========================================
+
+# 개발 모드
+x-development:
+  jupyter-lab:
+    profiles: ["dev"]
+    image: jupyter/scipy-notebook:latest
+    container_name: dvd-jupyter
+    volumes:
+      - ./notebooks:/home/jovyan/work
+      - ./results:/home/jovyan/results
+      - ./models:/home/jovyan/models
+    environment:
+      - JUPYTER_ENABLE_LAB=yes
+      - JUPYTER_TOKEN=dvdtoken
+    networks:
+      - analysis-network 
+    ports:
+      - "8888:8888"
