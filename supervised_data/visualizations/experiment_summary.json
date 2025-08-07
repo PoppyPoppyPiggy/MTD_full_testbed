@@ -1,0 +1,7 @@
+{
+  "experiment_date": "2025-08-07T18:23:14.428135",
+  "best_algorithm": "Random Forest",
+  "best_accuracy": 0.85,
+  "total_algorithms_tested": 4,
+  "visualization_file": "/home/kali/MTD/MTD_full_testbed/supervised_data/visualizations/model_comparison_20250807_182314.png"
+}
