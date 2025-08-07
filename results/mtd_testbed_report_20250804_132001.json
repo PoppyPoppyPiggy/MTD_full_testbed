@@ -1,0 +1,2991 @@
+{
+  "metadata": {
+    "generation_time": "2025-08-04T13:20:01.042635",
+    "testbed_version": "1.0.0",
+    "campaign_duration": 180,
+    "configuration": {
+      "system": {
+        "qgroundcontrol_host": "localhost",
+        "qgroundcontrol_port": 14550,
+        "ardupilot_host": "localhost",
+        "ardupilot_port": 14551,
+        "gazebo_port": 11345,
+        "ns3_port": 9999
+      },
+      "fanet": {
+        "max_range": 1000.0,
+        "node_count": 10,
+        "mobility_model": "random_waypoint"
+      },
+      "attacks": {
+        "base_duration": 60,
+        "max_concurrent": 3,
+        "adaptive_intensity": true
+      },
+      "detection": {
+        "anomaly_threshold": 0.7,
+        "alert_cooldown": 30
+      },
+      "mtd": {
+        "enabled": true,
+        "response_time": 10,
+        "defensive_actions": [
+          "topology_change",
+          "frequency_hop",
+          "encryption_rotate"
+        ]
+      }
+    }
+  },
+  "summary": {
+    "total_attacks_executed": 3,
+    "successful_attacks": 1,
+    "success_rate": 0.3333333333333333,
+    "total_anomalies_detected": 89,
+    "detection_rate": 29.666666666666668,
+    "mtd_actions_executed": 143,
+    "final_attack_intensity": "RECONNAISSANCE"
+  },
+  "attack_analysis": {
+    "by_category": {
+      "unknown": {
+        "success_rate": 0.0,
+        "total": 1,
+        "success": 0
+      },
+      "reconnaissance": {
+        "success_rate": 0.5,
+        "total": 2,
+        "success": 1
+      }
+    },
+    "intensity_adjustments": 0,
+    "intensity_history": []
+  },
+  "system_performance": {
+    "baseline_metrics": {
+      "timestamp": "2025-08-04 12:49:58.506961",
+      "cpu_usage": 18.18,
+      "memory_usage": 49.21999999999999,
+      "network_latency": 3.072786331176758,
+      "packet_loss": 0.0,
+      "connection_count": 41,
+      "mavlink_messages": 124,
+      "qgc_status": "running",
+      "gazebo_entities": 4,
+      "ns3_nodes": 14,
+      "fanet_topology": {
+        "active_nodes": 8,
+        "total_connections": 15,
+        "routing_efficiency": 0.8045342004478226,
+        "network_diameter": 5
+      },
+      "anomaly_score": 0.0
+    },
+    "final_metrics": {
+      "timestamp": "2025-08-04 13:19:51.291042",
+      "cpu_usage": 16.4,
+      "memory_usage": 50.2,
+      "network_latency": 1.7325878143310547,
+      "packet_loss": 0.0,
+      "connection_count": 41,
+      "mavlink_messages": 65,
+      "qgc_status": "stopped",
+      "gazebo_entities": 6,
+      "ns3_nodes": 18,
+      "fanet_topology": {
+        "active_nodes": 3,
+        "total_connections": 12,
+        "routing_efficiency": 0.8761663331359875,
+        "network_diameter": 6
+      },
+      "anomaly_score": 0.013653333333333413
+    },
+    "anomaly_events": [
+      {
+        "timestamp": "2025-08-04T12:50:08.761273",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T12:50:29.024989",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T12:50:49.276583",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T12:51:09.528382",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T12:51:29.802486",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T12:51:50.072447",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T12:52:10.328438",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T12:52:30.586030",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T12:52:50.838993",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T12:53:11.095535",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T12:53:31.358597",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T12:53:51.613100",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T12:54:11.874084",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T12:54:32.133720",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T12:54:52.378603",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T12:55:12.639335",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T12:55:32.885971",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T12:55:53.143779",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T12:56:13.403611",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T12:56:33.657778",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T12:56:53.911130",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T12:57:14.167048",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T12:57:34.423562",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T12:57:54.686368",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T12:58:14.937980",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T12:58:35.193604",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T12:58:55.449269",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T12:59:15.701957",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T12:59:35.958407",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T12:59:56.221406",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:00:16.473930",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:00:36.728803",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:00:56.988978",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:01:17.238483",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:01:37.494028",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:01:57.751618",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:02:18.008370",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:02:38.267315",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:02:58.522988",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:03:18.777506",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:03:39.030918",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:03:59.286339",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:04:19.543042",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:04:39.799518",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:05:00.054460",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:05:20.311470",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:05:40.565890",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:06:00.821462",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:06:21.084225",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:06:41.333734",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:07:01.595188",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:07:21.846740",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:07:42.103928",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:08:02.361932",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:08:22.614611",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:08:42.875367",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:09:03.125452",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:09:23.382051",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:09:43.640512",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:10:03.900183",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:10:24.151128",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:10:44.406511",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:11:04.661713",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:11:24.918289",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:11:45.174595",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:12:05.441086",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:12:25.691318",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:12:45.944397",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:13:06.196727",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:13:26.455233",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:13:46.710536",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:14:06.971744",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:14:27.228531",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:14:47.479222",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:15:07.704791",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:15:27.958828",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:15:48.219001",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:16:08.470704",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:16:28.728104",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:16:48.982369",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:17:09.241958",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:17:29.502080",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:17:49.751230",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:18:10.006378",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:18:30.269621",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:18:50.522053",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:19:10.781286",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:19:31.031867",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T13:19:51.291042",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      }
+    ]
+  },
+  "fanet_analysis": {
+    "final_topology": {
+      "node_count": 8,
+      "connection_count": 1,
+      "avg_degree": 0.25,
+      "max_degree": 1,
+      "min_degree": 0,
+      "density": 0.03571428571428571
+    },
+    "topology_changes": 76,
+    "node_mobility": {
+      "active_nodes": 8,
+      "average_connections": 0.25,
+      "network_density": 0.03571428571428571
+    }
+  },
+  "mtd_effectiveness": {
+    "total_actions": 143,
+    "successful_actions": 143,
+    "action_types": {
+      "emergency_response": 89,
+      "topology_change": 17,
+      "frequency_hop": 21,
+      "encryption_rotate": 16
+    },
+    "response_times": [
+      0.000547,
+      -20.263169,
+      -40.514763,
+      0.465006,
+      -19.79871,
+      -40.050304,
+      20.263991,
+      0.000275,
+      -20.251319,
+      -40.503118,
+      40.5156,
+      20.251884,
+      0.00029,
+      -20.251509,
+      -40.525613,
+      40.515895,
+      20.252179,
+      0.000585,
+      -20.251214,
+      -40.525318,
+      40.516126,
+      20.25241,
+      0.000816,
+      -20.250983,
+      -40.525087,
+      40.616757,
+      20.353041,
+      0.101447,
+      -20.150352,
+      -40.424456,
+      40.503657,
+      20.252063,
+      0.000264,
+      -20.27384,
+      -40.543801,
+      40.526158,
+      20.274359,
+      0.000255,
+      -20.269706,
+      -40.525697,
+      40.544284,
+      20.27018,
+      0.000219,
+      -20.255772,
+      -40.513364,
+      40.526167,
+      20.256206,
+      0.000215,
+      -20.257377,
+      -40.51034,
+      40.51418,
+      20.258189,
+      0.000597,
+      -20.252366,
+      -40.508908,
+      40.510791,
+      20.253199,
+      0.000236,
+      -20.256306,
+      -40.519368,
+      40.511078,
+      20.253486,
+      0.000523,
+      -20.256019,
+      -40.519081,
+      40.509854,
+      20.256891,
+      0.000349,
+      -20.262713,
+      -40.517216,
+      40.519822,
+      20.26328,
+      0.000218,
+      -20.254285,
+      -40.515269,
+      40.517805,
+      20.254743,
+      0.00024,
+      -20.260744,
+      -40.52038,
+      40.518008,
+      20.254946,
+      0.000443,
+      -20.260541,
+      -40.520177,
+      40.516463,
+      20.26196,
+      0.000976,
+      -20.25866,
+      -40.503543,
+      50.364232,
+      30.109729,
+      9.848745,
+      -10.410891,
+      -30.655774,
+      -50.916506,
+      40.520846,
+      20.259862,
+      0.000226,
+      -20.244657,
+      -40.505389,
+      40.504779,
+      20.245143,
+      0.00026,
+      -20.260472,
+      -40.507108,
+      40.505865,
+      20.260982,
+      0.00025,
+      -20.246386,
+      -40.504194,
+      50.252657,
+      30.007774,
+      9.747042,
+      -10.499594,
+      -30.757402,
+      -51.017234,
+      40.507623,
+      20.246891,
+      0.000255,
+      -20.257553,
+      -40.517385,
+      40.504729,
+      20.258093,
+      0.000285,
+      -20.259547,
+      -40.513714,
+      40.505026,
+      20.25839,
+      0.000582,
+      -20.25925,
+      -40.513417,
+      40.51814,
+      20.260332,
+      0.0005,
+      -20.253667,
+      -40.507019,
+      40.514247,
+      20.254415,
+      0.000248,
+      -20.253104,
+      -40.509022,
+      40.507762,
+      20.253595,
+      0.000243,
+      -20.255675,
+      -40.512189,
+      40.509534,
+      20.256182,
+      0.000264,
+      -20.25625,
+      -40.519056,
+      50.265022,
+      30.01167,
+      9.755752,
+      -10.500762,
+      -30.763568,
+      -51.01518,
+      50.265651,
+      30.012299,
+      9.756381,
+      -10.500133,
+      -30.762939,
+      -51.014551,
+      40.512686,
+      20.256768,
+      0.000254,
+      -20.262552,
+      -40.514164,
+      40.519568,
+      20.263054,
+      0.000248,
+      -20.251364,
+      -40.506988,
+      40.520054,
+      20.26354,
+      0.000734,
+      -20.250878,
+      -40.506502,
+      40.515075,
+      20.252269,
+      0.000657,
+      -20.254967,
+      -40.510632,
+      50.374833,
+      30.112027,
+      9.860415,
+      -10.395209,
+      -30.650874,
+      -50.903562,
+      40.507478,
+      20.255866,
+      0.000242,
+      -20.255423,
+      -40.508111,
+      40.511514,
+      20.25589,
+      0.000225,
+      -20.252463,
+      -40.508913,
+      40.511731,
+      20.256107,
+      0.000442,
+      -20.252246,
+      -40.508696,
+      40.511865,
+      20.256241,
+      0.000576,
+      -20.252112,
+      -40.508562,
+      40.508594,
+      20.252929,
+      0.000241,
+      -20.256209,
+      -40.519208,
+      50.364947,
+      30.109282,
+      9.856594,
+      -10.399856,
+      -30.662855,
+      -50.915379,
+      50.365615,
+      30.10995,
+      9.857262,
+      -10.399188,
+      -30.662187,
+      -50.914711,
+      40.509391,
+      20.256703,
+      0.000253,
+      -20.262746,
+      -40.51527,
+      40.519716,
+      20.263266,
+      0.000267,
+      -20.252257,
+      -40.50713,
+      40.519979,
+      20.263529,
+      0.00053,
+      -20.251994,
+      -40.506867,
+      40.515796,
+      20.252797,
+      0.000273,
+      -20.2546,
+      -40.514775,
+      40.507674,
+      20.25515,
+      0.000277,
+      -20.259898,
+      -40.509403,
+      40.515334,
+      20.260461,
+      0.000286,
+      -20.249219,
+      -40.504764,
+      40.509954,
+      20.249779,
+      0.000274,
+      -20.255271,
+      -40.512861,
+      50.269561,
+      30.009386,
+      9.759881,
+      -10.495664,
+      -30.753254,
+      -51.010006,
+      40.505281,
+      20.255776,
+      0.000231,
+      -20.257359,
+      -40.514111,
+      40.513327,
+      20.257782,
+      0.000192,
+      -20.25656,
+      -40.515505,
+      40.513717,
+      20.258172,
+      0.000582,
+      -20.25617,
+      -40.515115,
+      40.514093,
+      20.258548,
+      0.000958,
+      -20.255794,
+      -40.514739,
+      40.514571,
+      20.256981,
+      0.000229,
+      -20.258716,
+      -40.514389,
+      50.368782,
+      30.111192,
+      9.85444,
+      -10.404505,
+      -30.660178,
+      -50.914696,
+      40.515906,
+      20.259154,
+      0.000209,
+      -20.255464,
+      -40.509982,
+      40.514853,
+      20.255908,
+      0.000235,
+      -20.254283,
+      -40.507695,
+      40.515151,
+      20.256206,
+      0.000533,
+      -20.253985,
+      -40.507397,
+      40.616105,
+      20.35716,
+      0.101487,
+      -20.153031,
+      -40.406443,
+      40.510446,
+      20.254773,
+      0.000255,
+      -20.253157,
+      -40.508578,
+      50.46712,
+      30.211447,
+      9.956929,
+      -10.296483,
+      -30.551904,
+      -50.808607,
+      40.508207,
+      20.253689,
+      0.000277,
+      -20.255144,
+      -40.511847,
+      40.509075,
+      20.255663,
+      0.000242,
+      -20.256461,
+      -40.512937,
+      40.509463,
+      20.256051,
+      0.00063,
+      -20.256073,
+      -40.512549,
+      40.50994,
+      20.256528,
+      0.001107,
+      -20.255596,
+      -40.512072,
+      40.51232,
+      20.256899,
+      0.000196,
+      -20.25628,
+      -40.511222,
+      40.513433,
+      20.25673,
+      0.000254,
+      -20.254688,
+      -40.511698,
+      40.5117,
+      20.255224,
+      0.000282,
+      -20.256728,
+      -40.511148,
+      40.512013,
+      20.255537,
+      0.000595,
+      -20.256415,
+      -40.510835,
+      40.512173,
+      20.257231,
+      0.000221,
+      -20.254199,
+      -40.509771,
+      40.511836,
+      20.254826,
+      0.000406,
+      -20.255166,
+      -40.517929,
+      40.510213,
+      20.255793,
+      0.000221,
+      -20.262542,
+      -40.512051,
+      40.510429,
+      20.256009,
+      0.000437,
+      -20.262326,
+      -40.511835,
+      40.518593,
+      20.263021,
+      0.000258,
+      -20.249251,
+      -40.510705,
+      40.512495,
+      20.249732,
+      0.000223,
+      -20.261231,
+      -40.512783,
+      40.511211,
+      20.261702,
+      0.000248,
+      -20.251304,
+      -40.508492,
+      40.511425,
+      20.261916,
+      0.000462,
+      -20.25109,
+      -40.508278,
+      40.511743,
+      20.262234,
+      0.00078,
+      -20.250772,
+      -40.50796,
+      40.513214,
+      20.25176,
+      0.000208,
+      -20.25698,
+      -40.514984,
+      50.372747,
+      30.111293,
+      9.859741,
+      -10.397447,
+      -30.655451,
+      -50.90813,
+      50.373261,
+      30.111807,
+      9.860255,
+      -10.396933,
+      -30.654937,
+      -50.907616,
+      40.509,
+      20.257448,
+      0.00026,
+      -20.257744,
+      -40.510423,
+      40.515408,
+      20.25822,
+      0.000216,
+      -20.252463,
+      -40.513219,
+      40.515615,
+      20.258427,
+      0.000423,
+      -20.252256,
+      -40.513012,
+      40.616391,
+      20.359203,
+      0.101199,
+      -20.15148,
+      -40.412236,
+      40.510878,
+      20.252874,
+      0.000195,
+      -20.260561,
+      -40.510646,
+      50.471189,
+      30.213185,
+      9.960506,
+      -10.30025,
+      -30.550335,
+      -50.806934,
+      40.513685,
+      20.261006,
+      0.00025,
+      -20.249835,
+      -40.506434,
+      40.511106,
+      20.25035,
+      0.000265,
+      -20.256334,
+      -40.514795,
+      40.506893,
+      20.256808,
+      0.000209,
+      -20.258252,
+      -40.517923,
+      50.259171,
+      30.009086,
+      9.752487,
+      -10.505974,
+      -30.765645,
+      -51.01659,
+      50.259333,
+      30.009248,
+      9.752649,
+      -10.505812,
+      -30.765483,
+      -51.016428,
+      40.515285,
+      20.258686,
+      0.000225,
+      -20.259446,
+      -40.510391,
+      40.51852,
+      20.260059,
+      0.000388,
+      -20.250557,
+      -40.50594,
+      40.518796,
+      20.260335,
+      0.000664,
+      -20.250281,
+      -40.505664,
+      40.510812,
+      20.251141,
+      0.000196,
+      -20.255187,
+      -40.510389,
+      40.506626,
+      20.255681,
+      0.000298,
+      -20.254904,
+      -40.51148,
+      40.510822,
+      20.255439,
+      0.000237,
+      -20.256339,
+      -40.512645,
+      40.511244,
+      20.255861,
+      0.000659,
+      -20.255917,
+      -40.512223,
+      40.512056,
+      20.256854,
+      0.000278,
+      -20.256028,
+      -40.522519,
+      50.363792,
+      30.10859,
+      9.852014,
+      -10.404292,
+      -30.670783,
+      -50.921015,
+      50.364329,
+      30.109127,
+      9.852551,
+      -10.403755,
+      -30.670246,
+      -50.920478,
+      40.513131,
+      20.256555,
+      0.000249,
+      -20.266242,
+      -40.516474,
+      40.52307,
+      20.266764,
+      0.000273,
+      -20.249959,
+      -40.503038,
+      40.523303,
+      20.266997,
+      0.000506,
+      -20.249726,
+      -40.502805,
+      40.516979,
+      20.250488,
+      0.000256,
+      -20.252823,
+      -40.505153,
+      50.375713,
+      30.109222,
+      9.85899,
+      -10.394089,
+      -30.646419,
+      -50.904925,
+      40.503583,
+      20.253351,
+      0.000272,
+      -20.252058,
+      -40.510564,
+      40.505609,
+      20.25253,
+      0.0002,
+      -20.258306,
+      -40.513609,
+      40.505932,
+      20.252853,
+      0.000523,
+      -20.257983,
+      -40.513286,
+      40.506352,
+      20.253273,
+      0.000943,
+      -20.257563,
+      -40.512866,
+      40.511108,
+      20.258778,
+      0.000272,
+      -20.255031,
+      -40.516239,
+      50.364033,
+      30.111703,
+      9.853197,
+      -10.402106,
+      -30.663314,
+      -50.920101,
+      40.514037,
+      20.255531,
+      0.000228,
+      -20.26098,
+      -40.517767,
+      50.46545,
+      30.21312,
+      9.954614,
+      -10.300689,
+      -30.561897,
+      -50.818684,
+      40.516726,
+      20.261423,
+      0.000215,
+      -20.256572,
+      -40.507263,
+      40.518267,
+      20.257059,
+      0.000272,
+      -20.250419,
+      -40.475988,
+      40.507688,
+      20.250901,
+      0.00021,
+      -20.225359,
+      -40.479396,
+      40.508006,
+      20.251219,
+      0.000528,
+      -20.225041,
+      -40.479078,
+      40.608634,
+      20.351847,
+      0.101156,
+      -20.124413,
+      -40.37845,
+      40.476477,
+      20.225786,
+      0.000217,
+      -20.25382,
+      -40.513993,
+      40.479852,
+      20.254283,
+      0.000246,
+      -20.259927,
+      -40.51163,
+      50.462221,
+      30.21153,
+      9.985961,
+      -10.268076,
+      -30.528249,
+      -50.779952,
+      40.514494,
+      20.260457,
+      0.000284,
+      -20.251419,
+      -40.508819,
+      50.258873,
+      30.004836,
+      9.744663,
+      -10.50704,
+      -30.76444,
+      -51.018705,
+      40.512227,
+      20.252054,
+      0.000351,
+      -20.257049,
+      -40.511314,
+      40.509373,
+      20.25767,
+      0.00027,
+      -20.253995,
+      -40.513584,
+      40.509662,
+      20.257959,
+      0.000559,
+      -20.253706,
+      -40.513295,
+      40.511875,
+      20.254475,
+      0.00021,
+      -20.259379,
+      -40.519501,
+      40.514051,
+      20.259786,
+      0.000197,
+      -20.259925,
+      -40.509075,
+      40.519959,
+      20.26037,
+      0.000248,
+      -20.248902,
+      -40.50405,
+      40.509541,
+      20.249419,
+      0.000269,
+      -20.254879,
+      -40.518122,
+      50.268664,
+      30.008542,
+      9.759392,
+      -10.495756,
+      -30.758999,
+      -51.011431,
+      40.504606,
+      20.255456,
+      0.000308,
+      -20.262935,
+      -40.515367,
+      40.518639,
+      20.263491,
+      0.000248,
+      -20.252184,
+      -40.511417,
+      40.515984,
+      20.252741,
+      0.000309,
+      -20.258924,
+      -40.509505,
+      40.511991,
+      20.259559,
+      0.000326,
+      -20.250255,
+      -40.50943,
+      40.510084,
+      20.250851,
+      0.00027,
+      -20.258905,
+      40.510009,
+      20.259428,
+      0.000253
+    ]
+  },
+  "detailed_results": {
+    "attack_results": [
+      {
+        "attack_name": "fanet_routing_attack",
+        "success": false,
+        "error": "[Errno 2] No such file or directory: PosixPath('/home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/network_disruption')",
+        "execution_time": 0,
+        "timestamp": "2025-08-04 12:50:08.761976"
+      },
+      {
+        "attack_name": "wifi_network_discovery",
+        "category": "reconnaissance",
+        "intensity": 2,
+        "success": false,
+        "execution_time": 0.009875,
+        "return_code": 1,
+        "stdout": "\u001b[0;36m============================================\u001b[0m\n\u001b[0;36m         WiFi Network Discovery            \u001b[0m\n\u001b[0;36m============================================\u001b[0m\n\u001b[0;31m[ERROR]\u001b[0m This script must be run as root\n",
+        "stderr": "",
+        "iocs": [],
+        "timestamp": "2025-08-04 12:50:08.762650",
+        "target_modules": [
+          "fanet"
+        ]
+      },
+      {
+        "attack_name": "mavlink_service_discovery",
+        "category": "reconnaissance",
+        "intensity": 3,
+        "success": true,
+        "execution_time": 0.462673,
+        "return_code": 0,
+        "stdout": "\u001b[0;36m\u2554\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2557\u001b[0m\n\u001b[0;36m\u2551      MAVLink Service Discovery        \u2551\u001b[0m\n\u001b[0;36m\u255a\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u2550\u255d\u001b[0m\n\u001b[0;34m[INFO]\u001b[0m Starting MAVLink Service Discovery\n\u001b[0;34m[INFO]\u001b[0m Scanning flight-controller (10.13.0.2)...\n\r   Testing 10.13.0.2:14550...\r   Testing 10.13.0.2:14551...\r   Testing 10.13.0.2:14552...\r   Testing 10.13.0.2:5760...\r   Testing 10.13.0.2:5762...\r   Testing 10.13.0.2:5763...\r                                                  \r\n\u001b[0;34m[INFO]\u001b[0m Scanning companion-computer (10.13.0.3)...\n\r   Testing 10.13.0.3:14550...\r   Testing 10.13.0.3:14551...\r   Testing 10.13.0.3:14552...\r   Testing 10.13.0.3:5760...\r   Testing 10.13.0.3:5762...\r   Testing 10.13.0.3:5763...\r                                                  \r\n\u001b[0;34m[INFO]\u001b[0m Scanning ground-control-station (10.13.0.4)...\n\r   Testing 10.13.0.4:14550...\r\u001b[0;32m[+] Port 14550/UDP open on 10.13.0.4\u001b[0m\n\u001b[0;32m[+] MAVLink service confirmed: 10.13.0.4:14550 (ground-c",
+        "stderr": "/home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/reconnaissance/../common/utils.sh: line 30: /home/kali/MTD/MTD_full_testbed/attack_logs/mavlink_discovery.log: Permission denied\n/home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/reconnaissance/../common/utils.sh: line 30: /home/kali/MTD/MTD_full_testbed/attack_logs/mavlink_discovery.log: Permission denied\n/home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/reconnaissance/../common/utils.sh: line 30: /home/kali/MTD/MTD_full_testbed/attack_logs/mavlink_discovery.log: Permission denied\n/home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/reconnaissance/../common/utils.sh: line 30: /home/kali/MTD/MTD_full_testbed/attack_logs/mavlink_discovery.log: Permission denied\n/home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/reconnaissance/../common/utils.sh: line 30: /home/kali/MTD/MTD_full_testbed/attack_logs/mavlink_discovery.log: Permission denied\n/home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/reconnaissance/../common/utils.sh: li",
+        "iocs": [
+          "10.13.0.4",
+          "10.13.0.5",
+          "10.13.0.2",
+          "10.13.0.3"
+        ],
+        "timestamp": "2025-08-04 12:50:08.763018",
+        "target_modules": [
+          "mavlink",
+          "ardupilot"
+        ]
+      }
+    ],
+    "mtd_actions": [
+      {
+        "timestamp": "2025-08-04T12:50:08.761820",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T12:50:09.226279",
+        "action_type": "encryption_rotate",
+        "target_module": "fanet",
+        "success": true,
+        "parameters": {
+          "new_key": "BBCB91B5DAB43385DC6C221AC9D08FE7",
+          "encryption_type": "AES256"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T12:50:29.025264",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T12:50:49.276873",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T12:50:49.277168",
+        "action_type": "topology_change",
+        "target_module": "fanet",
+        "success": true,
+        "parameters": {
+          "new_topology": "random",
+          "node_count": 10,
+          "connection_probability": 0.47900484974046165
+        }
+      },
+      {
+        "timestamp": "2025-08-04T12:50:49.277399",
+        "action_type": "frequency_hop",
+        "target_module": "mavlink",
+        "success": true,
+        "parameters": {
+          "new_frequency": 2400,
+          "hop_interval": 3.4177883711138297
+        }
+      },
+      {
+        "timestamp": "2025-08-04T12:50:49.378030",
+        "action_type": "encryption_rotate",
+        "target_module": "gazebo",
+        "success": true,
+        "parameters": {
+          "new_key": "B94CB8E097A884001C724941823F4BC1",
+          "encryption_type": "ChaCha20"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T12:51:09.528646",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T12:51:29.802741",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T12:51:50.072666",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T12:52:10.328653",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T12:52:30.586627",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T12:52:50.839229",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T12:52:50.839516",
+        "action_type": "topology_change",
+        "target_module": "ns3",
+        "success": true,
+        "parameters": {
+          "new_topology": "random",
+          "node_count": 11,
+          "connection_probability": 0.561961527203964
+        }
+      },
+      {
+        "timestamp": "2025-08-04T12:53:11.095884",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T12:53:31.358815",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T12:53:51.613340",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T12:53:51.613543",
+        "action_type": "frequency_hop",
+        "target_module": "mavlink",
+        "success": true,
+        "parameters": {
+          "new_frequency": 5200,
+          "hop_interval": 2.8254597159350863
+        }
+      },
+      {
+        "timestamp": "2025-08-04T12:54:11.875060",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T12:54:21.722829",
+        "action_type": "frequency_hop",
+        "target_module": "ardupilot",
+        "success": true,
+        "parameters": {
+          "new_frequency": 5800,
+          "hop_interval": 2.4578136578255076
+        }
+      },
+      {
+        "timestamp": "2025-08-04T12:54:32.133946",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T12:54:52.378863",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T12:55:12.639585",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T12:55:22.386377",
+        "action_type": "frequency_hop",
+        "target_module": "ns3",
+        "success": true,
+        "parameters": {
+          "new_frequency": 2400,
+          "hop_interval": 4.157591586109572
+        }
+      },
+      {
+        "timestamp": "2025-08-04T12:55:32.886226",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T12:55:53.144064",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T12:55:53.144361",
+        "action_type": "frequency_hop",
+        "target_module": "fanet",
+        "success": true,
+        "parameters": {
+          "new_frequency": 5800,
+          "hop_interval": 3.725289393770206
+        }
+      },
+      {
+        "timestamp": "2025-08-04T12:56:13.404111",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T12:56:33.658026",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T12:56:53.911373",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T12:57:14.167312",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T12:57:23.922800",
+        "action_type": "topology_change",
+        "target_module": "mavlink",
+        "success": true,
+        "parameters": {
+          "new_topology": "random",
+          "node_count": 8,
+          "connection_probability": 0.5155444837480133
+        }
+      },
+      {
+        "timestamp": "2025-08-04T12:57:23.923429",
+        "action_type": "frequency_hop",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "new_frequency": 5200,
+          "hop_interval": 2.6415066092539674
+        }
+      },
+      {
+        "timestamp": "2025-08-04T12:57:34.423816",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T12:57:54.686616",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T12:57:54.687102",
+        "action_type": "encryption_rotate",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "new_key": "5B1DF0242F380E4C872D3BAF62C40984",
+          "encryption_type": "AES256"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T12:58:14.938637",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T12:58:24.798395",
+        "action_type": "topology_change",
+        "target_module": "ns3",
+        "success": true,
+        "parameters": {
+          "new_topology": "random",
+          "node_count": 6,
+          "connection_probability": 0.3631609812953378
+        }
+      },
+      {
+        "timestamp": "2025-08-04T12:58:35.193846",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T12:58:55.449494",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T12:58:55.449711",
+        "action_type": "topology_change",
+        "target_module": "fanet",
+        "success": true,
+        "parameters": {
+          "new_topology": "random",
+          "node_count": 5,
+          "connection_probability": 0.4625721213301931
+        }
+      },
+      {
+        "timestamp": "2025-08-04T12:58:55.449845",
+        "action_type": "frequency_hop",
+        "target_module": "ardupilot",
+        "success": true,
+        "parameters": {
+          "new_frequency": 5500,
+          "hop_interval": 1.1972716886191206
+        }
+      },
+      {
+        "timestamp": "2025-08-04T12:59:15.702198",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T12:59:25.558551",
+        "action_type": "topology_change",
+        "target_module": "ns3",
+        "success": true,
+        "parameters": {
+          "new_topology": "random",
+          "node_count": 12,
+          "connection_probability": 0.3954827426991218
+        }
+      },
+      {
+        "timestamp": "2025-08-04T12:59:25.559219",
+        "action_type": "encryption_rotate",
+        "target_module": "gazebo",
+        "success": true,
+        "parameters": {
+          "new_key": "AA30796711F0102E79B6E72C4D26422D",
+          "encryption_type": "ChaCha20"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T12:59:35.958660",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T12:59:56.221673",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T12:59:56.221936",
+        "action_type": "topology_change",
+        "target_module": "mavlink",
+        "success": true,
+        "parameters": {
+          "new_topology": "random",
+          "node_count": 15,
+          "connection_probability": 0.4631090734711347
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:00:16.474203",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:00:36.729080",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:00:56.989264",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:01:17.238757",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:01:26.998364",
+        "action_type": "encryption_rotate",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "new_key": "DC60BB4B762714173C1FF05FC855411D",
+          "encryption_type": "ChaCha20"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:01:37.494259",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:01:57.751810",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:01:57.752200",
+        "action_type": "topology_change",
+        "target_module": "ardupilot",
+        "success": true,
+        "parameters": {
+          "new_topology": "random",
+          "node_count": 13,
+          "connection_probability": 0.46589619879830885
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:01:57.752576",
+        "action_type": "frequency_hop",
+        "target_module": "ardupilot",
+        "success": true,
+        "parameters": {
+          "new_frequency": 2450,
+          "hop_interval": 2.056363981296402
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:02:18.008599",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:02:27.862810",
+        "action_type": "topology_change",
+        "target_module": "fanet",
+        "success": true,
+        "parameters": {
+          "new_topology": "random",
+          "node_count": 11,
+          "connection_probability": 0.4513587305443514
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:02:38.267524",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:02:58.523223",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:02:58.523521",
+        "action_type": "frequency_hop",
+        "target_module": "fanet",
+        "success": true,
+        "parameters": {
+          "new_frequency": 2450,
+          "hop_interval": 1.4101642705762676
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:02:58.624475",
+        "action_type": "encryption_rotate",
+        "target_module": "ardupilot",
+        "success": true,
+        "parameters": {
+          "new_key": "1EE6A807CCC9F3C676D7729F98509FC4",
+          "encryption_type": "AES256"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:03:18.777761",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:03:28.734435",
+        "action_type": "topology_change",
+        "target_module": "mavlink",
+        "success": true,
+        "parameters": {
+          "new_topology": "random",
+          "node_count": 12,
+          "connection_probability": 0.3892325773191945
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:03:39.031195",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:03:59.286581",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:03:59.286969",
+        "action_type": "topology_change",
+        "target_module": "ardupilot",
+        "success": true,
+        "parameters": {
+          "new_topology": "random",
+          "node_count": 5,
+          "connection_probability": 0.7036466174127467
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:03:59.287446",
+        "action_type": "encryption_rotate",
+        "target_module": "ns3",
+        "success": true,
+        "parameters": {
+          "new_key": "C3E219903FB3F8A652533FE140AA4BA1",
+          "encryption_type": "AES256"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:04:19.543238",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:04:39.799772",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:05:00.054742",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:05:00.055055",
+        "action_type": "encryption_rotate",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "new_key": "060AEBA06820EF55A26B110AF5C7FBE9",
+          "encryption_type": "AES256"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:05:20.311691",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:05:40.566296",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:06:00.821683",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:06:00.821899",
+        "action_type": "frequency_hop",
+        "target_module": "ardupilot",
+        "success": true,
+        "parameters": {
+          "new_frequency": 5200,
+          "hop_interval": 4.202998290363068
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:06:21.084483",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:06:41.333957",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:07:01.595436",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:07:01.595650",
+        "action_type": "topology_change",
+        "target_module": "mavlink",
+        "success": true,
+        "parameters": {
+          "new_topology": "random",
+          "node_count": 7,
+          "connection_probability": 0.432451862631754
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:07:01.595968",
+        "action_type": "frequency_hop",
+        "target_module": "gazebo",
+        "success": true,
+        "parameters": {
+          "new_frequency": 5800,
+          "hop_interval": 1.805671966814074
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:07:21.846948",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:07:31.706481",
+        "action_type": "topology_change",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "new_topology": "random",
+          "node_count": 9,
+          "connection_probability": 0.6735997110151245
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:07:31.706995",
+        "action_type": "frequency_hop",
+        "target_module": "gazebo",
+        "success": true,
+        "parameters": {
+          "new_frequency": 5800,
+          "hop_interval": 4.9044089434662705
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:07:42.104188",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:08:02.362148",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:08:02.362355",
+        "action_type": "frequency_hop",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "new_frequency": 2500,
+          "hop_interval": 3.012262375594066
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:08:02.463131",
+        "action_type": "encryption_rotate",
+        "target_module": "mavlink",
+        "success": true,
+        "parameters": {
+          "new_key": "6EE9CD015539E7F4C555266FA0E31E66",
+          "encryption_type": "ChaCha20"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:08:22.614806",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:08:32.575117",
+        "action_type": "topology_change",
+        "target_module": "ns3",
+        "success": true,
+        "parameters": {
+          "new_topology": "random",
+          "node_count": 6,
+          "connection_probability": 0.3275406574387026
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:08:42.875617",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:09:03.125717",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:09:23.382260",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:09:33.134538",
+        "action_type": "topology_change",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "new_topology": "random",
+          "node_count": 5,
+          "connection_probability": 0.3921043177135687
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:09:33.134700",
+        "action_type": "frequency_hop",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "new_frequency": 2450,
+          "hop_interval": 4.133837431762428
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:09:43.640737",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:10:03.900571",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:10:03.900847",
+        "action_type": "encryption_rotate",
+        "target_module": "mavlink",
+        "success": true,
+        "parameters": {
+          "new_key": "747677FE755020BA35AC9BC726F59D98",
+          "encryption_type": "ChaCha20"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:10:24.151324",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:10:44.406809",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:11:04.661950",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:11:04.662372",
+        "action_type": "frequency_hop",
+        "target_module": "ns3",
+        "success": true,
+        "parameters": {
+          "new_frequency": 2400,
+          "hop_interval": 2.8061819156054604
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:11:24.918567",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:11:34.770303",
+        "action_type": "topology_change",
+        "target_module": "ardupilot",
+        "success": true,
+        "parameters": {
+          "new_topology": "random",
+          "node_count": 11,
+          "connection_probability": 0.33359441399858647
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:11:34.770840",
+        "action_type": "frequency_hop",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "new_frequency": 2500,
+          "hop_interval": 4.137247813464592
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:11:45.174844",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:12:05.441359",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:12:05.441592",
+        "action_type": "frequency_hop",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "new_frequency": 5800,
+          "hop_interval": 3.726660099518843
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:12:25.691574",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:12:35.550308",
+        "action_type": "encryption_rotate",
+        "target_module": "ardupilot",
+        "success": true,
+        "parameters": {
+          "new_key": "529F3AB8693875FB46859A2D34ABB0D9",
+          "encryption_type": "AES256"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:12:45.944669",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:13:06.196927",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:13:06.197250",
+        "action_type": "topology_change",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "new_topology": "random",
+          "node_count": 8,
+          "connection_probability": 0.6659900454927434
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:13:06.197670",
+        "action_type": "encryption_rotate",
+        "target_module": "ns3",
+        "success": true,
+        "parameters": {
+          "new_key": "F6A43FAC2F168ED955D17647A1EE8199",
+          "encryption_type": "ChaCha20"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:13:26.455505",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:13:36.308430",
+        "action_type": "frequency_hop",
+        "target_module": "ardupilot",
+        "success": true,
+        "parameters": {
+          "new_frequency": 5200,
+          "hop_interval": 2.7533691798068674
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:13:46.710764",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:13:36.409847",
+        "action_type": "encryption_rotate",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "new_key": "D216B73BE18F1D54C5BED22F187D651F",
+          "encryption_type": "AES256"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:14:06.971959",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:14:27.228803",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:14:47.479432",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:14:47.479750",
+        "action_type": "frequency_hop",
+        "target_module": "ns3",
+        "success": true,
+        "parameters": {
+          "new_frequency": 2400,
+          "hop_interval": 4.37389883659921
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:14:47.580378",
+        "action_type": "encryption_rotate",
+        "target_module": "mavlink",
+        "success": true,
+        "parameters": {
+          "new_key": "12BDEC4EE8063298C87D79BF77986F60",
+          "encryption_type": "AES256"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:15:07.705008",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:15:27.959074",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:15:17.690752",
+        "action_type": "frequency_hop",
+        "target_module": "fanet",
+        "success": true,
+        "parameters": {
+          "new_frequency": 5500,
+          "hop_interval": 3.3275196088599515
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:15:48.219285",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:15:57.963664",
+        "action_type": "encryption_rotate",
+        "target_module": "fanet",
+        "success": true,
+        "parameters": {
+          "new_key": "551ABE4863AF34693859482AD543B96A",
+          "encryption_type": "AES256"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:16:08.471055",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:16:28.728374",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:16:28.728663",
+        "action_type": "frequency_hop",
+        "target_module": "mavlink",
+        "success": true,
+        "parameters": {
+          "new_frequency": 5800,
+          "hop_interval": 3.8307921182792724
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:16:48.982579",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:17:09.242155",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:17:29.502328",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:17:49.751499",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:17:59.510622",
+        "action_type": "encryption_rotate",
+        "target_module": "ns3",
+        "success": true,
+        "parameters": {
+          "new_key": "DFD0109585C2FFFCE38645D9A63AD92C",
+          "encryption_type": "AES256"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:18:10.006686",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:18:30.269869",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:18:50.522362",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:19:10.781612",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:19:31.032137",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T13:19:51.291295",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      }
+    ]
+  },
+  "recommendations": [
+    "\uc774\uc0c1 \ud0d0\uc9c0\uc728\uc774 \ub192\uc2b5\ub2c8\ub2e4. \uc624\ud0d0\uc744 \uc904\uc774\uae30 \uc704\ud574 \ud0d0\uc9c0 \uc784\uacc4\uac12\uc744 \uc870\uc815\ud558\uc138\uc694.",
+    "FANET \ud1a0\ud3f4\ub85c\uc9c0\uc758 \ub3d9\uc801 \ubcc0\ud654\uac00 \uacf5\uaca9 \uc131\uacf5\ub960\uc5d0 \ubbf8\uce58\ub294 \uc601\ud5a5\uc744 \ubd84\uc11d\ud558\uc138\uc694.",
+    "\ub2e4\uc591\ud55c \uacf5\uaca9 \uac15\ub3c4\uc5d0\uc11c\uc758 \uc2dc\uc2a4\ud15c \uc131\ub2a5\uc744 \ube44\uad50 \ubd84\uc11d\ud558\uc138\uc694.",
+    "\uc2e4\uc81c \ub4dc\ub860 \ud658\uacbd\uc5d0\uc11c\uc758 \uac80\uc99d\uc744 \uc704\ud574 \ud558\ub4dc\uc6e8\uc5b4 \ud14c\uc2a4\ud2b8\ub97c \uc218\ud589\ud558\uc138\uc694.",
+    "\ub17c\ubb38 \uc791\uc131\uc744 \uc704\ud574 \ud1b5\uacc4\uc801 \uc720\uc758\uc131\uc744 \ud655\ubcf4\ud560 \uc218 \uc788\ub294 \ucda9\ubd84\ud55c \uc2e4\ud5d8 \ub370\uc774\ud130\ub97c \uc218\uc9d1\ud558\uc138\uc694."
+  ]
+}

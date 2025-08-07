@@ -1,54 +1,49 @@
 #!/bin/bash
-# colors.sh - Color definitions for DVD attack tools
+# DVD Common Colors - 공통 색상 정의
 
-# Regular colors
-BLACK='\033[0;30m'
+# 색상 정의
 RED='\033[0;31m'
 GREEN='\033[0;32m'
-YELLOW='\033[0;33m'
+YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
-MAGENTA='\033[0;35m'
+PURPLE='\033[0;35m'
 CYAN='\033[0;36m'
-WHITE='\033[0;37m'
-
-# Bold colors
-BOLD_BLACK='\033[1;30m'
-BOLD_RED='\033[1;31m'
-BOLD_GREEN='\033[1;32m'
-BOLD_YELLOW='\033[1;33m'
-BOLD_BLUE='\033[1;34m'
-BOLD_MAGENTA='\033[1;35m'
-BOLD_CYAN='\033[1;36m'
-BOLD_WHITE='\033[1;37m'
-
-# Background colors
-BG_BLACK='\033[40m'
-BG_RED='\033[41m'
-BG_GREEN='\033[42m'
-BG_YELLOW='\033[43m'
-BG_BLUE='\033[44m'
-BG_MAGENTA='\033[45m'
-BG_CYAN='\033[46m'
-BG_WHITE='\033[47m'
-
-# Text formatting
+WHITE='\033[1;37m'
 BOLD='\033[1m'
-DIM='\033[2m'
 UNDERLINE='\033[4m'
-BLINK='\033[5m'
-REVERSE='\033[7m'
-STRIKETHROUGH='\033[9m'
+NC='\033[0m' # No Color
 
-# Reset
-NC='\033[0m' # No Color / Reset
+# 로그 함수들
+log_info() {
+    echo -e "${GREEN}[INFO]${NC} $1"
+}
 
-# Aliases for common usage
-RESET=$NC
-NORMAL=$NC
+log_warning() {
+    echo -e "${YELLOW}[WARN]${NC} $1"
+}
 
-# Status colors (commonly used in logs)
-SUCCESS=$GREEN
-ERROR=$RED
-WARNING=$YELLOW
-INFO=$BLUE
-DEBUG=$MAGENTA
+log_error() {
+    echo -e "${RED}[ERROR]${NC} $1"
+}
+
+log_success() {
+    echo -e "${GREEN}[✓]${NC} $1"
+}
+
+log_attack() {
+    echo -e "${RED}[⚔️ ]${NC} $1"
+}
+
+log_target() {
+    echo -e "${CYAN}[🎯]${NC} $1"
+}
+
+# 헤더 출력 함수
+print_attack_header() {
+    local attack_name="$1"
+    echo -e "${BOLD}${CYAN}"
+    echo "╔═══════════════════════════════════════════════════════════════════════╗"
+    echo "║                      $attack_name"
+    echo "╚═══════════════════════════════════════════════════════════════════════╝"
+    echo -e "${NC}"
+}
