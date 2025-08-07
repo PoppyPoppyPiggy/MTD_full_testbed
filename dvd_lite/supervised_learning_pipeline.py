@@ -1430,8 +1430,851 @@ async def main():
     except Exception as e:
         print(f"\n❌ 오류 발생: {e}")
 
+    def print_pipeline_summary(self):
+        """파이프라인 실행 요약 출력"""
+        print("\n" + "="*80)
+        print("🎉 지도학습 파이프라인 실행 완료!")
+        print("="*80)
+        
+        for step_num, result in self.step_results.items():
+            step_name = {
+                'step_1': '데이터 수집 설정',
+                'step_2': '학습 작업 선택', 
+                'step_3': '데이터 수집 실행',
+                'step_4': '특성 공학',
+                'step_5': '모델 훈련',
+                'step_6': '모델 평가',
+                'step_7': '결과 분석 및 배포'
+            }.get(step_num, f'단계 {step_num}')
+            
+            status = "✅" if result.get('success', True) else "❌"
+            print(f"{status} {step_name}")
+        
+        print(f"\n📈 최종 결과:")
+        
+        # 데이터 요약
+        if 'step_3' in self.step_results:
+            sample_count = self.step_results['step_3'].get('sample_count', 0)
+            print(f"  • 훈련 데이터: {sample_count}개 샘플")
+        
+        # 특성 요약
+        if 'step_4' in self.step_results:
+            feature_count = self.step_results['step_4'].get('feature_count', 0)
+            print(f"  • 엔지니어링된 특성: {feature_count}개")
+        
+        # 모델 요약
+        if 'step_5' in self.step_results:
+            trained_models = self.step_results['step_5'].get('trained_models', [])
+            print(f"  • 훈련된 모델: {len(trained_models)}개")
+        
+        # 최고 모델
+        if 'step_6' in self.step_results:
+            best_model = self.step_results['step_6'].get('best_model', 'Unknown')
+            print(f"  • 최고 성능 모델: {best_model}")
+        
+        # 배포 정보
+        if 'step_7' in self.step_results:
+            deployment_path = self.step_results['step_7'].get('deployment_path', 'None')
+            print(f"  • 배포 경로: {deployment_path}")
+        
+        print("\n🔗 다음 단계 권장사항:")
+        print("  1. 더 많은 공격 데이터 수집으로 모델 성능 향상")
+        print("  2. 실시간 탐지 시스템에 모델 통합")
+        print("  3. 지속적인 모델 성능 모니터링")
+        print("  4. 새로운 공격 패턴에 대한 재훈련")
+
+class HyperparameterTuning:
+    """하이퍼파라미터 튜닝 시스템"""
+    
+    def __init__(self, pipeline: SupervisedLearningPipeline):
+        self.pipeline = pipeline
+        self.tuning_results = {}
+        
+    async def grid_search(self, algorithm: str, param_grid: Dict[str, List]) -> Dict[str, Any]:
+        """그리드 서치를 통한 하이퍼파라미터 최적화"""
+        if not SKLEARN_AVAILABLE:
+            return {"error": "scikit-learn required for grid search"}
+        
+        from sklearn.model_selection import GridSearchCV
+        from sklearn.model_selection import StratifiedKFold
+        
+        # 베이스 모델 생성
+        base_model = self.pipeline._create_model(algorithm, LearningTask.ATTACK_DETECTION)
+        
+        # 교차 검증 설정
+        cv = StratifiedKFold(n_splits=5, shuffle=True, random_state=42)
+        
+        # 그리드 서치 실행
+        grid_search = GridSearchCV(
+            base_model, 
+            param_grid, 
+            cv=cv, 
+            scoring='f1_weighted',
+            n_jobs=-1,
+            verbose=1
+        )
+        
+        # 훈련 데이터로 그리드 서치
+        X_train, X_test, y_train, y_test = train_test_split(
+            self.pipeline.processed_features, 
+            self.pipeline.labels,
+            test_size=0.2, 
+            random_state=42
+        )
+        
+        grid_search.fit(X_train, y_train)
+        
+        # 결과 저장
+        tuning_result = {
+            'algorithm': algorithm,
+            'best_params': grid_search.best_params_,
+            'best_score': grid_search.best_score_,
+            'cv_results': grid_search.cv_results_
+        }
+        
+        self.tuning_results[algorithm] = tuning_result
+        
+        return tuning_result
+
+class ModelExplainer:
+    """모델 해석성 분석 도구"""
+    
+    def __init__(self, model, feature_names: List[str]):
+        self.model = model
+        self.feature_names = feature_names
+        
+    def explain_prediction(self, sample_features: np.ndarray) -> Dict[str, Any]:
+        """개별 예측에 대한 설명"""
+        explanation = {
+            'prediction': self.model.predict(sample_features.reshape(1, -1))[0],
+            'feature_contributions': {}
+        }
+        
+        # 특성 중요도 기반 설명 (Random Forest 등)
+        if hasattr(self.model, 'feature_importances_'):
+            importance = self.model.feature_importances_
+            
+            for i, feature_name in enumerate(self.feature_names):
+                contribution = importance[i] * sample_features[i]
+                explanation['feature_contributions'][feature_name] = contribution
+        
+        return explanation
+    
+    def generate_decision_rules(self) -> List[str]:
+        """의사결정 규칙 추출 (Tree 기반 모델)"""
+        rules = []
+        
+        if hasattr(self.model, 'estimators_'):
+            # Random Forest의 경우 첫 번째 트리에서 규칙 추출
+            tree = self.model.estimators_[0]
+            rules = self._extract_tree_rules(tree, self.feature_names)
+        elif hasattr(self.model, 'tree_'):
+            # 단일 트리의 경우
+            rules = self._extract_tree_rules(self.model, self.feature_names)
+        
+        return rules[:10]  # 상위 10개 규칙만 반환
+    
+    def _extract_tree_rules(self, tree, feature_names) -> List[str]:
+        """트리에서 규칙 추출"""
+        rules = []
+        
+        def recurse(node, depth=0, rule=""):
+            if tree.tree_.feature[node] != -2:  # 리프 노드가 아닌 경우
+                feature = feature_names[tree.tree_.feature[node]]
+                threshold = tree.tree_.threshold[node]
+                
+                # 왼쪽 자식 (조건 만족)
+                left_rule = f"{rule} AND {feature} <= {threshold:.3f}" if rule else f"{feature} <= {threshold:.3f}"
+                recurse(tree.tree_.children_left[node], depth + 1, left_rule)
+                
+                # 오른쪽 자식 (조건 불만족)
+                right_rule = f"{rule} AND {feature} > {threshold:.3f}" if rule else f"{feature} > {threshold:.3f}"
+                recurse(tree.tree_.children_right[node], depth + 1, right_rule)
+            else:
+                # 리프 노드 - 규칙 완성
+                prediction = np.argmax(tree.tree_.value[node])
+                confidence = np.max(tree.tree_.value[node]) / np.sum(tree.tree_.value[node])
+                
+                if confidence > 0.8:  # 높은 신뢰도의 규칙만
+                    rules.append(f"IF {rule} THEN prediction={prediction} (confidence={confidence:.3f})")
+        
+        if hasattr(tree, 'tree_'):
+            recurse(0)
+        
+        return rules
+
+class AdversarialTesting:
+    """적대적 공격에 대한 모델 강건성 테스트"""
+    
+    def __init__(self, model, feature_names: List[str]):
+        self.model = model
+        self.feature_names = feature_names
+        
+    def generate_adversarial_samples(self, X_test: np.ndarray, epsilon: float = 0.1) -> np.ndarray:
+        """적대적 샘플 생성 (FGSM 유사)"""
+        adversarial_samples = []
+        
+        for sample in X_test:
+            # 각 특성에 작은 노이즈 추가
+            noise = np.random.uniform(-epsilon, epsilon, size=sample.shape)
+            adversarial_sample = sample + noise
+            
+            # 특성 값이 음수가 되지 않도록 클리핑
+            adversarial_sample = np.clip(adversarial_sample, 0, None)
+            
+            adversarial_samples.append(adversarial_sample)
+        
+        return np.array(adversarial_samples)
+    
+    def test_robustness(self, X_test: np.ndarray, y_test: np.ndarray) -> Dict[str, float]:
+        """모델 강건성 테스트"""
+        # 원본 정확도
+        original_predictions = self.model.predict(X_test)
+        original_accuracy = np.mean(original_predictions == y_test)
+        
+        # 적대적 샘플에서의 정확도
+        adversarial_X = self.generate_adversarial_samples(X_test)
+        adversarial_predictions = self.model.predict(adversarial_X)
+        adversarial_accuracy = np.mean(adversarial_predictions == y_test)
+        
+        # 강건성 점수
+        robustness_score = adversarial_accuracy / original_accuracy
+        
+        return {
+            'original_accuracy': original_accuracy,
+            'adversarial_accuracy': adversarial_accuracy,
+            'robustness_score': robustness_score,
+            'accuracy_drop': original_accuracy - adversarial_accuracy
+        }
+
+class ContinualLearning:
+    """지속 학습 시스템"""
+    
+    def __init__(self, base_pipeline: SupervisedLearningPipeline):
+        self.base_pipeline = base_pipeline
+        self.model_versions = {}
+        self.performance_history = []
+        
+    async def update_model(self, new_data: List[Dict]) -> Dict[str, Any]:
+        """새로운 데이터로 모델 업데이트"""
+        self.base_pipeline.logger.info("🔄 지속 학습 - 모델 업데이트 시작")
+        
+        # 새 데이터 추가
+        original_count = len(self.base_pipeline.raw_data)
+        self.base_pipeline.raw_data.extend(new_data)
+        
+        # 특성 재생성
+        features_df, labels_series = await self.base_pipeline.engineer_features(LearningTask.ATTACK_DETECTION)
+        
+        # 점진적 학습 또는 재훈련
+        if SKLEARN_AVAILABLE:
+            # 기존 모델이 있는 경우 점진적 학습 시도
+            if 'random_forest' in self.base_pipeline.trained_models:
+                updated_performance = await self._incremental_update('random_forest', features_df, labels_series)
+            else:
+                # 새 모델 훈련
+                updated_performance = await self.base_pipeline.train_models(LearningTask.ATTACK_DETECTION, ['random_forest'])
+        else:
+            updated_performance = await self.base_pipeline.train_models(LearningTask.ATTACK_DETECTION)
+        
+        # 성능 이력 기록
+        self.performance_history.append({
+            'timestamp': datetime.now().isoformat(),
+            'data_size': len(self.base_pipeline.raw_data),
+            'new_samples': len(new_data),
+            'performance': updated_performance
+        })
+        
+        update_result = {
+            'original_data_size': original_count,
+            'new_data_size': len(new_data),
+            'updated_data_size': len(self.base_pipeline.raw_data),
+            'performance_change': self._calculate_performance_change(),
+            'recommendation': self._get_update_recommendation()
+        }
+        
+        return update_result
+    
+    async def _incremental_update(self, algorithm: str, features_df: pd.DataFrame, labels_series: pd.Series) -> Dict[str, Any]:
+        """점진적 모델 업데이트"""
+        # 새 데이터만 사용하여 모델 업데이트 시뮬레이션
+        # 실제로는 온라인 학습 알고리즘이나 배치 업데이트 사용
+        
+        # 단순 재훈련으로 구현 (점진적 학습 시뮬레이션)
+        X_train, X_test, y_train, y_test = train_test_split(
+            features_df, labels_series, test_size=0.2, random_state=42
+        )
+        
+        model = self.base_pipeline.trained_models[algorithm]
+        
+        # 새 데이터로 재훈련
+        model.fit(X_train, y_train)
+        
+        # 성능 측정
+        y_pred = model.predict(X_test)
+        performance = self.base_pipeline._calculate_performance_metrics(
+            y_test, y_pred, model, X_test, algorithm
+        )
+        
+        return {algorithm: performance}
+    
+    def _calculate_performance_change(self) -> float:
+        """성능 변화 계산"""
+        if len(self.performance_history) < 2:
+            return 0.0
+        
+        current = self.performance_history[-1]['performance']
+        previous = self.performance_history[-2]['performance']
+        
+        # F1 점수 기준으로 변화 계산
+        current_f1 = list(current.values())[0].f1_score if current else 0
+        previous_f1 = list(previous.values())[0].f1_score if previous else 0
+        
+        return current_f1 - previous_f1
+    
+    def _get_update_recommendation(self) -> str:
+        """업데이트 권장사항"""
+        performance_change = self._calculate_performance_change()
+        
+        if performance_change > 0.05:
+            return "EXCELLENT - 성능이 크게 향상되었습니다"
+        elif performance_change > 0.01:
+            return "GOOD - 성능이 향상되었습니다"
+        elif performance_change > -0.01:
+            return "STABLE - 성능이 유지되고 있습니다"
+        elif performance_change > -0.05:
+            return "DEGRADED - 성능이 약간 저하되었습니다"
+        else:
+            return "POOR - 성능이 크게 저하되었습니다. 모델 재검토 필요"
+
+class AutoMLSystem:
+    """자동 머신러닝 시스템"""
+    
+    def __init__(self):
+        self.best_pipeline = None
+        self.pipeline_results = []
+        
+    async def auto_optimize(self, data_sources: List[str], task_type: LearningTask) -> Dict[str, Any]:
+        """자동 파이프라인 최적화"""
+        print("🤖 AutoML 시스템 시작 - 자동 최적화")
+        
+        # 여러 설정으로 파이프라인 실험
+        configurations = [
+            {'enable_augmentation': True, 'cross_validation': True, 'feature_selection': True},
+            {'enable_augmentation': False, 'cross_validation': True, 'feature_selection': True},
+            {'enable_augmentation': True, 'cross_validation': False, 'feature_selection': True},
+            {'enable_augmentation': True, 'cross_validation': True, 'feature_selection': False},
+        ]
+        
+        algorithms_sets = [
+            ['random_forest'],
+            ['gradient_boosting'],
+            ['random_forest', 'gradient_boosting'],
+            ['random_forest', 'gradient_boosting', 'svm'] if SKLEARN_AVAILABLE else ['random_forest']
+        ]
+        
+        best_score = 0
+        best_config = None
+        
+        for i, config in enumerate(configurations):
+            for j, algorithms in enumerate(algorithms_sets):
+                print(f"🔄 실험 {i+1}-{j+1}: {config} with {algorithms}")
+                
+                try:
+                    # 파이프라인 실행
+                    pipeline = SupervisedLearningPipeline(config)
+                    
+                    # 데이터 수집 및 전처리
+                    await pipeline.collect_training_data(data_sources)
+                    
+                    if config.get('enable_augmentation', False):
+                        await pipeline.generate_augmented_data(2)
+                    
+                    await pipeline.engineer_features(task_type)
+                    
+                    # 모델 훈련
+                    performances = await pipeline.train_models(task_type, algorithms)
+                    
+                    # 최고 성능 기록
+                    best_algorithm = max(performances.items(), key=lambda x: x[1].f1_score)
+                    current_score = best_algorithm[1].f1_score
+                    
+                    experiment_result = {
+                        'config': config,
+                        'algorithms': algorithms,
+                        'best_algorithm': best_algorithm[0],
+                        'score': current_score,
+                        'performance': asdict(best_algorithm[1])
+                    }
+                    
+                    self.pipeline_results.append(experiment_result)
+                    
+                    if current_score > best_score:
+                        best_score = current_score
+                        best_config = experiment_result
+                        self.best_pipeline = pipeline
+                    
+                    print(f"✅ F1 점수: {current_score:.3f}")
+                    
+                except Exception as e:
+                    print(f"❌ 실험 실패: {e}")
+                    continue
+        
+        # 최적화 결과
+        optimization_result = {
+            'best_configuration': best_config,
+            'best_score': best_score,
+            'total_experiments': len(self.pipeline_results),
+            'all_results': self.pipeline_results
+        }
+        
+        print(f"🏆 AutoML 완료 - 최고 F1 점수: {best_score:.3f}")
+        print(f"🎯 최적 알고리즘: {best_config['best_algorithm'] if best_config else 'None'}")
+        
+        return optimization_result
+    
+    async def deploy_best_model(self) -> Optional[str]:
+        """최고 성능 모델 배포"""
+        if not self.best_pipeline:
+            return None
+        
+        best_config = max(self.pipeline_results, key=lambda x: x['score'])
+        best_algorithm = best_config['best_algorithm']
+        
+        deployment_path = await self.best_pipeline.deploy_model(best_algorithm)
+        return deployment_path
+
+class MLOpsIntegration:
+    """MLOps 통합 시스템"""
+    
+    def __init__(self, pipeline: SupervisedLearningPipeline):
+        self.pipeline = pipeline
+        self.model_registry = {}
+        self.experiment_tracking = []
+        
+    async def register_model(self, model_name: str, algorithm: str, metadata: Dict[str, Any]) -> str:
+        """모델 레지스트리에 등록"""
+        model_id = f"{model_name}_{algorithm}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+        
+        self.model_registry[model_id] = {
+            'name': model_name,
+            'algorithm': algorithm,
+            'metadata': metadata,
+            'registered_at': datetime.now().isoformat(),
+            'status': 'REGISTERED'
+        }
+        
+        return model_id
+    
+    async def create_model_card(self, model_id: str) -> str:
+        """모델 카드 생성"""
+        if model_id not in self.model_registry:
+            return "Model not found"
+        
+        model_info = self.model_registry[model_id]
+        
+        card_content = f"""# Model Card: {model_info['name']}
+
+## Model Information
+- **Algorithm**: {model_info['algorithm']}
+- **Registration Date**: {model_info['registered_at']}
+- **Status**: {model_info['status']}
+
+## Performance Metrics
+- **Accuracy**: {model_info['metadata'].get('accuracy', 'N/A')}
+- **F1 Score**: {model_info['metadata'].get('f1_score', 'N/A')}
+- **Precision**: {model_info['metadata'].get('precision', 'N/A')}
+- **Recall**: {model_info['metadata'].get('recall', 'N/A')}
+
+## Training Data
+- **Dataset Size**: {model_info['metadata'].get('dataset_size', 'N/A')}
+- **Feature Count**: {model_info['metadata'].get('feature_count', 'N/A')}
+
+## Intended Use
+이 모델은 드론 보안 테스트베드에서 공격 탐지 및 분류를 위해 훈련되었습니다.
+
+## Limitations
+- 시뮬레이션 환경에서 훈련됨
+- 특정 공격 패턴에 특화됨
+- 정기적인 재훈련 필요
+
+## Ethical Considerations
+- 교육 및 연구 목적으로만 사용
+- 실제 운영 환경 적용 시 추가 검증 필요
+
+---
+Generated by DVD MTD Testbed
+"""
+        
+        # 모델 카드 저장
+        card_path = PROJECT_ROOT / "supervised_data" / "models" / f"{model_id}_card.md"
+        with open(card_path, 'w', encoding='utf-8') as f:
+            f.write(card_content)
+        
+        return str(card_path)
+    
+    def track_experiment(self, experiment_name: str, parameters: Dict, results: Dict):
+        """실험 추적"""
+        experiment = {
+            'name': experiment_name,
+            'timestamp': datetime.now().isoformat(),
+            'parameters': parameters,
+            'results': results,
+            'experiment_id': len(self.experiment_tracking) + 1
+        }
+        
+        self.experiment_tracking.append(experiment)
+        
+        # 실험 로그 저장
+        log_path = PROJECT_ROOT / "supervised_data" / "experiments" / f"experiment_{experiment['experiment_id']}.json"
+        log_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        with open(log_path, 'w', encoding='utf-8') as f:
+            json.dump(experiment, f, indent=2)
+
+# 통합 실행 함수들
+async def run_comprehensive_ml_suite():
+    """종합적인 ML 스위트 실행"""
+    print("🚀 DVD MTD 종합 ML 스위트 시작")
+    
+    # 데이터 소스 설정
+    supervised_dir = PROJECT_ROOT / "supervised_data"
+    data_files = list(supervised_dir.glob("**/*.json")) + list(supervised_dir.glob("**/*.jsonl"))
+    
+    if not data_files:
+        print("❌ 훈련 데이터가 없습니다. 먼저 공격을 실행하세요.")
+        return
+    
+    data_sources = [str(f) for f in data_files[:5]]  # 최신 5개 파일
+    
+    # 1. 기본 파이프라인
+    print("\n1️⃣ 기본 파이프라인 실행")
+    pipeline = SupervisedLearningPipeline({'enable_augmentation': True})
+    basic_results = await pipeline.run_full_pipeline(
+        data_sources, 
+        LearningTask.ATTACK_DETECTION,
+        ['random_forest', 'gradient_boosting'] if SKLEARN_AVAILABLE else None
+    )
+    
+    # 2. AutoML 최적화
+    print("\n2️⃣ AutoML 최적화 실행")
+    automl = AutoMLSystem()
+    automl_results = await automl.auto_optimize(data_sources, LearningTask.ATTACK_DETECTION)
+    
+    # 3. 모델 해석성 분석
+    print("\n3️⃣ 모델 해석성 분석")
+    if 'random_forest' in pipeline.trained_models:
+        explainer = ModelExplainer(
+            pipeline.trained_models['random_forest'], 
+            pipeline.feature_columns
+        )
+        
+        rules = explainer.generate_decision_rules()
+        print(f"📋 추출된 의사결정 규칙: {len(rules)}개")
+    
+    # 4. 강건성 테스트
+    print("\n4️⃣ 모델 강건성 테스트")
+    if pipeline.processed_features is not None and 'random_forest' in pipeline.trained_models:
+        adversarial_tester = AdversarialTesting(
+            pipeline.trained_models['random_forest'],
+            pipeline.feature_columns
+        )
+        
+        # 테스트 데이터 생성
+        X_train, X_test, y_train, y_test = train_test_split(
+            pipeline.processed_features, pipeline.labels, test_size=0.2, random_state=42
+        )
+        
+        robustness = adversarial_tester.test_robustness(X_test.values, y_test.values)
+        print(f"🛡️ 강건성 점수: {robustness['robustness_score']:.3f}")
+    
+    # 5. MLOps 통합
+    print("\n5️⃣ MLOps 통합")
+    mlops = MLOpsIntegration(pipeline)
+    
+    best_algorithm = basic_results['deployment_info']['best_model']
+    model_id = await mlops.register_model(
+        "dvd_attack_detector", 
+        best_algorithm,
+        basic_results['deployment_info']['performance']
+    )
+    
+    card_path = await mlops.create_model_card(model_id)
+    print(f"📋 모델 카드 생성: {card_path}")
+    
+    # 6. 종합 보고서 생성
+    print("\n6️⃣ 종합 보고서 생성")
+    comprehensive_report = {
+        'execution_timestamp': datetime.now().isoformat(),
+        'basic_pipeline_results': basic_results,
+        'automl_results': automl_results,
+        'model_registry': mlops.model_registry,
+        'recommendations': generate_ml_recommendations(basic_results, automl_results)
+    }
+    
+    report_file = PROJECT_ROOT / "supervised_data" / f"comprehensive_ml_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
+    with open(report_file, 'w', encoding='utf-8') as f:
+        json.dump(comprehensive_report, f, indent=2, default=str)
+    
+    print(f"📊 종합 보고서 저장: {report_file}")
+    print("🎉 종합 ML 스위트 완료!")
+    
+    return comprehensive_report
+
+def generate_ml_recommendations(basic_results: Dict, automl_results: Dict) -> List[str]:
+    """ML 권장사항 생성"""
+    recommendations = []
+    
+    # 성능 기반 권장사항
+    best_f1 = basic_results.get('deployment_info', {}).get('performance', {}).get('f1_score', 0)
+    
+    if best_f1 < 0.7:
+        recommendations.append("모델 성능이 낮습니다. 더 많은 훈련 데이터가 필요합니다.")
+    elif best_f1 < 0.8:
+        recommendations.append("특성 엔지니어링을 개선하여 성능을 향상시킬 수 있습니다.")
+    else:
+        recommendations.append("우수한 성능입니다. 실제 환경에서 테스트해보세요.")
+    
+    # AutoML 결과 기반 권장사항
+    if automl_results.get('total_experiments', 0) > 0:
+        best_automl_score = automl_results.get('best_score', 0)
+        if best_automl_score > best_f1:
+            recommendations.append("AutoML이 더 나은 설정을 찾았습니다. 최적 구성을 사용하세요.")
+        else:
+            recommendations.append("기본 설정이 AutoML 결과와 유사합니다. 현재 설정을 유지하세요.")
+    
+    # 데이터 크기 기반 권장사항
+    dataset_size = basic_results.get('data_summary', {}).get('total_samples', 0)
+    if dataset_size < 1000:
+        recommendations.append("데이터셋이 작습니다. 더 많은 공격 시나리오를 실행하세요.")
+    elif dataset_size > 10000:
+        recommendations.append("충분한 데이터가 있습니다. 고급 알고리즘을 시도해보세요.")
+    
+    return recommendations
+
+async def main():
+    """메인 실행 함수"""
+    
+    print("🎓 DVD MTD 지도학습 파이프라인")
+    print("="*50)
+    
+    print("\n실행 모드를 선택하세요:")
+    print("1. 단계별 대화형 학습 (권장)")
+    print("2. 전체 파이프라인 자동 실행")
+    print("3. AutoML 자동 최적화")
+    print("4. 종합 ML 스위트 실행")
+    print("5. 지속 학습 테스트")
+    print("6. 모델 해석성 분석")
+    print("7. 강건성 테스트")
+    
+    try:
+        choice = input("\n선택 (1-7): ").strip()
+        
+        if choice == "1":
+            # 단계별 대화형 실행
+            step_learning = StepByStepLearning()
+            await step_learning.run_interactive_pipeline()
+            
+        elif choice == "2":
+            # 전체 파이프라인 자동 실행
+            print("\n🚀 전체 파이프라인 자동 실행...")
+            
+            pipeline = SupervisedLearningPipeline({
+                'enable_augmentation': True,
+                'cross_validation': True
+            })
+            
+            # 데이터 소스 자동 탐지
+            supervised_dir = PROJECT_ROOT / "supervised_data"
+            data_files = list(supervised_dir.glob("**/*.json")) + list(supervised_dir.glob("**/*.csv"))
+            recent_files = sorted(data_files, key=os.path.getmtime, reverse=True)[:3]
+            
+            if not recent_files:
+                print("❌ 훈련 데이터가 없습니다. 먼저 공격을 실행하여 데이터를 생성하세요.")
+                return
+            
+            data_sources = [str(f) for f in recent_files]
+            
+            # 공격 탐지 작업으로 파이프라인 실행
+            results = await pipeline.run_full_pipeline(
+                data_sources, 
+                LearningTask.ATTACK_DETECTION,
+                ['random_forest', 'gradient_boosting'] if SKLEARN_AVAILABLE else None
+            )
+            
+            print("\n🎉 파이프라인 완료!")
+            print(f"최고 모델: {results['deployment_info']['best_model']}")
+            
+        elif choice == "3":
+            # AutoML 최적화
+            print("\n🤖 AutoML 자동 최적화...")
+            
+            supervised_dir = PROJECT_ROOT / "supervised_data"
+            data_files = list(supervised_dir.glob("**/*.json")) + list(supervised_dir.glob("**/*.jsonl"))
+            
+            if not data_files:
+                print("❌ 훈련 데이터가 없습니다.")
+                return
+            
+            data_sources = [str(f) for f in data_files[:5]]
+            
+            automl = AutoMLSystem()
+            results = await automl.auto_optimize(data_sources, LearningTask.ATTACK_DETECTION)
+            
+            # 최고 모델 배포
+            if automl.best_pipeline:
+                deployment_path = await automl.deploy_best_model()
+                print(f"🚀 최적 모델 배포: {deployment_path}")
+            
+        elif choice == "4":
+            # 종합 ML 스위트
+            print("\n🎯 종합 ML 스위트 실행...")
+            await run_comprehensive_ml_suite()
+            
+        elif choice == "5":
+            # 지속 학습 테스트
+            print("\n🔄 지속 학습 테스트...")
+            
+            # 기본 파이프라인 생성
+            pipeline = SupervisedLearningPipeline()
+            
+            # 기존 데이터로 초기 모델 훈련
+            supervised_dir = PROJECT_ROOT / "supervised_data"
+            data_files = list(supervised_dir.glob("**/*.json"))[:3]
+            
+            if data_files:
+                data_sources = [str(f) for f in data_files]
+                await pipeline.collect_training_data(data_sources)
+                await pipeline.engineer_features(LearningTask.ATTACK_DETECTION)
+                await pipeline.train_models(LearningTask.ATTACK_DETECTION, ['random_forest'])
+                
+                # 지속 학습 시스템 테스트
+                continual = ContinualLearning(pipeline)
+                
+                # 새 데이터 시뮬레이션
+                new_data = [
+                    {
+                        'timestamp': datetime.now().isoformat(),
+                        'attack_vector': 'test_attack',
+                        'network_features_packet_count': 500,
+                        'attack_features_payload_size': 1024,
+                        'label': 'attack_success'
+                    }
+                ]
+                
+                update_result = await continual.update_model(new_data)
+                print(f"📊 업데이트 결과: {update_result['recommendation']}")
+            else:
+                print("❌ 기존 데이터가 없어 지속 학습을 테스트할 수 없습니다.")
+            
+        elif choice == "6":
+            # 모델 해석성 분석
+            print("\n🔍 모델 해석성 분석...")
+            
+            # 간단한 파이프라인 실행
+            pipeline = SupervisedLearningPipeline()
+            
+            supervised_dir = PROJECT_ROOT / "supervised_data"
+            data_files = list(supervised_dir.glob("**/*.json"))
+            
+            if data_files:
+                data_sources = [str(f) for f in data_files[:2]]
+                await pipeline.collect_training_data(data_sources)
+                await pipeline.engineer_features(LearningTask.ATTACK_DETECTION)
+                await pipeline.train_models(LearningTask.ATTACK_DETECTION, ['random_forest'])
+                
+                if 'random_forest' in pipeline.trained_models:
+                    explainer = ModelExplainer(
+                        pipeline.trained_models['random_forest'],
+                        pipeline.feature_columns
+                    )
+                    
+                    # 의사결정 규칙 추출
+                    rules = explainer.generate_decision_rules()
+                    print(f"\n📋 추출된 의사결정 규칙 ({len(rules)}개):")
+                    for i, rule in enumerate(rules[:5], 1):
+                        print(f"{i}. {rule}")
+                    
+                    # 샘플 예측 설명
+                    if pipeline.processed_features is not None and len(pipeline.processed_features) > 0:
+                        sample = pipeline.processed_features.iloc[0].values
+                        explanation = explainer.explain_prediction(sample)
+                        
+                        print(f"\n🎯 샘플 예측 설명:")
+                        print(f"예측: {explanation['prediction']}")
+                        print("주요 기여 특성:")
+                        sorted_contributions = sorted(
+                            explanation['feature_contributions'].items(),
+                            key=lambda x: abs(x[1]),
+                            reverse=True
+                        )
+                        for feature, contribution in sorted_contributions[:5]:
+                            print(f"  • {feature}: {contribution:.3f}")
+                else:
+                    print("❌ 훈련된 모델이 없습니다.")
+            else:
+                print("❌ 훈련 데이터가 없습니다.")
+                
+        elif choice == "7":
+            # 강건성 테스트
+            print("\n🛡️ 모델 강건성 테스트...")
+            
+            # 파이프라인 실행
+            pipeline = SupervisedLearningPipeline()
+            
+            supervised_dir = PROJECT_ROOT / "supervised_data"
+            data_files = list(supervised_dir.glob("**/*.json"))
+            
+            if data_files:
+                data_sources = [str(f) for f in data_files[:2]]
+                await pipeline.collect_training_data(data_sources)
+                await pipeline.engineer_features(LearningTask.ATTACK_DETECTION)
+                await pipeline.train_models(LearningTask.ATTACK_DETECTION, ['random_forest'])
+                
+                if 'random_forest' in pipeline.trained_models and pipeline.processed_features is not None:
+                    adversarial_tester = AdversarialTesting(
+                        pipeline.trained_models['random_forest'],
+                        pipeline.feature_columns
+                    )
+                    
+                    # 테스트 데이터 준비
+                    X_train, X_test, y_train, y_test = train_test_split(
+                        pipeline.processed_features, pipeline.labels, 
+                        test_size=0.2, random_state=42
+                    )
+                    
+                    # 강건성 테스트 실행
+                    robustness_results = adversarial_tester.test_robustness(X_test.values, y_test.values)
+                    
+                    print(f"\n🎯 강건성 테스트 결과:")
+                    print(f"  • 원본 정확도: {robustness_results['original_accuracy']:.3f}")
+                    print(f"  • 적대적 정확도: {robustness_results['adversarial_accuracy']:.3f}")
+                    print(f"  • 강건성 점수: {robustness_results['robustness_score']:.3f}")
+                    print(f"  • 정확도 감소: {robustness_results['accuracy_drop']:.3f}")
+                    
+                    if robustness_results['robustness_score'] > 0.8:
+                        print("✅ 모델이 적대적 공격에 강건합니다.")
+                    elif robustness_results['robustness_score'] > 0.6:
+                        print("⚠️ 모델이 적대적 공격에 어느 정도 취약합니다.")
+                    else:
+                        print("❌ 모델이 적대적 공격에 매우 취약합니다.")
+                else:
+                    print("❌ 테스트할 모델이나 데이터가 없습니다.")
+            else:
+                print("❌ 훈련 데이터가 없습니다.")
+                
+        else:
+            print("❌ 잘못된 선택입니다.")
+            
+    except KeyboardInterrupt:
+        print("\n\n⚠️ 사용자에 의해 중단되었습니다.")
+    except Exception as e:
+        print(f"\n❌ 오류 발생: {e}")
+        import traceback
+        traceback.print_exc()
+
 if __name__ == "__main__":
-    asyncio.run(main())attack_detection_features(self, df: pd.DataFrame) -> Tuple[pd.DataFrame, pd.Series]:
+    asyncio.run(main())
         """공격 탐지를 위한 특성 생성"""
         features = []
         labels = []
