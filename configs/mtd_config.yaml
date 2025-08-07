@@ -1,0 +1,56 @@
+# 파일 위치: /home/kali/MTD/MTD_full_testbed/configs/mtd_config.yaml
+# MTD 테스트베드 설정 (Kali Linux 최적화)
+system:
+  qgroundcontrol_host: "127.0.0.1"
+  qgroundcontrol_port: 14550
+  ardupilot_host: "127.0.0.1"
+  ardupilot_port: 14551
+  gazebo_host: "127.0.0.1"
+  gazebo_port: 11345
+  ns3_host: "127.0.0.1"
+  ns3_port: 9999
+
+fanet:
+  max_range: 300.0
+  node_count: 10
+  mobility_model: "random_waypoint"
+  ns3_integration: true
+  simulation_area:
+    x_range: [-2000, 2000]
+    y_range: [-2000, 2000]
+    z_range: [50, 500]
+
+attacks:
+  base_duration: 60
+  max_concurrent: 3
+  adaptive_intensity: true
+  intensity_levels:
+    light: 1
+    moderate: 2
+    aggressive: 3
+
+detection:
+  anomaly_threshold: 0.7
+  alert_cooldown: 30
+  ml_enabled: true
+
+mtd:
+  enabled: true
+  response_time: 10
+  defensive_actions:
+    - "topology_change"
+    - "frequency_hop"
+    - "encryption_rotate"
+
+environment:
+  type: "simulation"
+  use_virtual_env: true
+  kali_linux: true
+
+logging:
+  level: "INFO"
+  file: "logs/mtd_testbed.log"
+
+research:
+  paper_mode: true
+  data_collection: true

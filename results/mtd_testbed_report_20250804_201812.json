@@ -1,0 +1,1301 @@
+{
+  "metadata": {
+    "generation_time": "2025-08-04T20:18:12.861949",
+    "testbed_version": "1.0.0",
+    "campaign_duration": 60,
+    "configuration": {
+      "system": {
+        "qgroundcontrol_host": "127.0.0.1",
+        "qgroundcontrol_port": 14550,
+        "ardupilot_host": "127.0.0.1",
+        "ardupilot_port": 14551,
+        "gazebo_host": "127.0.0.1",
+        "gazebo_port": 11345,
+        "ns3_host": "127.0.0.1",
+        "ns3_port": 9999
+      },
+      "fanet": {
+        "max_range": 300.0,
+        "node_count": 10,
+        "mobility_model": "random_waypoint",
+        "ns3_integration": true,
+        "simulation_area": {
+          "x_range": [
+            -2000,
+            2000
+          ],
+          "y_range": [
+            -2000,
+            2000
+          ],
+          "z_range": [
+            50,
+            500
+          ]
+        }
+      },
+      "attacks": {
+        "base_duration": 60,
+        "max_concurrent": 3,
+        "adaptive_intensity": true,
+        "intensity_levels": {
+          "light": 1,
+          "moderate": 2,
+          "aggressive": 3
+        }
+      },
+      "detection": {
+        "anomaly_threshold": 0.7,
+        "alert_cooldown": 30,
+        "ml_enabled": true
+      },
+      "mtd": {
+        "enabled": true,
+        "response_time": 10,
+        "defensive_actions": [
+          "topology_change",
+          "frequency_hop",
+          "encryption_rotate"
+        ]
+      },
+      "environment": {
+        "type": "simulation",
+        "use_virtual_env": true,
+        "kali_linux": true
+      },
+      "logging": {
+        "level": "INFO",
+        "file": "logs/mtd_testbed.log"
+      },
+      "research": {
+        "paper_mode": true,
+        "data_collection": true
+      }
+    }
+  },
+  "summary": {
+    "total_attacks_executed": 1,
+    "successful_attacks": 0,
+    "success_rate": 0.0,
+    "total_anomalies_detected": 33,
+    "detection_rate": 33.0,
+    "mtd_actions_executed": 43,
+    "final_attack_intensity": "RECONNAISSANCE"
+  },
+  "attack_analysis": {
+    "by_category": {
+      "reconnaissance": {
+        "success_rate": 0.0,
+        "total": 1,
+        "success": 0
+      }
+    },
+    "intensity_adjustments": 0,
+    "intensity_history": []
+  },
+  "system_performance": {
+    "baseline_metrics": {
+      "timestamp": "2025-08-04 20:12:57.840175",
+      "cpu_usage": 43.88,
+      "memory_usage": 59.0,
+      "network_latency": 3.315877914428711,
+      "packet_loss": 0.0,
+      "connection_count": 48,
+      "mavlink_messages": 113,
+      "qgc_status": "running",
+      "gazebo_entities": 4,
+      "ns3_nodes": 8,
+      "fanet_topology": {
+        "active_nodes": 11,
+        "total_connections": 26,
+        "routing_efficiency": 0.7181076578937765,
+        "network_diameter": 8
+      },
+      "anomaly_score": 0.0
+    },
+    "final_metrics": {
+      "timestamp": "2025-08-04 20:18:12.851739",
+      "cpu_usage": 99.2,
+      "memory_usage": 79.1,
+      "network_latency": 5.733728408813477,
+      "packet_loss": 0.0,
+      "connection_count": 48,
+      "mavlink_messages": 137,
+      "qgc_status": "stopped",
+      "gazebo_entities": 6,
+      "ns3_nodes": 18,
+      "fanet_topology": {
+        "active_nodes": 3,
+        "total_connections": 18,
+        "routing_efficiency": 0.7692314013169426,
+        "network_diameter": 7
+      },
+      "anomaly_score": 0.5527520671853204
+    },
+    "anomaly_events": [
+      {
+        "timestamp": "2025-08-04T20:13:08.085609",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T20:13:28.479627",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T20:13:48.719041",
+        "type": "high_cpu_usage",
+        "severity": "high",
+        "confidence": 0.9,
+        "description": "Abnormally high CPU usage detected"
+      },
+      {
+        "timestamp": "2025-08-04T20:13:48.719041",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T20:14:09.076579",
+        "type": "high_cpu_usage",
+        "severity": "high",
+        "confidence": 0.9,
+        "description": "Abnormally high CPU usage detected"
+      },
+      {
+        "timestamp": "2025-08-04T20:14:09.076579",
+        "type": "high_memory_usage",
+        "severity": "medium",
+        "confidence": 0.9,
+        "description": "High memory usage detected"
+      },
+      {
+        "timestamp": "2025-08-04T20:14:09.076579",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T20:14:29.453444",
+        "type": "high_cpu_usage",
+        "severity": "high",
+        "confidence": 0.9,
+        "description": "Abnormally high CPU usage detected"
+      },
+      {
+        "timestamp": "2025-08-04T20:14:29.453444",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T20:14:49.725242",
+        "type": "high_cpu_usage",
+        "severity": "high",
+        "confidence": 0.9,
+        "description": "Abnormally high CPU usage detected"
+      },
+      {
+        "timestamp": "2025-08-04T20:14:49.725242",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T20:15:10.009098",
+        "type": "high_cpu_usage",
+        "severity": "high",
+        "confidence": 0.9,
+        "description": "Abnormally high CPU usage detected"
+      },
+      {
+        "timestamp": "2025-08-04T20:15:10.009098",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T20:15:30.379525",
+        "type": "high_cpu_usage",
+        "severity": "high",
+        "confidence": 0.9,
+        "description": "Abnormally high CPU usage detected"
+      },
+      {
+        "timestamp": "2025-08-04T20:15:30.379525",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T20:15:50.656162",
+        "type": "high_cpu_usage",
+        "severity": "high",
+        "confidence": 0.9,
+        "description": "Abnormally high CPU usage detected"
+      },
+      {
+        "timestamp": "2025-08-04T20:15:50.656162",
+        "type": "high_memory_usage",
+        "severity": "medium",
+        "confidence": 0.9,
+        "description": "High memory usage detected"
+      },
+      {
+        "timestamp": "2025-08-04T20:15:50.656162",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T20:16:11.015366",
+        "type": "high_cpu_usage",
+        "severity": "high",
+        "confidence": 0.9,
+        "description": "Abnormally high CPU usage detected"
+      },
+      {
+        "timestamp": "2025-08-04T20:16:11.015366",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T20:16:31.328385",
+        "type": "high_cpu_usage",
+        "severity": "high",
+        "confidence": 0.9,
+        "description": "Abnormally high CPU usage detected"
+      },
+      {
+        "timestamp": "2025-08-04T20:16:31.328385",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T20:16:51.599951",
+        "type": "high_cpu_usage",
+        "severity": "high",
+        "confidence": 0.9,
+        "description": "Abnormally high CPU usage detected"
+      },
+      {
+        "timestamp": "2025-08-04T20:16:51.599951",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T20:17:11.919370",
+        "type": "high_cpu_usage",
+        "severity": "high",
+        "confidence": 0.9,
+        "description": "Abnormally high CPU usage detected"
+      },
+      {
+        "timestamp": "2025-08-04T20:17:11.919370",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T20:17:32.221452",
+        "type": "high_cpu_usage",
+        "severity": "high",
+        "confidence": 0.9,
+        "description": "Abnormally high CPU usage detected"
+      },
+      {
+        "timestamp": "2025-08-04T20:17:32.221452",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T20:17:52.522286",
+        "type": "high_cpu_usage",
+        "severity": "high",
+        "confidence": 0.9,
+        "description": "Abnormally high CPU usage detected"
+      },
+      {
+        "timestamp": "2025-08-04T20:17:52.522286",
+        "type": "high_memory_usage",
+        "severity": "medium",
+        "confidence": 0.9,
+        "description": "High memory usage detected"
+      },
+      {
+        "timestamp": "2025-08-04T20:17:52.522286",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      },
+      {
+        "timestamp": "2025-08-04T20:18:12.851739",
+        "type": "high_cpu_usage",
+        "severity": "high",
+        "confidence": 0.9,
+        "description": "Abnormally high CPU usage detected"
+      },
+      {
+        "timestamp": "2025-08-04T20:18:12.851739",
+        "type": "qgc_connection_lost",
+        "severity": "critical",
+        "confidence": 0.9,
+        "description": "QGroundControl connection lost"
+      }
+    ]
+  },
+  "fanet_analysis": {
+    "final_topology": {
+      "node_count": 13,
+      "connection_count": 1,
+      "avg_degree": 0.15384615384615385,
+      "max_degree": 1,
+      "min_degree": 0,
+      "density": 0.01282051282051282
+    },
+    "topology_changes": 15,
+    "node_mobility": {
+      "active_nodes": 13,
+      "average_connections": 0.15384615384615385,
+      "network_density": 0.01282051282051282
+    }
+  },
+  "mtd_effectiveness": {
+    "total_actions": 43,
+    "successful_actions": 43,
+    "action_types": {
+      "emergency_response": 30,
+      "topology_change": 4,
+      "encryption_rotate": 4,
+      "frequency_hop": 5
+    },
+    "response_times": [
+      0.000563,
+      -20.393455,
+      -40.632869,
+      -40.632869,
+      0.017077,
+      -20.376941,
+      -40.616355,
+      -40.616355,
+      20.398124,
+      0.004106,
+      -20.235308,
+      -20.235308,
+      -40.592846,
+      -40.592846,
+      -40.592846,
+      30.129372,
+      9.735354,
+      -10.50406,
+      -10.50406,
+      -30.861598,
+      -30.861598,
+      -30.861598,
+      -51.238463,
+      -51.238463,
+      40.633704,
+      20.239686,
+      0.000272,
+      0.000272,
+      -20.357266,
+      -20.357266,
+      -20.357266,
+      -40.734131,
+      -40.734131,
+      40.634046,
+      20.240028,
+      0.000614,
+      0.000614,
+      -20.356924,
+      -20.356924,
+      -20.356924,
+      -40.733789,
+      -40.733789,
+      40.603401,
+      20.363987,
+      20.363987,
+      0.006449,
+      0.006449,
+      0.006449,
+      -20.370416,
+      -20.370416,
+      -40.642214,
+      -40.642214,
+      40.604189,
+      20.364775,
+      20.364775,
+      0.007237,
+      0.007237,
+      0.007237,
+      -20.369628,
+      -20.369628,
+      -40.641426,
+      -40.641426,
+      40.60974,
+      20.370326,
+      20.370326,
+      0.012788,
+      0.012788,
+      0.012788,
+      -20.364077,
+      -20.364077,
+      -40.635875,
+      -40.635875,
+      40.624478,
+      20.385064,
+      20.385064,
+      0.027526,
+      0.027526,
+      0.027526,
+      -20.349339,
+      -20.349339,
+      -40.621137,
+      -40.621137,
+      40.739536,
+      40.739536,
+      20.381998,
+      20.381998,
+      20.381998,
+      0.005133,
+      0.005133,
+      -20.266665,
+      -20.266665,
+      -40.550521,
+      -40.550521,
+      40.739864,
+      40.739864,
+      20.382326,
+      20.382326,
+      20.382326,
+      0.005461,
+      0.005461,
+      -20.266337,
+      -20.266337,
+      -40.550193,
+      -40.550193,
+      50.500173,
+      50.500173,
+      30.142635,
+      30.142635,
+      30.142635,
+      9.76577,
+      9.76577,
+      -10.506028,
+      -10.506028,
+      -30.789884,
+      -30.789884,
+      -51.160311,
+      -51.160311,
+      40.649375,
+      40.649375,
+      40.649375,
+      20.27251,
+      20.27251,
+      0.000712,
+      0.000712,
+      -20.283144,
+      -20.283144,
+      -40.653571,
+      -40.653571,
+      40.651186,
+      40.651186,
+      40.651186,
+      20.274321,
+      20.274321,
+      0.002523,
+      0.002523,
+      -20.281333,
+      -20.281333,
+      -40.65176,
+      -40.65176,
+      40.555962,
+      40.555962,
+      20.284164,
+      20.284164,
+      0.000308,
+      0.000308,
+      -20.370119,
+      -20.370119,
+      -40.646756,
+      -40.646756,
+      -40.646756,
+      40.557378,
+      40.557378,
+      20.28558,
+      20.28558,
+      0.001724,
+      0.001724,
+      -20.368703,
+      -20.368703,
+      -40.64534,
+      -40.64534,
+      -40.64534,
+      40.561215,
+      40.561215,
+      20.289417,
+      20.289417,
+      0.005561,
+      0.005561,
+      -20.364866,
+      -20.364866,
+      -40.641503,
+      -40.641503,
+      -40.641503,
+      40.654689,
+      40.654689,
+      20.370833,
+      20.370833,
+      0.000406,
+      0.000406,
+      -20.276231,
+      -20.276231,
+      -20.276231,
+      -40.635435,
+      -40.635435,
+      40.655198,
+      40.655198,
+      20.371342,
+      20.371342,
+      0.000915,
+      0.000915,
+      -20.275722,
+      -20.275722,
+      -20.275722,
+      -40.634926,
+      -40.634926,
+      50.297386,
+      50.297386,
+      30.01353,
+      30.01353,
+      9.643103,
+      9.643103,
+      -10.633534,
+      -10.633534,
+      -10.633534,
+      -30.992738,
+      -30.992738,
+      -51.305757,
+      -51.305757,
+      50.297911,
+      50.297911,
+      30.014055,
+      30.014055,
+      9.643628,
+      9.643628,
+      -10.633009,
+      -10.633009,
+      -10.633009,
+      -30.992213,
+      -30.992213,
+      -51.305232,
+      -51.305232,
+      50.400576,
+      50.400576,
+      30.11672,
+      30.11672,
+      9.746293,
+      9.746293,
+      -10.530344,
+      -10.530344,
+      -10.530344,
+      -30.889548,
+      -30.889548,
+      -51.202567,
+      -51.202567,
+      40.647807,
+      40.647807,
+      20.27738,
+      20.27738,
+      0.000743,
+      0.000743,
+      0.000743,
+      -20.358461,
+      -20.358461,
+      -40.67148,
+      -40.67148,
+      40.648142,
+      40.648142,
+      20.277715,
+      20.277715,
+      0.001078,
+      0.001078,
+      0.001078,
+      -20.358126,
+      -20.358126,
+      -40.671145,
+      -40.671145,
+      40.63619,
+      40.63619,
+      20.359553,
+      20.359553,
+      20.359553,
+      0.000349,
+      0.000349,
+      -20.31267,
+      -20.31267,
+      -40.584236,
+      -40.584236,
+      40.636641,
+      40.636641,
+      20.360004,
+      20.360004,
+      20.360004,
+      0.0008,
+      0.0008,
+      -20.312219,
+      -20.312219,
+      -40.583785,
+      -40.583785,
+      40.639223,
+      40.639223,
+      20.362586,
+      20.362586,
+      20.362586,
+      0.003382,
+      0.003382,
+      -20.309637,
+      -20.309637,
+      -40.581203,
+      -40.581203,
+      40.672545,
+      40.672545,
+      40.672545,
+      20.313341,
+      20.313341,
+      0.000322,
+      0.000322,
+      -20.271244,
+      -20.271244,
+      -40.590663,
+      -40.590663,
+      40.673129,
+      40.673129,
+      40.673129,
+      20.313925,
+      20.313925,
+      0.000906,
+      0.000906,
+      -20.27066,
+      -20.27066,
+      -40.590079,
+      -40.590079,
+      50.474783,
+      50.474783,
+      50.474783,
+      30.115579,
+      30.115579,
+      9.80256,
+      9.80256,
+      -10.469006,
+      -10.469006,
+      -30.788425,
+      -30.788425,
+      -51.090507,
+      -51.090507,
+      40.585314,
+      40.585314,
+      20.272295,
+      20.272295,
+      0.000729,
+      0.000729,
+      -20.31869,
+      -20.31869,
+      -40.620772,
+      -40.620772,
+      40.587241,
+      40.587241,
+      20.274222,
+      20.274222,
+      0.002656,
+      0.002656,
+      -20.316763,
+      -20.316763,
+      -40.618845,
+      -40.618845,
+      40.591412,
+      40.591412,
+      20.319846,
+      20.319846,
+      0.000427,
+      0.000427,
+      -20.301655,
+      -20.301655,
+      -40.602489,
+      -40.602489,
+      -40.602489,
+      40.593174,
+      40.593174,
+      20.321608,
+      20.321608,
+      0.002189,
+      0.002189,
+      -20.299893,
+      -20.299893,
+      -40.600727,
+      -40.600727,
+      -40.600727,
+      40.593632,
+      40.593632,
+      20.322066,
+      20.322066,
+      0.002647,
+      0.002647,
+      -20.299435,
+      -20.299435,
+      -40.600269,
+      -40.600269,
+      -40.600269,
+      40.696748,
+      40.696748,
+      20.425182,
+      20.425182,
+      0.105763,
+      0.105763,
+      -20.196319,
+      -20.196319,
+      -40.497153,
+      -40.497153,
+      -40.497153,
+      40.626334,
+      40.626334,
+      20.306915,
+      20.306915,
+      0.004833,
+      0.004833,
+      -20.296001,
+      -20.296001,
+      -20.296001,
+      -40.625454,
+      -40.625454,
+      40.626481,
+      40.626481,
+      20.307062,
+      20.307062,
+      0.00498,
+      0.00498,
+      -20.295854,
+      -20.295854,
+      -20.295854,
+      -40.625307,
+      -40.625307,
+      40.603174,
+      40.603174,
+      20.301092,
+      20.301092,
+      0.000258,
+      0.000258,
+      0.000258,
+      -20.329195,
+      -20.329195,
+      40.60357,
+      40.60357,
+      20.301488,
+      20.301488,
+      0.000654,
+      0.000654,
+      0.000654,
+      -20.328799,
+      -20.328799,
+      40.630648,
+      40.630648,
+      20.329814,
+      20.329814,
+      20.329814,
+      0.000361,
+      0.000361,
+      40.630917,
+      40.630917,
+      20.330083,
+      20.330083,
+      20.330083,
+      0.00063,
+      0.00063
+    ]
+  },
+  "detailed_results": {
+    "attack_results": [
+      {
+        "attack_name": "wifi_network_discovery",
+        "category": "reconnaissance",
+        "intensity": 2,
+        "success": false,
+        "execution_time": 0.014245,
+        "return_code": 1,
+        "stdout": "\u001b[0;36m============================================\u001b[0m\n\u001b[0;36m         WiFi Network Discovery            \u001b[0m\n\u001b[0;36m============================================\u001b[0m\n\u001b[0;31m[ERROR]\u001b[0m This script must be run as root\n",
+        "stderr": "",
+        "iocs": [],
+        "timestamp": "2025-08-04 20:13:08.086496",
+        "target_modules": [
+          "fanet"
+        ]
+      }
+    ],
+    "mtd_actions": [
+      {
+        "timestamp": "2025-08-04T20:13:08.086172",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T20:13:08.102686",
+        "action_type": "encryption_rotate",
+        "target_module": "fanet",
+        "success": true,
+        "parameters": {
+          "new_key": "224CF2D0A2456A245063845A8ACAC529",
+          "encryption_type": "AES256"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T20:13:28.483733",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T20:13:38.214981",
+        "action_type": "topology_change",
+        "target_module": "gazebo",
+        "success": true,
+        "parameters": {
+          "new_topology": "random",
+          "node_count": 15,
+          "connection_probability": 0.5556694875055239
+        }
+      },
+      {
+        "timestamp": "2025-08-04T20:13:48.719313",
+        "action_type": "emergency_response",
+        "target_module": "gazebo",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "high_cpu_usage",
+          "severity": "high"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T20:13:48.719655",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T20:14:09.083028",
+        "action_type": "emergency_response",
+        "target_module": "gazebo",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "high_cpu_usage",
+          "severity": "high"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T20:14:09.083816",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T20:14:09.089367",
+        "action_type": "topology_change",
+        "target_module": "mavlink",
+        "success": true,
+        "parameters": {
+          "new_topology": "random",
+          "node_count": 9,
+          "connection_probability": 0.5676958109808701
+        }
+      },
+      {
+        "timestamp": "2025-08-04T20:14:09.104105",
+        "action_type": "encryption_rotate",
+        "target_module": "mavlink",
+        "success": true,
+        "parameters": {
+          "new_key": "D7F7786BBD642E86D871A41187919AAF",
+          "encryption_type": "AES256"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T20:14:29.458577",
+        "action_type": "emergency_response",
+        "target_module": "gazebo",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "high_cpu_usage",
+          "severity": "high"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T20:14:29.458905",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T20:14:39.219214",
+        "action_type": "frequency_hop",
+        "target_module": "mavlink",
+        "success": true,
+        "parameters": {
+          "new_frequency": 2500,
+          "hop_interval": 1.32611072564973
+        }
+      },
+      {
+        "timestamp": "2025-08-04T20:14:49.725954",
+        "action_type": "emergency_response",
+        "target_module": "gazebo",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "high_cpu_usage",
+          "severity": "high"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T20:14:49.727765",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T20:15:10.009406",
+        "action_type": "emergency_response",
+        "target_module": "gazebo",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "high_cpu_usage",
+          "severity": "high"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T20:15:10.010822",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T20:15:10.014659",
+        "action_type": "topology_change",
+        "target_module": "ardupilot",
+        "success": true,
+        "parameters": {
+          "new_topology": "random",
+          "node_count": 9,
+          "connection_probability": 0.4648792419861507
+        }
+      },
+      {
+        "timestamp": "2025-08-04T20:15:30.379931",
+        "action_type": "emergency_response",
+        "target_module": "gazebo",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "high_cpu_usage",
+          "severity": "high"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T20:15:30.380440",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T20:15:40.022628",
+        "action_type": "topology_change",
+        "target_module": "mavlink",
+        "success": true,
+        "parameters": {
+          "new_topology": "random",
+          "node_count": 13,
+          "connection_probability": 0.4430799625345759
+        }
+      },
+      {
+        "timestamp": "2025-08-04T20:15:40.023153",
+        "action_type": "frequency_hop",
+        "target_module": "ns3",
+        "success": true,
+        "parameters": {
+          "new_frequency": 2400,
+          "hop_interval": 3.6924291193387058
+        }
+      },
+      {
+        "timestamp": "2025-08-04T20:15:40.125818",
+        "action_type": "encryption_rotate",
+        "target_module": "ardupilot",
+        "success": true,
+        "parameters": {
+          "new_key": "92DFE7ADFFE49486032C738D8EF666EE",
+          "encryption_type": "AES256"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T20:15:50.656905",
+        "action_type": "emergency_response",
+        "target_module": "gazebo",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "high_cpu_usage",
+          "severity": "high"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T20:15:50.657240",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T20:16:11.015715",
+        "action_type": "emergency_response",
+        "target_module": "gazebo",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "high_cpu_usage",
+          "severity": "high"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T20:16:11.016166",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T20:16:11.018748",
+        "action_type": "frequency_hop",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "new_frequency": 5800,
+          "hop_interval": 4.108212506432958
+        }
+      },
+      {
+        "timestamp": "2025-08-04T20:16:31.328707",
+        "action_type": "emergency_response",
+        "target_module": "gazebo",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "high_cpu_usage",
+          "severity": "high"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T20:16:31.329291",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T20:16:41.130945",
+        "action_type": "frequency_hop",
+        "target_module": "fanet",
+        "success": true,
+        "parameters": {
+          "new_frequency": 5200,
+          "hop_interval": 3.4984037362394655
+        }
+      },
+      {
+        "timestamp": "2025-08-04T20:16:51.600680",
+        "action_type": "emergency_response",
+        "target_module": "gazebo",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "high_cpu_usage",
+          "severity": "high"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T20:16:51.602607",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T20:17:11.919797",
+        "action_type": "emergency_response",
+        "target_module": "gazebo",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "high_cpu_usage",
+          "severity": "high"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T20:17:11.921559",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T20:17:11.922017",
+        "action_type": "frequency_hop",
+        "target_module": "fanet",
+        "success": true,
+        "parameters": {
+          "new_frequency": 5200,
+          "hop_interval": 4.174242662046778
+        }
+      },
+      {
+        "timestamp": "2025-08-04T20:17:12.025133",
+        "action_type": "encryption_rotate",
+        "target_module": "mavlink",
+        "success": true,
+        "parameters": {
+          "new_key": "FDD13DB7E325783D18552E519E5B5AFB",
+          "encryption_type": "AES256"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T20:17:32.226285",
+        "action_type": "emergency_response",
+        "target_module": "gazebo",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "high_cpu_usage",
+          "severity": "high"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T20:17:32.226432",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T20:17:52.522544",
+        "action_type": "emergency_response",
+        "target_module": "gazebo",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "high_cpu_usage",
+          "severity": "high"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T20:17:52.522940",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T20:18:12.852100",
+        "action_type": "emergency_response",
+        "target_module": "gazebo",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "high_cpu_usage",
+          "severity": "high"
+        }
+      },
+      {
+        "timestamp": "2025-08-04T20:18:12.852369",
+        "action_type": "emergency_response",
+        "target_module": "qgroundcontrol",
+        "success": true,
+        "parameters": {
+          "anomaly_type": "qgc_connection_lost",
+          "severity": "critical"
+        }
+      }
+    ]
+  },
+  "recommendations": [
+    "\uacf5\uaca9 \uc131\uacf5\ub960\uc774 \ub0ae\uc2b5\ub2c8\ub2e4. \uacf5\uaca9 \uc2a4\ud06c\ub9bd\ud2b8 \ub610\ub294 \ub300\uc0c1 \uc2dc\uc2a4\ud15c \uc124\uc815\uc744 \ud655\uc778\ud558\uc138\uc694.",
+    "\uc774\uc0c1 \ud0d0\uc9c0\uc728\uc774 \ub192\uc2b5\ub2c8\ub2e4. \uc624\ud0d0\uc744 \uc904\uc774\uae30 \uc704\ud574 \ud0d0\uc9c0 \uc784\uacc4\uac12\uc744 \uc870\uc815\ud558\uc138\uc694.",
+    "FANET \ud1a0\ud3f4\ub85c\uc9c0\uc758 \ub3d9\uc801 \ubcc0\ud654\uac00 \uacf5\uaca9 \uc131\uacf5\ub960\uc5d0 \ubbf8\uce58\ub294 \uc601\ud5a5\uc744 \ubd84\uc11d\ud558\uc138\uc694.",
+    "\ub2e4\uc591\ud55c \uacf5\uaca9 \uac15\ub3c4\uc5d0\uc11c\uc758 \uc2dc\uc2a4\ud15c \uc131\ub2a5\uc744 \ube44\uad50 \ubd84\uc11d\ud558\uc138\uc694.",
+    "\uc2e4\uc81c \ub4dc\ub860 \ud658\uacbd\uc5d0\uc11c\uc758 \uac80\uc99d\uc744 \uc704\ud574 \ud558\ub4dc\uc6e8\uc5b4 \ud14c\uc2a4\ud2b8\ub97c \uc218\ud589\ud558\uc138\uc694.",
+    "\ub17c\ubb38 \uc791\uc131\uc744 \uc704\ud574 \ud1b5\uacc4\uc801 \uc720\uc758\uc131\uc744 \ud655\ubcf4\ud560 \uc218 \uc788\ub294 \ucda9\ubd84\ud55c \uc2e4\ud5d8 \ub370\uc774\ud130\ub97c \uc218\uc9d1\ud558\uc138\uc694."
+  ]
+}
