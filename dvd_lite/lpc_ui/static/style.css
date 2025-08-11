@@ -1,0 +1,4 @@
+/* 최소한의 톤 업 */
+body { font-feature-settings: "tnum"; }
+.card-header { font-weight: 600; }
+pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
