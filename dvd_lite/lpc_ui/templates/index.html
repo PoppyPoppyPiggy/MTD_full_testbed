@@ -1,0 +1,217 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="row g-4">
+  <div class="col-lg-8">
+    <div class="card shadow-sm">
+      <div class="card-header d-flex align-items-center">
+        <strong class="me-2">실행 컨트롤</strong>
+        <span class="badge text-bg-secondary">ATTACKS_DIR: {{ attacks_dir }}</span>
+      </div>
+      <div class="card-body">
+        <form id="run-form" class="row gy-3">
+          <div class="col-md-4">
+            <label class="form-label">실행 타입</label>
+            <select class="form-select" name="run_type" id="run_type">
+              <option value="module">모듈 실행</option>
+              <option value="scenario">시나리오 실행</option>
+              <option value="eval">평가 실행(eval + ns-3)</option>
+            </select>
+          </div>
+
+          <div class="col-md-8">
+            <div id="modsel">
+              <label class="form-label">모듈</label>
+              <select class="form-select" name="module">
+                {% for m in modules %}
+                  <option value="{{ m }}">{{ m.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+            <div id="scsel" style="display:none;">
+              <label class="form-label">시나리오</label>
+              <select class="form-select" name="scenario">
+                {% for s in scenarios %}
+                  <option value="{{ s }}">{{ s.name }}</option>
+                {% endfor %}
+              </select>
+            </div>
+          </div>
+
+          <div class="col-12"><hr></div>
+
+          <div class="col-md-3">
+            <label class="form-label">LPC_DUTY</label>
+            <input class="form-control" name="LPC_DUTY" placeholder="0.10">
+          </div>
+            <div class="col-md-3">
+            <label class="form-label">INTERVAL(ms)</label>
+            <input class="form-control" name="LPC_INTERVAL_MS" placeholder="15000">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">JITTER(%)</label>
+            <input class="form-control" name="LPC_JITTER_PCT" placeholder="30">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">BACKOFF</label>
+            <select class="form-select" name="LPC_BACKOFF">
+              <option value="">(기본)</option>
+              <option>none</option><option>linear</option><option>exp</option>
+            </select>
+          </div>
+
+          <div class="col-md-3">
+            <label class="form-label">MAX_BUDGET</label>
+            <input class="form-control" name="LPC_MAX_BUDGET" placeholder="120">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">STEP</label>
+            <input class="form-control" name="LPC_STEP" placeholder="0.02">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">WINDOW</label>
+            <input class="form-control" name="LPC_WINDOW" placeholder="HH:MM-HH:MM">
+          </div>
+          <div class="col-md-3">
+            <label class="form-label">SEED</label>
+            <input class="form-control" name="LPC_SEED" placeholder="">
+          </div>
+
+          <div class="col-md-6">
+            <label class="form-label">PROFILE(env)</label>
+            <select class="form-select" name="LPC_PROFILE">
+              <option value="">(선택 안 함)</option>
+              {% for p in profiles %}
+                <option value="{{ p }}">{{ p.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="col-md-6">
+            <label class="form-label">PHASE FILE(csv)</label>
+            <select class="form-select" name="LPC_PHASE_FILE">
+              <option value="">(선택 안 함)</option>
+              {% for p in phases %}
+                <option value="{{ p }}">{{ p.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+
+          <div class="col-md-4">
+            <label class="form-label">DVD_C_GCS</label>
+            <input class="form-control" name="DVD_C_GCS" placeholder="ground-control-station">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">DVD_C_CC</label>
+            <input class="form-control" name="DVD_C_CC" placeholder="companion-computer">
+          </div>
+          <div class="col-md-4">
+            <label class="form-label">DVD_C_FC</label>
+            <input class="form-control" name="DVD_C_FC" placeholder="flight-controller">
+          </div>
+
+          <div class="col-md-4 form-check mt-2">
+            <input class="form-check-input" type="checkbox" name="force_now" id="force_now">
+            <label class="form-check-label" for="force_now">LPC_WINDOW 무시하고 지금 실행</label>
+          </div>
+
+          <div class="col-12 d-flex gap-2 mt-2">
+            <button type="button" class="btn btn-primary" id="btn-run">실행</button>
+            <button type="button" class="btn btn-outline-danger" id="btn-stop" disabled>중지</button>
+          </div>
+          <div class="col-12 small text-muted mt-1">
+            Docker 컨테이너: {{ docker_names|join(", ") }}
+          </div>
+        </form>
+      </div>
+    </div>
+
+    <div class="card shadow-sm mt-4">
+      <div class="card-header"><strong>Metrics (after eval)</strong></div>
+      <div class="card-body">
+        <pre id="metrics" class="small text-bg-light p-3 rounded" style="min-height: 100px;">(eval 실행 후 자동 갱신)</pre>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-lg-4">
+    <div class="card shadow-sm">
+      <div class="card-header"><strong>bus.log (tail)</strong></div>
+      <div class="card-body">
+        <pre id="logbox" class="small text-bg-dark text-light p-3 rounded" style="height: 420px; overflow:auto;"></pre>
+      </div>
+    </div>
+    <div class="card shadow-sm mt-4">
+      <div class="card-header"><strong>Jobs</strong></div>
+      <div class="card-body">
+        <pre id="jobs" class="small text-bg-light p-3 rounded" style="height:120px; overflow:auto;"></pre>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+const runTypeSel = document.getElementById('run_type');
+const modSel = document.getElementById('modsel');
+const scSel = document.getElementById('scsel');
+runTypeSel.addEventListener('change', () => {
+  const v = runTypeSel.value;
+  modSel.style.display = (v === 'module') ? 'block':'none';
+  scSel.style.display = (v !== 'module') ? 'block':'none';
+});
+
+let currentJob = null;
+
+async function runAction() {
+  const form = document.getElementById('run-form');
+  const data = new FormData(form);
+  const rt = data.get('run_type');
+  const endpoint = (rt === 'module') ? '/api/run/module' : (rt === 'scenario' ? '/api/run/scenario' : '/api/run/eval');
+  const res = await fetch(endpoint, { method:'POST', body: data });
+  const j = await res.json();
+  if (j.ok) {
+    currentJob = j.job_id;
+    document.getElementById('btn-stop').disabled = false;
+  }
+  alert(j.ok ? ('시작: ' + j.job_id) : ('실패: ' + j.msg));
+}
+
+async function stopAction() {
+  if (!currentJob) return;
+  const fd = new FormData(); fd.append('job_id', currentJob);
+  const res = await fetch('/api/stop', { method:'POST', body: fd });
+  const j = await res.json();
+  alert(j.ok ? '중지됨' : '중지 실패');
+  currentJob = null;
+  document.getElementById('btn-stop').disabled = true;
+}
+
+async function refreshLogs() {
+  try{
+    const res = await fetch('/api/logs?n=400'); const j = await res.json();
+    if (j.ok) { document.getElementById('logbox').textContent = j.lines.join('\n'); }
+  }catch(e){}
+}
+async function refreshJobs() {
+  try{
+    const res = await fetch('/api/jobs'); const j = await res.json();
+    document.getElementById('jobs').textContent = JSON.stringify(j, null, 2);
+  }catch(e){}
+}
+async function refreshMetrics() {
+  try{
+    const res = await fetch('/api/metrics'); const j = await res.json();
+    if (j.ok) {
+      const rows = [j.header.join(' , ')]
+        .concat(j.data.map(r => r.join(' , '))).join('\n');
+      document.getElementById('metrics').textContent = rows;
+    }
+  }catch(e){}
+}
+
+document.getElementById('btn-run').addEventListener('click', runAction);
+document.getElementById('btn-stop').addEventListener('click', stopAction);
+setInterval(refreshLogs, 1500);
+setInterval(refreshJobs, 3000);
+setInterval(refreshMetrics, 5000);
+refreshLogs(); refreshJobs(); refreshMetrics();
+</script>
+{% endblock %}
