@@ -1,3 +1,9 @@
+export MTD_ROOT="/home/kali/MTD/MTD_full_testbed"
+export LPC_ROOT="$MTD_ROOT/dvd_lite/dvd_attacks_lpc"
+export LPC_LOG_DIR="$LPC_ROOT/attack_output"
+mkdir -p "$LPC_LOG_DIR"
+: > "$LPC_LOG_DIR/bus.log"
+
 #!/usr/bin/env bash
 # === 절대 경로 ===
 export MTD_ROOT="/home/kali/MTD/MTD_full_testbed"
@@ -26,9 +32,9 @@ export DVD_RTSP_PORT=8554         # 카메라(관행)
 find_c_by_hint(){ docker ps --format '{{.Names}}' | grep -iE "$1" | head -n1; }
 
 # 자동탐지(없으면 빈값 유지 → 모듈이 효과만 시뮬)
-[[ -z "$DVD_C_GCS" ]] && DVD_C_GCS="$(find_c_by_hint 'gcs|qgc|mavproxy')"
-[[ -z "$DVD_C_CC"  ]] && DVD_C_CC="$(find_c_by_hint 'companion|cc')"
-[[ -z "$DVD_C_FC"  ]] && DVD_C_FC="$(find_c_by_hint 'sitl|ardupilot|fc')"
+[[ -z "$DVD_C_GCS" ]] && DVD_C_GCS="$(find_c_by_hint 'gcs|qgc|mavproxy|ground-control')"
+[[ -z "$DVD_C_CC"  ]] && DVD_C_CC="$(find_c_by_hint 'companion|cc|companion-computer')"
+[[ -z "$DVD_C_FC"  ]] && DVD_C_FC="$(find_c_by_hint 'sitl|ardupilot|fc|flight-controller')"
 
 export DVD_C_GCS DVD_C_CC DVD_C_FC
 
