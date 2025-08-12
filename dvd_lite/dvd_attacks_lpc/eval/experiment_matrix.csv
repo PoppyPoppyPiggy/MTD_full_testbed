@@ -1,0 +1,4 @@
+id,scenario,profile,phase_csv,SIM_TIME,LPC_DUTY,LPC_INTERVAL_MS,LPC_JITTER_PCT,LPC_BACKOFF,LPC_STEP,notes
+exp01,scenarios/S_lpc_v2.pipeline,scenarios/options.d/profile_stealth.env,scenarios/options.d/mission_phases.csv,90,0.08,1000,35,exp,0.8,stealth mix
+exp02,scenarios/S_lpc_v2.pipeline,scenarios/options.d/profile_balanced.env,scenarios/options.d/mission_phases.csv,120,0.10,900,35,exp,0.9,balanced mix
+exp03,scenarios/S_lpc_v2.pipeline,scenarios/options.d/profile_escalate.env,scenarios/options.d/mission_phases_escalate.csv,120,0.14,800,40,exp,1.1,escalate mix
