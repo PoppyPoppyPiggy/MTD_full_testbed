@@ -1,24 +1,44 @@
 {
-  "telemetry_trickle_jam": {
-    "low":  { "loss_pct": 2, "jitter_ms": 2,  "delay_ms": 0,  "dup_pct": 0, "rate_limit_mbps": 0 },
-    "mid":  { "loss_pct": 5, "jitter_ms": 4,  "delay_ms": 1,  "dup_pct": 0, "rate_limit_mbps": 0 },
-    "high": { "loss_pct": 9, "jitter_ms": 6,  "delay_ms": 2,  "dup_pct": 1, "rate_limit_mbps": 0 }
+  "wifi_slow_scan": {
+    "low":    { "loss_pct": 1.5,  "jitter_ms": 0.8, "delay_ms": 0.5, "dup_pct": 0.0, "rate_limit_mbps": 0.0, "description": "매우 가벼운 WiFi 스캔 활동" },
+    "medium": { "loss_pct": 3.2,  "jitter_ms": 2.1, "delay_ms": 1.2, "dup_pct": 0.1, "rate_limit_mbps": 0.0, "description": "중간 강도 WiFi 스캔" },
+    "high":   { "loss_pct": 6.8,  "jitter_ms": 4.5, "delay_ms": 2.8, "dup_pct": 0.3, "rate_limit_mbps": 0.0, "description": "활발한 WiFi 스캔 및 신호 변동" }
   },
-  "telemetry_burst_drop": {
-    "low":  { "loss_pct": 4, "jitter_ms": 1,  "delay_ms": 0,  "dup_pct": 0, "rate_limit_mbps": 0 },
-    "mid":  { "loss_pct": 8, "jitter_ms": 2,  "delay_ms": 1,  "dup_pct": 0, "rate_limit_mbps": 0 },
-    "high": { "loss_pct": 15,"jitter_ms": 3,  "delay_ms": 2,  "dup_pct": 0, "rate_limit_mbps": 0 }
+  "telemetry_trickle_jam": {
+    "low":    { "loss_pct": 2.1,  "jitter_ms": 1.5, "delay_ms": 2.0,  "dup_pct": 0.0, "rate_limit_mbps": 0.0, "description": "저율 텔레메트리 간섭" },
+    "medium": { "loss_pct": 5.5,  "jitter_ms": 4.2, "delay_ms": 8.0,  "dup_pct": 0.2, "rate_limit_mbps": 0.0, "description": "중간 강도 텔레메트리 방해" },
+    "high":   { "loss_pct": 12.0, "jitter_ms": 8.8, "delay_ms": 20.0, "dup_pct": 0.8, "rate_limit_mbps": 0.5, "description": "높은 강도 텔레메트리 차단" }
   },
   "mavlink_param_drift": {
-    "any":  { "loss_pct": 0, "jitter_ms": 1,  "delay_ms": 1,  "dup_pct": 0, "rate_limit_mbps": 0 }
+    "low":    { "loss_pct": 0.8, "jitter_ms": 0.3, "delay_ms": 0.2, "dup_pct": 0.0, "rate_limit_mbps": 0.0, "description": "미세한 파라미터 조작" },
+    "medium": { "loss_pct": 2.5, "jitter_ms": 1.1, "delay_ms": 0.8, "dup_pct": 0.1, "rate_limit_mbps": 0.0, "description": "중간 수준 파라미터 변조" },
+    "high":   { "loss_pct": 6.2, "jitter_ms": 3.5, "delay_ms": 2.5, "dup_pct": 0.3, "rate_limit_mbps": 0.0, "description": "파라미터 대량 변조로 인한 불안정" }
   },
-  "mavlink_mode_tease":   { "any": { "loss_pct": 0, "jitter_ms": 1, "delay_ms": 2, "dup_pct": 0, "rate_limit_mbps": 0 } },
-  "gps_slow_spoof":       { "any": { "loss_pct": 0, "jitter_ms": 0, "delay_ms": 0, "dup_pct": 0, "rate_limit_mbps": 0 } },
-  "gps_time_skew":        { "any": { "loss_pct": 0, "jitter_ms": 0, "delay_ms": 3, "dup_pct": 0, "rate_limit_mbps": 0 } },
-  "waypoint_drift":       { "any": { "loss_pct": 0, "jitter_ms": 0, "delay_ms": 0, "dup_pct": 0, "rate_limit_mbps": 0 } },
-  "sensor_fusion_noise":  { "any": { "loss_pct": 0, "jitter_ms": 1, "delay_ms": 1, "dup_pct": 0, "rate_limit_mbps": 0 } },
-  "battery_route_drain":  { "any": { "loss_pct": 0, "jitter_ms": 0, "delay_ms": 0, "dup_pct": 0, "rate_limit_mbps": -1 } },
-  "wifi_slow_scan":       { "any": { "loss_pct": 3, "jitter_ms": 2, "delay_ms": 1, "dup_pct": 0, "rate_limit_mbps": 0 } },
-  "safe_rth_penalty":     { "any": { "loss_pct": 0, "jitter_ms": 0, "delay_ms": 2, "dup_pct": 0, "rate_limit_mbps": 0 } },
-  "_decay": { "half_life_bins": 6 }
+  "gps_slow_spoof": {
+    "low":    { "loss_pct": 1.2, "jitter_ms": 0.5, "delay_ms": 0.3, "dup_pct": 0.0, "rate_limit_mbps": 0.0, "description": "미세한 GPS 위치 편향" },
+    "medium": { "loss_pct": 3.8, "jitter_ms": 1.8, "delay_ms": 1.5, "dup_pct": 0.1, "rate_limit_mbps": 0.0, "description": "중간 수준 GPS 스푸핑" },
+    "high":   { "loss_pct": 8.5, "jitter_ms": 5.2, "delay_ms": 4.0, "dup_pct": 0.4, "rate_limit_mbps": 0.0, "description": "심각한 GPS 위치 조작" }
+  },
+  "power_route_bias": {
+    "low":    { "loss_pct": 0.5, "jitter_ms": 0.2, "delay_ms": 0.8, "dup_pct": 0.0, "rate_limit_mbps": 0.0, "description": "경미한 경로 부하 증가" },
+    "medium": { "loss_pct": 1.8, "jitter_ms": 0.8, "delay_ms": 3.2, "dup_pct": 0.0, "rate_limit_mbps": 0.0, "description": "중간 수준 시스템 부하" },
+    "high":   { "loss_pct": 4.5, "jitter_ms": 2.5, "delay_ms": 8.8, "dup_pct": 0.2, "rate_limit_mbps": 0.2, "description": "높은 CPU 부하로 인한 성능 저하" }
+  },
+  "service_enum_probe": {
+    "low":    { "loss_pct": 0.3, "jitter_ms": 0.1, "delay_ms": 0.2, "dup_pct": 0.0, "rate_limit_mbps": 0.0, "description": "조용한 서비스 열거" },
+    "medium": { "loss_pct": 1.2, "jitter_ms": 0.5, "delay_ms": 0.8, "dup_pct": 0.0, "rate_limit_mbps": 0.0, "description": "중간 강도 포트 스캐닝" },
+    "high":   { "loss_pct": 3.5, "jitter_ms": 1.8, "delay_ms": 2.2, "dup_pct": 0.1, "rate_limit_mbps": 0.0, "description": "집중적인 서비스 스캐닝" }
+  },
+  "_meta": {
+    "version": "1.0",
+    "description": "LPC 공격 모듈들의 링크 영향 매핑 규칙",
+    "update_date": "2025-08-14",
+    "bin_duration_sec": 10,
+    "decay_factor": 0.95,
+    "notes": [
+      "모든 값은 bin 단위로 적용되며 감쇠 팩터가 적용됨",
+      "intensity 파라미터는 low/medium/high 3단계 지원",
+      "실제 패킷 전송이 아닌 효과 시뮬레이션 용도"
+    ]
+  }
 }
