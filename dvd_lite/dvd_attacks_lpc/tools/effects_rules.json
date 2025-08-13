@@ -1,0 +1,12 @@
+{
+    "telemetry_trickle_jam": {
+      "low":  { "loss_pct": 2, "jitter_ms": 2, "delay_ms": 0, "dup_pct": 0, "rate_limit_mbps": 0 },
+      "mid":  { "loss_pct": 5, "jitter_ms": 4, "delay_ms": 1, "dup_pct": 0, "rate_limit_mbps": 0 },
+      "high": { "loss_pct": 9, "jitter_ms": 6, "delay_ms": 2, "dup_pct": 1, "rate_limit_mbps": 0 }
+    },
+    "mavlink_param_drift": {
+      "any":  { "loss_pct": 0, "jitter_ms": 1, "delay_ms": 1, "dup_pct": 0, "rate_limit_mbps": 0 }
+    },
+    "_decay": { "half_life_bins": 6 }
+  }
+  

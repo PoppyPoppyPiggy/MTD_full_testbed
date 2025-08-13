@@ -1,55 +1,83 @@
 #!/usr/bin/env python3
-# effect_timeline.csv → 임팩트 메트릭 산출 (합계/누적 중심)
-import sys, csv, re, os
+import argparse, csv, statistics as stats, os, sys
 
-TL = sys.argv[1] if len(sys.argv)>1 else "attack_output/effect_timeline.csv"
-OUT= sys.argv[2] if len(sys.argv)>2 else "attack_output/metrics.csv"
+# 시간 컬럼 후보에 ts_ms 추가 (ms면 s로 변환)
+CAND_TIME = ["t_sec", "t", "time", "timestamp", "ts_ms"]
+METRICS   = ["loss_pct", "delay_ms", "jitter_ms", "dup_pct", "rate_limit_mbps"]
 
-effects=[]
-with open(TL) as f:
-    r=csv.DictReader(f)
-    for row in r:
-        effects.append(row)
+def read_csv_rows(path):
+    if not os.path.exists(path):
+        sys.exit(f"[ERR] timeline not found: {path}")
+    rows=[]
+    with open(path, newline="") as f:
+        r=csv.DictReader(f)
+        if not r.fieldnames:
+            sys.exit(f"[ERR] empty CSV or no header: {path}")
+        time_key=None
+        for k in CAND_TIME:
+            if k in r.fieldnames:
+                time_key=k; break
+        if not time_key:
+            sys.exit(f"[ERR] time column not found in {r.fieldnames}")
+        for row in r:
+            raw=row.get(time_key,"")
+            try:
+                t=float(raw)
+                # ts_ms면 초로 변환
+                if time_key=="ts_ms": t = t/1000.0
+            except:
+                continue
+            row["_t"]=t
+            rows.append(row)
+    if not rows:
+        sys.exit("[ERR] no valid rows after parsing timeline")
+    rows.sort(key=lambda x: x["_t"])
+    return rows
 
-def sum_numeric(prefix, absval=False, percent_as_abs=False):
-    s=0.0
-    for e in effects:
-        if e["effect"].startswith(prefix):
-            m=re.findall(r'[-+]?\d*\.?\d+', e["value"])
-            if not m: continue
-            v=float(m[0])
-            if percent_as_abs and "%" in e["value"]:
-                v=abs(v)  # 퍼센트는 절댓값 합산 권장
-            elif absval:
-                v=abs(v)
-            s+=v
-    return s
+def to_float(x):
+    try: return float(x)
+    except: return None
 
-metrics = {
-  # 항법/임무 편향
-  "position_drift_m":    sum_numeric("position_drift", absval=False),
-  "mission_bias_sum":    sum_numeric("mission_bias", absval=False),
-  "wp_deviation_m":      sum_numeric("wp_deviation", absval=False),
+def window_rows(rows, size):
+    out=[]; n=len(rows)
+    for i in range(0, n, size):
+        out.append(rows[i:i+size])
+    return out
 
-  # 에너지/비행시간 (기존 모듈과 호환)
-  "energy_delta_Wh":     sum_numeric("energy_delta", absval=False),
-  "flight_time_loss":    sum_numeric("flight_time_loss", absval=False),
+def agg_chunk(chunk):
+    d = {"win_idx": None, "start": f"{chunk[0]['_t']:.3f}", "end": f"{chunk[-1]['_t']:.3f}"}
+    for m in METRICS:
+        vals=[to_float(r.get(m)) for r in chunk]
+        vals=[v for v in vals if v is not None]
+        if vals:
+            mean=sum(vals)/len(vals)
+            std=stats.pstdev(vals) if len(vals)>1 else 0.0
+            d[f"{m}_mean"]=round(mean,3)
+            d[f"{m}_std"]=round(std,3)
+    return d
 
-  # 링크 품질 (ns-3로 일부 재현)
-  "link_jitter_ms":      sum_numeric("link_jitter", absval=False),
-  "packet_loss_pct":     sum_numeric("packet_loss", absval=False),
+def main():
+    ap=argparse.ArgumentParser()
+    ap.add_argument("--timeline", required=True)
+    ap.add_argument("--out", required=True)
+    ap.add_argument("--win", type=int, default=6)
+    args=ap.parse_args()
+    rows=read_csv_rows(args.timeline)
+    chunks=window_rows(rows, args.win)
+    feats=[]
+    for i,ch in enumerate(chunks):
+        d=agg_chunk(ch); d["win_idx"]=i; feats.append(d)
+    base=["win_idx","start","end"]
+    cols=[]
+    for m in METRICS:
+        k1=f"{m}_mean"; k2=f"{m}_std"
+        if k1 in feats[0]: cols.extend([k1,k2])
+    header=base+cols
+    with open(args.out,"w",newline="") as f:
+        w=csv.DictWriter(f, fieldnames=header)
+        w.writeheader()
+        for r in feats: w.writerow({k:r.get(k,"") for k in header})
+    print(f"[OK] wrote {args.out} ({len(feats)} windows)")
 
-  # 융합/운용
-  "sensor_residual":     sum_numeric("sensor_residual", absval=True),
-  "rth_margin_pct":      sum_numeric("rth_margin", percent_as_abs=True),
-
-  # 전체 이벤트 수
-  "events_total":        len(effects),
-}
-
-os.makedirs(os.path.dirname(OUT), exist_ok=True)
-with open(OUT,'w',newline='') as f:
-    w=csv.writer(f); w.writerow(["metric","value"])
-    for k,v in metrics.items(): w.writerow([k,v])
-
-print(f"[metrics] wrote {OUT}")
+if __name__=="__main__":
+    main()
