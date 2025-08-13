@@ -1,12 +1,24 @@
 {
-    "telemetry_trickle_jam": {
-      "low":  { "loss_pct": 2, "jitter_ms": 2, "delay_ms": 0, "dup_pct": 0, "rate_limit_mbps": 0 },
-      "mid":  { "loss_pct": 5, "jitter_ms": 4, "delay_ms": 1, "dup_pct": 0, "rate_limit_mbps": 0 },
-      "high": { "loss_pct": 9, "jitter_ms": 6, "delay_ms": 2, "dup_pct": 1, "rate_limit_mbps": 0 }
-    },
-    "mavlink_param_drift": {
-      "any":  { "loss_pct": 0, "jitter_ms": 1, "delay_ms": 1, "dup_pct": 0, "rate_limit_mbps": 0 }
-    },
-    "_decay": { "half_life_bins": 6 }
-  }
-  
+  "telemetry_trickle_jam": {
+    "low":  { "loss_pct": 2, "jitter_ms": 2,  "delay_ms": 0,  "dup_pct": 0, "rate_limit_mbps": 0 },
+    "mid":  { "loss_pct": 5, "jitter_ms": 4,  "delay_ms": 1,  "dup_pct": 0, "rate_limit_mbps": 0 },
+    "high": { "loss_pct": 9, "jitter_ms": 6,  "delay_ms": 2,  "dup_pct": 1, "rate_limit_mbps": 0 }
+  },
+  "telemetry_burst_drop": {
+    "low":  { "loss_pct": 4, "jitter_ms": 1,  "delay_ms": 0,  "dup_pct": 0, "rate_limit_mbps": 0 },
+    "mid":  { "loss_pct": 8, "jitter_ms": 2,  "delay_ms": 1,  "dup_pct": 0, "rate_limit_mbps": 0 },
+    "high": { "loss_pct": 15,"jitter_ms": 3,  "delay_ms": 2,  "dup_pct": 0, "rate_limit_mbps": 0 }
+  },
+  "mavlink_param_drift": {
+    "any":  { "loss_pct": 0, "jitter_ms": 1,  "delay_ms": 1,  "dup_pct": 0, "rate_limit_mbps": 0 }
+  },
+  "mavlink_mode_tease":   { "any": { "loss_pct": 0, "jitter_ms": 1, "delay_ms": 2, "dup_pct": 0, "rate_limit_mbps": 0 } },
+  "gps_slow_spoof":       { "any": { "loss_pct": 0, "jitter_ms": 0, "delay_ms": 0, "dup_pct": 0, "rate_limit_mbps": 0 } },
+  "gps_time_skew":        { "any": { "loss_pct": 0, "jitter_ms": 0, "delay_ms": 3, "dup_pct": 0, "rate_limit_mbps": 0 } },
+  "waypoint_drift":       { "any": { "loss_pct": 0, "jitter_ms": 0, "delay_ms": 0, "dup_pct": 0, "rate_limit_mbps": 0 } },
+  "sensor_fusion_noise":  { "any": { "loss_pct": 0, "jitter_ms": 1, "delay_ms": 1, "dup_pct": 0, "rate_limit_mbps": 0 } },
+  "battery_route_drain":  { "any": { "loss_pct": 0, "jitter_ms": 0, "delay_ms": 0, "dup_pct": 0, "rate_limit_mbps": -1 } },
+  "wifi_slow_scan":       { "any": { "loss_pct": 3, "jitter_ms": 2, "delay_ms": 1, "dup_pct": 0, "rate_limit_mbps": 0 } },
+  "safe_rth_penalty":     { "any": { "loss_pct": 0, "jitter_ms": 0, "delay_ms": 2, "dup_pct": 0, "rate_limit_mbps": 0 } },
+  "_decay": { "half_life_bins": 6 }
+}

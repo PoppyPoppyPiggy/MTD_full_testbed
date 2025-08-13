@@ -1,0 +1,2 @@
+win_idx,start,end,loss_pct_mean,loss_pct_std,delay_ms_mean,delay_ms_std,jitter_ms_mean,jitter_ms_std,dup_pct_mean,dup_pct_std,rate_limit_mbps_mean,rate_limit_mbps_std
+0,1755092440.000,1755092440.000,5.0,0.0,2.0,0.0,5.0,0.0,0.0,0.0,0.0,0.0
