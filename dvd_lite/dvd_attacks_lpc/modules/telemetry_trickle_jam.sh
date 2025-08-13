@@ -1,10 +1,23 @@
 #!/usr/bin/env bash
 set -euo pipefail
-BASE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-. "$BASE/sh_core/lpc_core.sh"; . "$BASE/primitives/telemetry_stub.sh"
+ATTACK_NAME="telemetry_trickle_jam"
+. "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")"/.. && pwd)/sh_core/attack_std.shlib"
 
-# Attack Point: GCS 컨테이너 ↔ MAVLink UDP (14550/14551)
-nibble(){ telemetry_trickle; }
-on_ip_shuffle(){ apply_backoff; }   # MTD 발생 시 즉시 둔화
-main(){ log "[telemetry_trickle_jam] GCS=$DVD_C_GCS dst=$DVD_MAVLINK_PORT"; lpc_loop nibble; }
-main "$@"
+: "${INTENSITY:=low}"
+: "${PPS_LIMIT:=auto}"
+: "${LATENCY_INCREASE:=auto}"
+
+case "$INTENSITY" in
+  low)    PPS_LIMIT=${PPS_LIMIT/auto/5};  LATENCY_INCREASE=${LATENCY_INCREASE/auto/2}  ;;
+  medium) PPS_LIMIT=${PPS_LIMIT/auto/15}; LATENCY_INCREASE=${LATENCY_INCREASE/auto/8}  ;;
+  high)   PPS_LIMIT=${PPS_LIMIT/auto/30}; LATENCY_INCREASE=${LATENCY_INCREASE/auto/20} ;;
+esac
+
+_act(){
+  local jitter; jitter=$(awk "BEGIN {srand(); print int(rand()*3)+1}")
+  local effective_latency=$((LATENCY_INCREASE + jitter))
+  _log_bus "$ATTACK_NAME" "intensity=$INTENSITY" "pps_limit=$PPS_LIMIT" "latency_increase_ms=$effective_latency" "jitter_ms=$jitter"
+  return 0
+}
+
+run_lpc_loop _act "${DUR:-0}"
