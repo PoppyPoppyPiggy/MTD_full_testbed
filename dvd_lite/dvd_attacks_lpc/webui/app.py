@@ -129,7 +129,7 @@ def index():
         ns3=ns3,
         features=features,
         timeline=timeline,
-        plot_exists=plot_exists
+        plot_exists=plot_exists,
         base_path=BASE,   # ← 추가
     )
 
