@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-import sys, pandas as pd, numpy as np
+import os, sys, pandas as pd, numpy as np
 
 ns3="attack_output/ns3_metrics.csv"
 out="attack_output/window_features.csv"
