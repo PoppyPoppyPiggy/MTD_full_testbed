@@ -1,6 +1,8 @@
-# attack_std.shlib - 공통 로깅/루프 유틸
+#!/usr/bin/env bash
+# attack_std.shlib - 공통 로깅/루프 유틸 (수정판)
 # 사용 전 00_env.sh 로드 필요 (BUS_LOG 보장)
 
+# 올바른 함수명으로 수정
 _log_bus() {
   local name="$1"; shift
   local line="[$(date '+%F %T')] [$name] $*"
@@ -8,30 +10,51 @@ _log_bus() {
   echo "$line" | tee -a "${BUS_LOG:-${LPC_LOG_DIR:-.}/bus.log}" >/dev/null
 }
 
-# === (선택) 강화 상태머신 사용 래퍼 ===
+# 하위 호환성을 위한 alias (기존 _log_bus 호출 지원)
+log_bus() { _log_bus "$@"; }
+
+# 교체/추가 (핵심 부분만)
 run_lpc_loop() {
   local action_func="$1"
-  local duration="${2:-0}"
+  local duration_raw="${2:-0}"
+  # "20s" 같은 입력을 정수초로 정규화
+  local duration="$(echo "$duration_raw" | sed -E 's/[^0-9]//g')"
+  duration="${duration:-0}"
 
-  if [[ "${LPC_USE_STATE_MACHINE:-true}" == "true" ]]; then
-    local lpc_state_lib="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)/lpc_state.shlib"
-    [[ -f "$lpc_state_lib" ]] && source "$lpc_state_lib"
-    if declare -f run_lpc_loop_with_state >/dev/null; then
-      run_lpc_loop_with_state "$action_func" "$duration"
-      return
-    fi
+  if [[ "$duration" -le 0 ]]; then
+    echo "[DEBUG] Duration이 0 이하, 루프 스킵"
+    return 0
   fi
 
-  # 폴백(간단 루프)
-  local start_time end_time
+  local interval_ms="${LPC_INTERVAL_MS:-1000}"   # 기본 1초
+  local start_time end_time current_time
   start_time=$(date +%s)
-  [[ "$duration" -gt 0 ]] && end_time=$((start_time + duration))
+  end_time=$((start_time + duration))
 
+  echo "[DEBUG] LPC 루프 시작: ${duration}s, interval=${interval_ms}ms"
   while true; do
-    [[ -n "${end_time:-}" && $(date +%s) -ge "$end_time" ]] && break
-    local duty="${LPC_DUTY:-0.1}"
-    local interval_ms="${LPC_INTERVAL_MS:-15000}"
-    awk "BEGIN {exit !(rand() < $duty)}" && $action_func
-    sleep "$(awk "BEGIN {printf(\"%.3f\", $interval_ms/1000)}")"
+    current_time=$(date +%s)
+    (( current_time >= end_time )) && break
+
+    if command -v "$action_func" >/dev/null 2>&1; then
+      "$action_func"
+    else
+      echo "[ERROR] 액션 함수 '$action_func' 찾을 수 없음"
+      break
+    fi
+
+    # 인터벌 대기
+    python3 - <<PY "$interval_ms"
+import sys,time
+ms=int(sys.argv[1]) if sys.argv[1].isdigit() else 1000
+time.sleep(ms/1000.0)
+PY
   done
+  _log_bus "lpc_loop_completed" "duration=${duration}s"
+  echo "[DEBUG] LPC 루프 완료"
+}
+
+# 디버그용 함수
+debug_log() {
+  echo "[DEBUG] $*" >&2
 }
