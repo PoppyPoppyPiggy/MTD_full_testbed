@@ -48,7 +48,7 @@ wait 2>/dev/null || true
 
 echo "[run] events written: $(wc -l < "$BUS")"
 echo "[run] generating timeline..."
-python3 "$BASE/tools/gen_effects_timeline.py" "$BUS" "$TL" "$BASE/tools/effects_rules.json"
+#python3 "$BASE/tools/gen_effects_timeline.py" "$BUS" "$TL" "$BASE/tools/effects_rules.json"
 head -n 5 "$TL" || true
 
 if [[ ! -s "$TL" || "$(wc -l < "$TL")" -le 1 ]]; then
