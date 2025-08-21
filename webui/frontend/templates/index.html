@@ -1,0 +1,264 @@
+{% extends "base.html" %}
+
+{% block title %}메인 대시보드 - MTD 드론 보안 테스트베드{% endblock %}
+
+{% block content %}
+<div class="row">
+    <div class="col-12">
+        <div class="jumbotron bg-primary text-white p-5 rounded">
+            <h1 class="display-4">🚁 MTD 드론 보안 테스트베드</h1>
+            <p class="lead">Moving Target Defense 기반 드론 보안 연구를 위한 완전 자동화된 플랫폼</p>
+            <hr class="my-4">
+            <p>실시간 모니터링, 실험 제어, 데이터 분석을 한 곳에서 수행하세요.</p>
+        </div>
+    </div>
+</div>
+
+<!-- 시스템 상태 카드 -->
+<div class="row mt-4">
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <i class="fas fa-server fa-3x text-primary mb-3"></i>
+                <h5 class="card-title">시스템 상태</h5>
+                <p class="card-text" id="system-status">확인 중...</p>
+                <button class="btn btn-primary btn-sm" onclick="toggleSystem()">
+                    <span id="system-btn-text">시작</span>
+                </button>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <i class="fas fa-shield-alt fa-3x text-success mb-3"></i>
+                <h5 class="card-title">탐지된 공격</h5>
+                <p class="card-text" id="attacks-detected">0</p>
+                <small class="text-muted">실시간 위협 탐지</small>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <i class="fas fa-random fa-3x text-warning mb-3"></i>
+                <h5 class="card-title">MTD 적응</h5>
+                <p class="card-text" id="mtd-activations">0</p>
+                <small class="text-muted">동적 방어 전략</small>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-3">
+        <div class="card text-center">
+            <div class="card-body">
+                <i class="fas fa-network-wired fa-3x text-info mb-3"></i>
+                <h5 class="card-title">네트워크 지연</h5>
+                <p class="card-text" id="network-latency">0ms</p>
+                <small class="text-muted">평균 응답 시간</small>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 빠른 액션 -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="fas fa-bolt"></i> 빠른 액션</h5>
+            </div>
+            <div class="card-body">
+                <div class="row">
+                    <div class="col-md-4">
+                        <div class="d-grid">
+                            <a href="{{ url_for('experiments') }}" class="btn btn-success btn-lg">
+                                <i class="fas fa-flask"></i> 새 실험 시작
+                            </a>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="d-grid">
+                            <a href="{{ url_for('dashboard') }}" class="btn btn-info btn-lg">
+                                <i class="fas fa-chart-line"></i> 실시간 모니터링
+                            </a>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="d-grid">
+                            <a href="{{ url_for('analysis') }}" class="btn btn-warning btn-lg">
+                                <i class="fas fa-analytics"></i> 데이터 분석
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- 최근 실험 결과 -->
+<div class="row mt-4">
+    <div class="col-12">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="fas fa-history"></i> 최근 실험 결과</h5>
+            </div>
+            <div class="card-body">
+                <div class="table-responsive">
+                    <table class="table table-striped">
+                        <thead>
+                            <tr>
+                                <th>실험 ID</th>
+                                <th>시나리오</th>
+                                <th>방어 수준</th>
+                                <th>상태</th>
+                                <th>시작 시간</th>
+                                <th>액션</th>
+                            </tr>
+                        </thead>
+                        <tbody id="recent-experiments">
+                            <tr>
+                                <td colspan="6" class="text-center">실험 데이터 로딩 중...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+let systemRunning = false;
+
+// 페이지 로드 시 초기화
+document.addEventListener('DOMContentLoaded', function() {
+    updateSystemStatus();
+    loadRecentExperiments();
+    
+    // 5초마다 상태 업데이트
+    setInterval(updateSystemStatus, 5000);
+});
+
+async function updateSystemStatus() {
+    try {
+        const response = await fetch('/api/system/status');
+        const data = await response.json();
+        
+        systemRunning = data.system_running;
+        
+        // 시스템 상태 업데이트
+        const statusElement = document.getElementById('system-status');
+        const btnElement = document.getElementById('system-btn-text');
+        
+        if (systemRunning) {
+            statusElement.innerHTML = '<span class="text-success">🟢 실행 중</span>';
+            btnElement.textContent = '중지';
+        } else {
+            statusElement.innerHTML = '<span class="text-danger">🔴 중지됨</span>';
+            btnElement.textContent = '시작';
+        }
+        
+        // 메트릭 업데이트
+        if (data.latest_metrics) {
+            document.getElementById('attacks-detected').textContent = 
+                data.latest_metrics.attacks_detected || 0;
+            document.getElementById('mtd-activations').textContent = 
+                data.latest_metrics.mtd_activations || 0;
+            document.getElementById('network-latency').textContent = 
+                (data.latest_metrics.latency_ms || 0).toFixed(1) + 'ms';
+        }
+        
+    } catch (error) {
+        console.error('상태 업데이트 오류:', error);
+    }
+}
+
+async function toggleSystem() {
+    try {
+        const action = systemRunning ? 'stop' : 'start';
+        const response = await fetch(`/api/system/${action}`, {
+            method: 'POST'
+        });
+        
+        const data = await response.json();
+        
+        if (data.status === 'success') {
+            showAlert(data.message, 'success');
+            setTimeout(updateSystemStatus, 2000);
+        } else {
+            showAlert(data.message, 'danger');
+        }
+        
+    } catch (error) {
+        showAlert('시스템 제어 오류: ' + error.message, 'danger');
+    }
+}
+
+async function loadRecentExperiments() {
+    try {
+        const response = await fetch('/api/experiments/list');
+        const data = await response.json();
+        
+        const tbody = document.getElementById('recent-experiments');
+        tbody.innerHTML = '';
+        
+        if (data.experiments && data.experiments.length > 0) {
+            const recent = data.experiments.slice(0, 5); // 최근 5개만
+            
+            recent.forEach(exp => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${exp.id}</td>
+                    <td>${exp.scenario}</td>
+                    <td>${exp.defense_level}</td>
+                    <td><span class="badge bg-${getStatusColor(exp.status)}">${exp.status}</span></td>
+                    <td>${new Date(exp.start_time).toLocaleString()}</td>
+                    <td>
+                        <a href="/experiments" class="btn btn-sm btn-outline-primary">
+                            <i class="fas fa-eye"></i> 보기
+                        </a>
+                    </td>
+                `;
+                tbody.appendChild(row);
+            });
+        } else {
+            tbody.innerHTML = '<tr><td colspan="6" class="text-center">실험 결과가 없습니다.</td></tr>';
+        }
+        
+    } catch (error) {
+        console.error('실험 목록 로드 오류:', error);
+    }
+}
+
+function getStatusColor(status) {
+    switch (status) {
+        case 'completed': return 'success';
+        case 'running': return 'primary';
+        case 'failed': return 'danger';
+        default: return 'secondary';
+    }
+}
+
+function showAlert(message, type) {
+    const alertDiv = document.createElement('div');
+    alertDiv.className = `alert alert-${type} alert-dismissible fade show`;
+    alertDiv.innerHTML = `
+        ${message}
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+    
+    document.querySelector('main').insertBefore(alertDiv, document.querySelector('main').firstChild);
+    
+    // 5초 후 자동 제거
+    setTimeout(() => {
+        alertDiv.remove();
+    }, 5000);
+}
+</script>
+{% endblock %}
