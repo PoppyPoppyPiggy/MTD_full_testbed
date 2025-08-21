@@ -1,0 +1,356 @@
+/* MTD 드론 보안 테스트베드 스타일 */
+
+:root {
+    --primary-color: #2c3e50;
+    --secondary-color: #3498db;
+    --success-color: #27ae60;
+    --warning-color: #f39c12;
+    --danger-color: #e74c3c;
+    --info-color: #17a2b8;
+    --light-color: #f8f9fa;
+    --dark-color: #343a40;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: #f5f6fa;
+}
+
+/* 네비게이션 */
+.navbar-brand {
+    font-weight: bold;
+    font-size: 1.5rem;
+}
+
+.navbar-dark .navbar-nav .nav-link {
+    color: rgba(255,255,255,.75);
+    transition: color 0.3s ease;
+}
+
+.navbar-dark .navbar-nav .nav-link:hover {
+    color: var(--secondary-color);
+}
+
+/* 카드 스타일 */
+.card {
+    border: none;
+    box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
+    transition: box-shadow 0.15s ease-in-out;
+    margin-bottom: 1rem;
+}
+
+.card:hover {
+    box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
+}
+
+.card-header {
+    background-color: var(--light-color);
+    border-bottom: 1px solid rgba(0,0,0,.125);
+    font-weight: 600;
+}
+
+/* 상태 카드 */
+.status-card {
+    text-align: center;
+    padding: 2rem 1rem;
+}
+
+.status-card i {
+    font-size: 3rem;
+    margin-bottom: 1rem;
+}
+
+.status-value {
+    font-size: 2rem;
+    font-weight: bold;
+    margin: 0.5rem 0;
+}
+
+/* 버튼 스타일 */
+.btn {
+    border-radius: 0.375rem;
+    transition: all 0.2s ease-in-out;
+}
+
+.btn:hover {
+    transform: translateY(-1px);
+}
+
+.btn-group-toggle .btn {
+    transition: all 0.3s ease;
+}
+
+/* 차트 컨테이너 */
+.chart-container {
+    position: relative;
+    height: 400px;
+    margin: 1rem 0;
+}
+
+.chart-small {
+    height: 250px;
+}
+
+.chart-large {
+    height: 500px;
+}
+
+/* 테이블 스타일 */
+.table {
+    margin-bottom: 0;
+}
+
+.table th {
+    border-top: none;
+    font-weight: 600;
+    color: var(--dark-color);
+}
+
+.table-responsive {
+    border-radius: 0.375rem;
+}
+
+/* 배지 */
+.badge {
+    font-size: 0.75rem;
+    padding: 0.35em 0.65em;
+}
+
+/* 로딩 스피너 */
+.spinner-overlay {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background-color: rgba(0, 0, 0, 0.5);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 9999;
+}
+
+.spinner-border-lg {
+    width: 3rem;
+    height: 3rem;
+}
+
+/* 알림 스타일 */
+.alert {
+    border: none;
+    border-radius: 0.5rem;
+}
+
+.alert-dismissible .btn-close {
+    padding: 0.75rem 1rem;
+}
+
+/* 통계 위젯 */
+.stat-widget {
+    background: linear-gradient(135deg, var(--primary-color) 0%, var(--secondary-color) 100%);
+    color: white;
+    border-radius: 1rem;
+    padding: 2rem;
+    margin-bottom: 1rem;
+}
+
+.stat-widget h3 {
+    font-size: 2.5rem;
+    font-weight: bold;
+    margin-bottom: 0.5rem;
+}
+
+.stat-widget p {
+    margin-bottom: 0;
+    opacity: 0.9;
+}
+
+/* 진행률 바 */
+.progress {
+    height: 1rem;
+    border-radius: 0.5rem;
+}
+
+.progress-bar {
+    transition: width 0.6s ease;
+}
+
+/* 메트릭 카드 */
+.metric-card {
+    border-left: 4px solid var(--primary-color);
+    transition: all 0.3s ease;
+}
+
+.metric-card:hover {
+    border-left-color: var(--secondary-color);
+}
+
+.metric-card.danger {
+    border-left-color: var(--danger-color);
+}
+
+.metric-card.warning {
+    border-left-color: var(--warning-color);
+}
+
+.metric-card.success {
+    border-left-color: var(--success-color);
+}
+
+/* 실험 제어 패널 */
+.experiment-control {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    border-radius: 1rem;
+    padding: 2rem;
+}
+
+.experiment-control .form-control,
+.experiment-control .form-select {
+    background-color: rgba(255, 255, 255, 0.1);
+    border: 1px solid rgba(255, 255, 255, 0.3);
+    color: white;
+}
+
+.experiment-control .form-control::placeholder {
+    color: rgba(255, 255, 255, 0.7);
+}
+
+.experiment-control .form-control:focus,
+.experiment-control .form-select:focus {
+    background-color: rgba(255, 255, 255, 0.2);
+    border-color: rgba(255, 255, 255, 0.5);
+    color: white;
+    box-shadow: 0 0 0 0.2rem rgba(255, 255, 255, 0.25);
+}
+
+/* 네트워크 토폴로지 */
+.topology-container {
+    background-color: #f8f9fa;
+    border-radius: 1rem;
+    padding: 2rem;
+    min-height: 400px;
+}
+
+.network-node {
+    display: inline-block;
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    margin: 1rem;
+    position: relative;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.network-node:hover {
+    transform: scale(1.1);
+}
+
+.network-node.real-drone {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+}
+
+.network-node.honeydrone {
+    background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%);
+}
+
+.network-node.dummy-drone {
+    background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%);
+}
+
+.network-node.ground-station {
+    background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%);
+}
+
+/* 반응형 디자인 */
+@media (max-width: 768px) {
+    .chart-container {
+        height: 250px;
+    }
+    
+    .stat-widget h3 {
+        font-size: 2rem;
+    }
+    
+    .status-card {
+        padding: 1rem;
+    }
+    
+    .status-card i {
+        font-size: 2rem;
+    }
+}
+
+/* 애니메이션 */
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.fade-in {
+    animation: fadeIn 0.5s ease-in-out;
+}
+
+@keyframes pulse {
+    0% { transform: scale(1); }
+    50% { transform: scale(1.05); }
+    100% { transform: scale(1); }
+}
+
+.pulse {
+    animation: pulse 2s infinite;
+}
+
+/* 커스텀 스크롤바 */
+::-webkit-scrollbar {
+    width: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: #f1f1f1;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--primary-color);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--secondary-color);
+}
+
+/* 다크 모드 지원 */
+@media (prefers-color-scheme: dark) {
+    body {
+        background-color: #1a1a1a;
+        color: #e0e0e0;
+    }
+    
+    .card {
+        background-color: #2d2d2d;
+        color: #e0e0e0;
+    }
+    
+    .card-header {
+        background-color: #404040;
+        border-bottom-color: #555;
+    }
+    
+    .table {
+        color: #e0e0e0;
+    }
+    
+    .table th {
+        border-bottom-color: #555;
+    }
+    
+    .table td {
+        border-top-color: #555;
+    }
+}
