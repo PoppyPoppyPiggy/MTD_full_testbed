@@ -1,0 +1,11 @@
+current_state=probe
+budget_used=0
+success_count=0
+failure_count=0
+detection_count=0
+last_action_time=0
+current_interval=15000
+backoff_multiplier=1.0
+target_index=0
+session_start=1755122518
+alert_level=0
