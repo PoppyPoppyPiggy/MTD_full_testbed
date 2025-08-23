@@ -1,0 +1,79 @@
+[2025-08-17 22:53:49] [mavlink_param_drift] intensity=medium param=PSC_POSXY_P step=0.0163915 noise=0.00139153
+[2025-08-17 22:53:50] [mavlink_param_drift] intensity=medium param=ATC_ANG_RLL_P step=0.0167202 noise=0.00172025
+[2025-08-17 22:53:51] [mavlink_param_drift] intensity=medium param=PSC_POSZ_P step=0.0162922 noise=0.00129223
+[2025-08-17 22:53:52] [mavlink_param_drift] intensity=medium param=ATC_ANG_RLL_P step=0.0185409 noise=0.00354087
+[2025-08-17 22:53:53] [mavlink_param_drift] intensity=medium param=PSC_POSZ_P step=0.0156682 noise=0.00066818
+[2025-08-17 22:53:54] [mavlink_param_drift] intensity=medium param=PSC_POSZ_P step=0.0186661 noise=0.00366613
+[2025-08-17 22:53:55] [mavlink_param_drift] intensity=medium param=ATC_ANG_RLL_P step=0.0136274 noise=-0.00137256
+[2025-08-17 22:53:57] [mavlink_param_drift] intensity=medium param=PSC_POSXY_P step=0.0118052 noise=-0.00319478
+[2025-08-17 22:53:58] [mavlink_param_drift] intensity=medium param=ATC_RAT_RLL_FF step=0.0164908 noise=0.00149078
+[2025-08-17 22:53:59] [mavlink_param_drift] intensity=medium param=ATC_RAT_RLL_FF step=0.0162115 noise=0.00121149
+[2025-08-17 22:54:00] [mavlink_param_drift] intensity=medium param=ATC_ANG_RLL_P step=0.015975 noise=0.000975048
+[2025-08-17 22:54:01] [mavlink_param_drift] intensity=medium param=ATC_ANG_RLL_P step=0.0143785 noise=-0.000621463
+[2025-08-17 22:54:02] [mavlink_param_drift] intensity=medium param=PSC_POSXY_P step=0.0175148 noise=0.00251482
+[2025-08-17 22:54:03] [mavlink_param_drift] intensity=medium param=PSC_POSXY_P step=0.0115384 noise=-0.00346157
+[2025-08-17 22:54:04] [lpc_loop_completed] duration=15s
+[2025-08-17 22:54:04] [telemetry_trickle_jam] intensity=high pps_limit=30 latency_increase_ms=22 jitter_ms=2
+[2025-08-17 22:54:05] [telemetry_trickle_jam] intensity=high pps_limit=30 latency_increase_ms=22 jitter_ms=2
+[2025-08-17 22:54:06] [telemetry_trickle_jam] intensity=high pps_limit=30 latency_increase_ms=23 jitter_ms=3
+[2025-08-17 22:54:07] [telemetry_trickle_jam] intensity=high pps_limit=30 latency_increase_ms=22 jitter_ms=2
+[2025-08-17 22:54:08] [telemetry_trickle_jam] intensity=high pps_limit=30 latency_increase_ms=21 jitter_ms=1
+[2025-08-17 22:54:09] [telemetry_trickle_jam] intensity=high pps_limit=30 latency_increase_ms=23 jitter_ms=3
+[2025-08-17 22:54:10] [telemetry_trickle_jam] intensity=high pps_limit=30 latency_increase_ms=22 jitter_ms=2
+[2025-08-17 22:54:11] [telemetry_trickle_jam] intensity=high pps_limit=30 latency_increase_ms=22 jitter_ms=2
+[2025-08-17 22:54:12] [telemetry_trickle_jam] intensity=high pps_limit=30 latency_increase_ms=23 jitter_ms=3
+[2025-08-17 22:54:13] [telemetry_trickle_jam] intensity=high pps_limit=30 latency_increase_ms=21 jitter_ms=1
+[2025-08-17 22:54:14] [telemetry_trickle_jam] intensity=high pps_limit=30 latency_increase_ms=23 jitter_ms=3
+[2025-08-17 22:54:15] [telemetry_trickle_jam] intensity=high pps_limit=30 latency_increase_ms=23 jitter_ms=3
+[2025-08-17 22:54:16] [telemetry_trickle_jam] intensity=high pps_limit=30 latency_increase_ms=23 jitter_ms=3
+[2025-08-17 22:54:17] [telemetry_trickle_jam] intensity=high pps_limit=30 latency_increase_ms=23 jitter_ms=3
+[2025-08-17 22:54:18] [telemetry_trickle_jam] intensity=high pps_limit=30 latency_increase_ms=22 jitter_ms=2
+[2025-08-17 22:54:19] [lpc_loop_completed] duration=15s
+[2025-08-17 22:54:19] [gps_slow_spoof] intensity=medium lat_offset_m=0.252515 lon_offset_m=0.252515 alt_offset_m=0.0252515 total_offset_m=0.35711 drift_rate=0.219064
+[2025-08-17 22:54:20] [gps_slow_spoof] intensity=medium lat_offset_m=-0.112825 lon_offset_m=-0.112825 alt_offset_m=-0.0112825 total_offset_m=0.159559 drift_rate=0.173397
+[2025-08-17 22:54:21] [gps_slow_spoof] intensity=medium lat_offset_m=-0.29758 lon_offset_m=-0.29758 alt_offset_m=-0.029758 total_offset_m=0.420842 drift_rate=0.150302
+[2025-08-17 22:54:22] [gps_slow_spoof] intensity=medium lat_offset_m=0.259454 lon_offset_m=0.259454 alt_offset_m=0.0259454 total_offset_m=0.366923 drift_rate=0.219932
+[2025-08-17 22:54:23] [gps_slow_spoof] intensity=medium lat_offset_m=-0.00239538 lon_offset_m=-0.00239538 alt_offset_m=-0.000239538 total_offset_m=0.00338758 drift_rate=0.187201
+[2025-08-17 22:54:24] [gps_slow_spoof] intensity=medium lat_offset_m=-0.230785 lon_offset_m=-0.230785 alt_offset_m=-0.0230785 total_offset_m=0.326379 drift_rate=0.158652
+[2025-08-17 22:54:25] [gps_slow_spoof] intensity=medium lat_offset_m=0.159399 lon_offset_m=0.159399 alt_offset_m=0.0159399 total_offset_m=0.225424 drift_rate=0.207425
+[2025-08-17 22:54:26] [gps_slow_spoof] intensity=medium lat_offset_m=0.177082 lon_offset_m=0.177082 alt_offset_m=0.0177082 total_offset_m=0.250432 drift_rate=0.209635
+[2025-08-17 22:54:27] [gps_slow_spoof] intensity=medium lat_offset_m=0.112785 lon_offset_m=0.112785 alt_offset_m=0.0112785 total_offset_m=0.159502 drift_rate=0.201598
+[2025-08-17 22:54:28] [gps_slow_spoof] intensity=medium lat_offset_m=-0.0211445 lon_offset_m=-0.0211445 alt_offset_m=-0.00211445 total_offset_m=0.0299028 drift_rate=0.184857
+[2025-08-17 22:54:29] [gps_slow_spoof] intensity=medium lat_offset_m=0.0532861 lon_offset_m=0.0532861 alt_offset_m=0.00532861 total_offset_m=0.0753579 drift_rate=0.194161
+[2025-08-17 22:54:30] [gps_slow_spoof] intensity=medium lat_offset_m=-0.242322 lon_offset_m=-0.242322 alt_offset_m=-0.0242322 total_offset_m=0.342695 drift_rate=0.15721
+[2025-08-17 22:54:32] [gps_slow_spoof] intensity=medium lat_offset_m=-0.0126424 lon_offset_m=-0.0126424 alt_offset_m=-0.00126424 total_offset_m=0.0178791 drift_rate=0.172206
+[2025-08-17 22:54:33] [gps_slow_spoof] intensity=medium lat_offset_m=0.084911 lon_offset_m=0.084911 alt_offset_m=0.0084911 total_offset_m=0.120082 drift_rate=0.198114
+[2025-08-17 22:54:34] [lpc_loop_completed] duration=15s
+[ENV] ns-3 launcher 발견: /home/kali/MTD/MTD_full_testbed/ns-3.45/ns-3-dev/ns3
+[ENV] 예) (cd "/home/kali/MTD/MTD_full_testbed/ns-3.45/ns-3-dev" && ./ns3 run "scratch/drone_lpc_eval --timeline=/home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks_lpc/attack_output/effect_timeline.csv --out=/home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks_lpc/attack_output/ns3_metrics.csv")
+[ENV] MAVLink GCS endpoint: udp://10.13.0.4:14550
+[ENV] MTD_ROOT=/home/kali/MTD/MTD_full_testbed
+[ENV] LPC_ROOT=/home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks_lpc
+[ENV] LPC_LOG_DIR=/home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks_lpc/attack_output
+[ENV] NS3=/home/kali/MTD/MTD_full_testbed/ns-3.45/ns-3-dev
+[ENV] NS3_BIN=/home/kali/MTD/MTD_full_testbed/ns-3.45/ns-3-dev/ns3
+[ENV] NS3_SCRATCH=scratch/drone_lpc_eval
+[ENV] BUS_LOG=/home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks_lpc/attack_output/bus.log
+[ENV] 환경 로드 완료.
+[ENV] ns-3 launcher 발견: /home/kali/MTD/MTD_full_testbed/ns-3.45/ns-3-dev/ns3
+[ENV] 예) (cd "/home/kali/MTD/MTD_full_testbed/ns-3.45/ns-3-dev" && ./ns3 run "scratch/drone_lpc_eval --timeline=/home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks_lpc/attack_output/effect_timeline.csv --out=/home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks_lpc/attack_output/ns3_metrics.csv")
+[ENV] MAVLink GCS endpoint: udp://10.13.0.4:14550
+[ENV] MTD_ROOT=/home/kali/MTD/MTD_full_testbed
+[ENV] LPC_ROOT=/home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks_lpc
+[ENV] LPC_LOG_DIR=/home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks_lpc/attack_output
+[ENV] NS3=/home/kali/MTD/MTD_full_testbed/ns-3.45/ns-3-dev
+[ENV] NS3_BIN=/home/kali/MTD/MTD_full_testbed/ns-3.45/ns-3-dev/ns3
+[ENV] NS3_SCRATCH=scratch/drone_lpc_eval
+[ENV] BUS_LOG=/home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks_lpc/attack_output/bus.log
+[ENV] 환경 로드 완료.
+[ENV] ns-3 launcher 발견: /home/kali/MTD/MTD_full_testbed/ns-3.45/ns-3-dev/ns3
+[ENV] 예) (cd "/home/kali/MTD/MTD_full_testbed/ns-3.45/ns-3-dev" && ./ns3 run "scratch/drone_lpc_eval --timeline=/home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks_lpc/attack_output/effect_timeline.csv --out=/home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks_lpc/attack_output/ns3_metrics.csv")
+[ENV] MAVLink GCS endpoint: udp://10.13.0.4:14550
+[ENV] MTD_ROOT=/home/kali/MTD/MTD_full_testbed
+[ENV] LPC_ROOT=/home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks_lpc
+[ENV] LPC_LOG_DIR=/home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks_lpc/attack_output
+[ENV] NS3=/home/kali/MTD/MTD_full_testbed/ns-3.45/ns-3-dev
+[ENV] NS3_BIN=/home/kali/MTD/MTD_full_testbed/ns-3.45/ns-3-dev/ns3
+[ENV] NS3_SCRATCH=scratch/drone_lpc_eval
+[ENV] BUS_LOG=/home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks_lpc/attack_output/bus.log
+[ENV] 환경 로드 완료.
