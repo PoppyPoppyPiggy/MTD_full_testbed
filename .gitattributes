@@ -1,0 +1,2 @@
+*.xml filter=lfs diff=lfs merge=lfs -text
+dvd_lite/dvd_attacks_lpc/attack_output/** filter=lfs diff=lfs merge=lfs -text
