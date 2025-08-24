@@ -1,26 +1,26 @@
 {
   "cti": {
-    "events_mtd": 1,
-    "events_cti": 4,
-    "detect_latency_mean_s": 1.0889999866485596,
-    "followup_latency_mean_s": 0.04400014877319336,
+    "events_mtd": 72,
+    "events_cti": 1,
+    "detect_latency_mean_s": null,
+    "followup_latency_mean_s": 114.40996010303498,
     "ip_tracking_accuracy": 1.0,
-    "port_tracking_accuracy": null
+    "port_tracking_accuracy": 0.85
   },
   "mtd": {
-    "disruption_window_mean_s": 1.7420001029968262,
-    "impair_loss_area_pct_x_s": 0.737,
-    "impair_delay_area_ms_x_s": 2.948,
-    "impair_jitter_area_ms_x_s": 0.737
+    "disruption_window_mean_s": 4.33644445406066,
+    "impair_loss_area_pct_x_s": 142.39499999999995,
+    "impair_delay_area_ms_x_s": 1021.1889999999997,
+    "impair_jitter_area_ms_x_s": 366.2529999999998
   },
   "ns3": {
     "flows": 2.0,
-    "throughput_avg": 1.41548,
-    "delay_avg": 4.69267,
+    "throughput_avg": 1.40472,
+    "delay_avg": 4.68786,
     "tx_bytes": 120669862.0,
-    "rx_bytes": 19362506.0,
-    "lost_packets": 257537.0,
-    "gcs_app_rx_packets": 34548.0,
-    "gcs_app_rx_bytes": 17688576.0
+    "rx_bytes": 19204238.0,
+    "lost_packets": 257761.0,
+    "gcs_app_rx_packets": 34272.0,
+    "gcs_app_rx_bytes": 17547264.0
   }
 }
