@@ -1,18 +1,18 @@
 #!/usr/bin/env bash
-# Defender의 IP Shuffle(MTD)을 능동 추적: docker inspect로 컨테이너 IP 변화 감지
+# Watch IP change of $DVD_TARGET_IF inside the container (not docker inspect)
 set -euo pipefail
 BASE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 . "$BASE/00_env.sh"; . "$BASE/sh_core/lpc_bus.sh"; . "$BASE/cti/cti_store.sh"
 
-: "${WATCH_INT:=1}"   # polling 주기(s)
+: "${WATCH_INT:=1}"
 
 get_ip(){
-  docker inspect -f '{{range.NetworkSettings.Networks}}{{.IPAddress}} {{end}}' "$DVD_C_GCS" 2>/dev/null | awk '{print $1}'
+  docker exec "$DVD_C_GCS" bash -lc "ip -4 -o addr show dev $DVD_TARGET_IF | awk '{print \$4}' | cut -d/ -f1 | head -n1"
 }
 
 main(){
-  log "[cti_watch_ip] watching container=$DVD_C_GCS every ${WATCH_INT}s"
-  prev="$(cti_get TARGET_IP)"
+  log "[cti_watch_ip] container=$DVD_C_GCS if=$DVD_TARGET_IF every ${WATCH_INT}s"
+  prev="$(cti_get TARGET_IP || true)"
   [ -z "${prev:-}" ] && prev="$(get_ip)"
   [ -n "${prev:-}" ] && cti_set_ip "$prev"
   while true; do
