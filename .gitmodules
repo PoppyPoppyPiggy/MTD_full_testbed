@@ -1,3 +1,7 @@
 [submodule "Damn-Vulnerable-Drone"]
 	path = Damn-Vulnerable-Drone
 	url = https://github.com/PoppyPoppyPiggy/MTD_full_testbed.git
+[submodule "Damn-Vulnerable-Drone"]
+    ignore = dirty
+[submodule "ardupilot"]
+    ignore = dirty
