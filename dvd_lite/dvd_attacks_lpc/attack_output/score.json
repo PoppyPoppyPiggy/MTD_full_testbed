@@ -1,3 +1,25 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:5664d3ce14012b515d73518c7f6cfe33066411effd7de4339f6b7c6fe526f8ff
-size 684
+{
+  "version": "1.1",
+  "timestamp": 1756035168,
+  "files": {
+    "bus": "attack_output/bus.log",
+    "timeline": "attack_output/effect_timeline.csv",
+    "ns3": "attack_output/ns3_metrics.csv"
+  },
+  "ns3_metrics": {
+    "flows": 2.0,
+    "throughput_avg": 1.41228,
+    "delay_avg": 4.69835,
+    "tx_bytes": 120669862.0,
+    "rx_bytes": 19292086.0,
+    "lost_packets": 257592.0,
+    "gcs_app_rx_packets": 34415.0,
+    "gcs_app_rx_bytes": 17620480.0,
+    "rate_limited_drops": 0.0
+  },
+  "diversity": 0.9779914858626895,
+  "redundancy": 0.3254437869822485,
+  "shuffle_efficiency_s": 3.3163783783783782,
+  "energy_units": 140.5,
+  "survivability_idx": 4.305214866498789e-12
+}

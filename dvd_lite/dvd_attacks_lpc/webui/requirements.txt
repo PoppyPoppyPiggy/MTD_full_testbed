@@ -1,0 +1,13 @@
+# Flask & CORS
+Flask==3.0.3
+flask-cors==4.0.1
+
+# 데이터 처리 (Py3.11에서 바이너리 휠 존재)
+pandas==2.2.2
+numpy>=1.26.0,<2.0.0
+
+# 시각화
+plotly==5.22.0
+
+# 기타
+psutil==5.9.8
