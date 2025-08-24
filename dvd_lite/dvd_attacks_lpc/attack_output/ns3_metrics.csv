@@ -1,9 +1,9 @@
 metric,value,unit
 flows,2,count
-throughput_avg,1.41548,Mbps
-delay_avg,4.69267,s
+throughput_avg,1.40472,Mbps
+delay_avg,4.68786,s
 tx_bytes,120669862,bytes
-rx_bytes,19362506,bytes
-lost_packets,257537,pkts
-gcs_app_rx_packets,34548,pkts
-gcs_app_rx_bytes,17688576,bytes
+rx_bytes,19204238,bytes
+lost_packets,257761,pkts
+gcs_app_rx_packets,34272,pkts
+gcs_app_rx_bytes,17547264,bytes
