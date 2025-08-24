@@ -1,3 +1,1 @@
-version https://git-lfs.github.com/spec/v1
-oid sha256:72f9eafd86bccbf2dfcc4cd88d2660682a9f4a93ac0a2dd9a7ee4715fb98b06b
-size 160
+[2025-08-24 07:25:50] [cti_watch_ip] container=ground-control-station if=eth0 every 1s

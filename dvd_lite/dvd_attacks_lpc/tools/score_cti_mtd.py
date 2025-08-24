@@ -1,169 +1,127 @@
 #!/usr/bin/env python3
-import csv, re, json, sys, os
-from collections import defaultdict
+# -*- coding: utf-8 -*-
+"""
+score_cti_mtd.py
+- bus.log + effect_timeline.csv + (optional) ns3_metrics.csv -> score.json
+- 지표: diversity, redundancy, shuffle_efficiency_s, energy_units, survivability_idx (+ ns3 raw)
+"""
+import json, csv, math, argparse, time
+from pathlib import Path
+from collections import Counter
 
-def parse_bus(path):
-    ev=[]
-    rx=re.compile(r'([A-Za-z0-9_]+)=([^\s]+)')
-    with open(path,encoding="utf-8",errors="ignore") as f:
-        for line in f:
-            line=line.strip()
-            if not line: continue
-            parts=line.split("\t")
-            if len(parts)<3: continue
-            try:
-                ts=float(parts[0])
-                if ts>1e12: ts/=1000.0   # epoch ms -> s
-            except: 
-                continue
-            tag=parts[1]
-            kv=dict(rx.findall(" ".join(parts[2:])))
-            ev.append((ts,tag,kv))
-    ev.sort(key=lambda x:x[0])
-    return ev
+def read_lines(p: Path):
+  if not p.exists(): return []
+  return [l.rstrip("\n") for l in p.open("r", errors="ignore").readlines()]
 
-def parse_timeline(path):
-    if not os.path.exists(path): return []
-    rows=[]
-    with open(path,newline="") as f:
-        r=csv.DictReader(f)
-        for row in r:
-            try:
-                t=float(row.get("t","0") or 0)
-            except:
-                continue
-            vals={}
-            for k in ["loss_pct","delay_ms","jitter_ms","dup_pct","rate_limit_mbps"]:
-                v=row.get(k,"")
-                try: vals[k]=float(v) if v!="" else 0.0
-                except: vals[k]=0.0
-            rows.append((t,vals))
-    rows.sort(key=lambda x:x[0])
-    return rows
+def parse_bus(path: Path):
+  ev=[]
+  for raw in read_lines(path):
+    if not raw.strip(): continue
+    parts = raw.replace("\t"," ").split()
+    if len(parts) < 2: continue
+    try:
+      ts = int(parts[0]); tag = parts[1]
+    except: continue
+    kv={}
+    for tok in parts[2:]:
+      if "=" in tok:
+        k,v = tok.split("=",1); kv[k]=v
+    ev.append((ts,tag,kv))
+  ev.sort(key=lambda x:x[0]); return ev
 
-def integral_from_hold(rows, key):
-    if not rows: return 0.0, 0.0
-    area=0.0
-    end=rows[-1][0]
-    for i,(t,vals) in enumerate(rows):
-        t_next = rows[i+1][0] if i+1 < len(rows) else end
-        dt = max(0.0, t_next - t)
-        area += vals.get(key,0.0)*dt
-    duration = end - rows[0][0] if end>=rows[0][0] else 0.0
-    return area, duration
+def read_ns3_metrics(p: Path):
+  res={}
+  if not p.exists(): return res
+  with p.open() as f:
+    rdr=csv.reader(f); next(rdr,None)
+    for row in rdr:
+      if not row: continue
+      m=row[0]; v=row[1] if len(row)>1 else ""
+      try: res[m]=float(v)
+      except: res[m]=v
+  return res
 
-def first_after(ev, t0, filt):
-    for ts,tag,kv in ev:
-        if ts>=t0 and filt(tag,kv):
-            return ts,tag,kv
-    return None
+def compute_metrics(ev, ns3):
+  # Diversity: entropy of (ip:port) states sequence
+  states=[]; last=None
+  for _,tag,kv in ev:
+    ip = kv.get("ip") or kv.get("target") or (kv.get("value") if (tag=="cti_set" and kv.get("key")=="TARGET_IP") else "")
+    port = kv.get("port") or kv.get("new") or (kv.get("value") if (tag=="cti_set" and kv.get("key")=="MAVLINK_PORT") else "")
+    if tag in ("mtd","mtd_done","mtd_porthop","cti_set","attack"):
+      st=f"{ip}:{port}"
+      if st and st!=last: states.append(st); last=st
+  cnt=Counter(states)
+  probs=[c/sum(cnt.values()) for c in cnt.values()] if cnt else []
+  H = -sum(p*math.log(p+1e-12,2) for p in probs) if probs else 0.0
+  Hmax = math.log(len(probs),2) if probs else 1.0
+  diversity=(H/Hmax) if Hmax>0 else 0.0
 
-def main(bus_path, tl_path, ns3_metrics_path=None, out_path=None):
-    ev=parse_bus(bus_path)
-    tl=parse_timeline(tl_path)
+  # Redundancy: repeated same MTD action in short succession (windowed)
+  mtd_actions=[]
+  for ts,tag,kv in ev:
+    if tag in ("mtd","mtd_done","mtd_porthop"):
+      a = kv.get("action") or kv.get("what") or "unknown"
+      mtd_actions.append((ts,a))
+  redundant=0; total=len(mtd_actions)
+  for i in range(1, len(mtd_actions)):
+    if mtd_actions[i][1] == mtd_actions[i-1][1] and (mtd_actions[i][0]-mtd_actions[i-1][0]) < 5000:
+      redundant += 1
+  redundancy = (redundant/max(1,total-1)) if total>1 else 0.0
 
-    # --- CTI 메트릭 ---
-    mtd_times=[]
-    for ts,tag,kv in ev:
-        if tag!="mtd": continue
-        act=kv.get("action","")
-        if act in ("ip_shuffle","port_hop","bridge_hop","port_hop_socat"):
-            mtd_times.append((ts,act,kv))
+  # Shuffle efficiency: avg time defender buys before next follow_* attack
+  last_mtd=None; gaps=[]
+  for ts,tag,kv in ev:
+    if tag in ("mtd","mtd_done","mtd_porthop"): last_mtd = ts
+    if tag=="attack" and kv.get("type","").startswith("follow_") and last_mtd:
+      gaps.append((ts-last_mtd)/1000.0); last_mtd=None
+  shuffle_eff = sum(gaps)/len(gaps) if gaps else 0.0
 
-    cti_lat=[]; follow_lat=[]; ip_acc=[]; port_acc=[]
-    latest_cti_ip=None
+  # Energy cost proxy
+  weights={"ip_shuffle":1.0,"port_hop":0.5,"port_hop_socat":0.6}
+  e_sum=0.0
+  for _,tag,kv in ev:
+    if tag in ("mtd","mtd_done"):
+      a=kv.get("action") or kv.get("what") or ""
+      if a in weights: e_sum+=weights[a]
 
-    for ts,tag,kv in ev:
-        if tag=="cti" and kv.get("type")=="ip_change":
-            latest_cti_ip=kv.get("new")
+  # Survivability from ns3
+  thr=float(ns3.get("throughput_avg",0.0)); delay=float(ns3.get("delay_avg",0.0))
+  lost=float(ns3.get("lost_packets",0.0)); rx=float(ns3.get("rx_bytes",0.0))+1e-9
+  sig=1.0/(1.0+math.exp(-(thr/10.0 - 1.0)))
+  loss_ratio=min(1.0, lost/(lost + (rx/250.0)))
+  survivability = sig * math.exp(-delay/0.2) * (1.0 - loss_ratio)
 
-        if tag=="mtd" and kv.get("action")=="ip_shuffle":
-            nxt=first_after(ev, ts, lambda t,kv2: t=="cti" and kv2.get("type")=="ip_change")
-            if nxt: cti_lat.append(nxt[0]-ts)
+  return {
+    "diversity": diversity,
+    "redundancy": redundancy,
+    "shuffle_efficiency_s": shuffle_eff,
+    "energy_units": e_sum,
+    "survivability_idx": survivability
+  }
 
-        if tag=="attack" and kv.get("type","").startswith("follow_"):
-            atk_ip=kv.get("ip")
-            prev_cti=None
-            for ts2,tag2,kv2 in reversed(ev):
-                if ts2>ts: continue
-                if tag2=="cti" and kv2.get("type")=="ip_change":
-                    prev_cti=(ts2,kv2); break
-            if prev_cti:
-                follow_lat.append(ts - prev_cti[0])
-                ip_acc.append(1.0 if atk_ip==prev_cti[1].get("new") else 0.0)
+def main():
+  ap=argparse.ArgumentParser()
+  ap.add_argument("bus", help="attack_output/bus.log")
+  ap.add_argument("timeline", help="attack_output/effect_timeline.csv")
+  ap.add_argument("--ns3", default="attack_output/ns3_metrics.csv")
+  ap.add_argument("-o","--out", default="attack_output/score.json")
+  args=ap.parse_args()
 
-    for ts,tag,kv in ev:
-        if tag=="mtd" and kv.get("action") in ("port_hop","port_hop_socat"):
-            newp=kv.get("new")
-            if not newp: continue
-            nxt=first_after(ev, ts, lambda t,kv2: t=="attack" and kv2.get("type")=="follow_flood")
-            if nxt: port_acc.append(1.0 if nxt[2].get("port")==newp else 0.0)
+  bus = Path(args.bus); tl = Path(args.timeline)
+  ns3 = read_ns3_metrics(Path(args.ns3))
+  ev = parse_bus(bus)
 
-    loss_area, dur = integral_from_hold(tl, "loss_pct")
-    delay_area, _  = integral_from_hold(tl, "delay_ms")
-    jitter_area,_  = integral_from_hold(tl, "jitter_ms")
+  score = {
+    "version": "1.1",
+    "timestamp": int(time.time()),
+    "files": {"bus": str(bus), "timeline": str(tl), "ns3": args.ns3},
+    "ns3_metrics": ns3,
+  }
+  score.update(compute_metrics(ev, ns3))
 
-    metrics={
-      "cti": {
-        "events_mtd": len(mtd_times),
-        "events_cti": sum(1 for ts,t,kv in ev if t=="cti" and kv.get("type")=="ip_change"),
-        "detect_latency_mean_s": (sum(cti_lat)/len(cti_lat) if cti_lat else None),
-        "followup_latency_mean_s": (sum(follow_lat)/len(follow_lat) if follow_lat else None),
-        "ip_tracking_accuracy": (sum(ip_acc)/len(ip_acc) if ip_acc else None),
-        "port_tracking_accuracy": (sum(port_acc)/len(port_acc) if port_acc else None)
-      },
-      "mtd": {
-        "disruption_window_mean_s": (sum(
-            first_after(ev, ts, lambda t,kv2: t=="attack" and kv2.get("type","").startswith("follow_"))[0]-ts
-            for ts,act,kv in mtd_times
-            if first_after(ev, ts, lambda t,kv2: t=="attack" and kv2.get("type","").startswith("follow_"))
-        )/len(mtd_times) if mtd_times else None),
-        "impair_loss_area_pct_x_s": loss_area,
-        "impair_delay_area_ms_x_s": delay_area,
-        "impair_jitter_area_ms_x_s": jitter_area
-      }
-    }
-
-    # --- NS-3 메트릭(유연 파서: 열이 3개 이상이어도 앞 2~3개만 사용) ---
-    if ns3_metrics_path and os.path.exists(ns3_metrics_path):
-      ns3={}
-      with open(ns3_metrics_path, newline="") as f:
-        r=csv.reader(f)
-        header=next(r, None)  # 기대: metric,value,unit
-        for row in r:
-          if not row: continue
-          # 앞 2칸만 강제 사용(값), 단위는 선택
-          k = row[0].strip()
-          v = row[1].strip() if len(row)>1 else ""
-          # unit = row[2].strip() if len(row)>2 else ""
-          try: ns3[k]=float(v)
-          except: ns3[k]=v
-      metrics["ns3"]=ns3
-
-    if out_path:
-        with open(out_path,"w") as f: json.dump(metrics,f,indent=2,ensure_ascii=False)
-
-    # 콘솔 요약
-    def fmt(x):
-        return "NA" if x is None else (f"{x:.3f}" if isinstance(x,float) else str(x))
-    print("== CTI ==")
-    print("MTD events:", metrics["cti"]["events_mtd"], "CTI ip_change:", metrics["cti"]["events_cti"])
-    print("detect_latency_mean_s:", fmt(metrics["cti"]["detect_latency_mean_s"]))
-    print("followup_latency_mean_s:", fmt(metrics["cti"]["followup_latency_mean_s"]))
-    print("ip_tracking_accuracy:", fmt(metrics["cti"]["ip_tracking_accuracy"]))
-    print("port_tracking_accuracy:", fmt(metrics["cti"]["port_tracking_accuracy"]))
-    if "ns3" in metrics:
-        print("== NS3 ==")
-        for k,v in metrics["ns3"].items():
-            print(k,":",v)
+  Path(args.out).parent.mkdir(parents=True, exist_ok=True)
+  with Path(args.out).open("w", encoding="utf-8") as f:
+    json.dump(score, f, ensure_ascii=False, indent=2)
 
 if __name__=="__main__":
-    if len(sys.argv)<3:
-        print("usage: score_cti_mtd.py <bus.log> <effect_timeline.csv> [--ns3 attack_output/ns3_metrics.csv] [-o score.json]")
-        sys.exit(1)
-    bus=sys.argv[1]; tl=sys.argv[2]; ns3=None; out=None
-    args=sys.argv[3:]
-    for i,a in enumerate(args):
-        if a=="--ns3" and i+1<len(args): ns3=args[i+1]
-        if a=="-o"   and i+1<len(args): out=args[i+1]
-    main(bus, tl, ns3, out)
+  main()
