@@ -1,2 +1,2 @@
-[2025-08-24 03:55:06] [cti_watch_ip] container=ground-control-station if=eth0 every 1s
-[2025-08-24 03:55:15] [cti_watch_ip] IP change: 10.13.0.105 -> 10.13.0.14[2025-08-24 03:55:15] [cti_watch_ip] IP change: 10.13.0.105 -> 10.13.0.145
+[2025-08-24 05:13:48] [cti_watch_ip] container=ground-control-station if=eth0 every 1s
+[2025-08-24 05:13:48] [cti_watch_ip] IP change: 10.13.0.4 -> 10.13.0.185

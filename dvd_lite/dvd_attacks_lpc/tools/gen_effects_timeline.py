@@ -1,136 +1,167 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
 """
-버스 로그(bus.log) → effect_timeline.csv 변환기 (규칙파일 적용)
-- 입력: bus.log (형식: [ISO8601] [module_name] key=val key=val ...)
-- 규칙: effects_rules.json (module: {low/medium/high: {...}})
-- 출력: effect_timeline.csv (t, loss_pct, delay_ms, jitter_ms, dup_pct, rate_limit_mbps)
-사용 예:
-  python3 tools/gen_effects_timeline.py attack_output/bus.log \
-    -o attack_output/effect_timeline.csv \
-    --rules tools/effects_rules.json
+bus.log -> effect_timeline.csv 생성기 (LPC 확장)
+- 'effect' 라인 우선, 없으면 룰로 보강
+- dup_pct 포함, action/intensity/level/grade 모두 인식
+- epoch-ms/epoch-s 모두 인식
+모드:
+  sparse : 이벤트 시점만 1행
+  hold   : 마지막 값 유지 스냅샷(권장)
+  sample : 일정 Hz로 균일 샘플
 """
-
 import argparse, csv, json, os, re, sys
-from datetime import datetime
 
-def parse_args():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("buslog", help="path to attack_output/bus.log")
-    ap.add_argument("-o", "--out", default="attack_output/effect_timeline.csv",
-                    help="output CSV path (default: attack_output/effect_timeline.csv)")
-    ap.add_argument("--rules", required=True, help="path to effects_rules.json")
-    ap.add_argument("--tz-naive", action="store_true",
-                    help="treat timestamps without timezone as localtime (default: parse as naive ISO)")
-    return ap.parse_args()
+FIELDS = ["loss_pct", "delay_ms", "jitter_ms", "dup_pct", "rate_limit_mbps"]
 
-# 버스 라인 포맷: [timestamp] [module] k=v k=v ...
-RE_LINE = re.compile(r'^\s*\[(.*?)\]\s*\[(.*?)\]\s*(.*)$')
-
-def parse_ts(s, tz_naive=False):
-    """
-    ts 문자열을 epoch(sec)로 변환.
-    허용: ISO8601 ('2025-08-14T12:34:56' 혹은 '2025-08-14 12:34:56', '...Z', '+09:00' 등)
-    """
-    s = s.strip()
-    # 공백 → T 치환
-    s2 = s.replace(" ", "T")
-    # Z → +00:00
-    if s2.endswith("Z"):
-        s2 = s2[:-1] + "+00:00"
+def parse_line(line: str):
+    parts = line.rstrip("\n").split("\t")
+    if len(parts) < 3:
+        return None
+    raw_ts = parts[0]
     try:
-        dt = datetime.fromisoformat(s2)
-        # Python 3.11+: aware이면 utcoffset 적용, naive면 그대로 timestamp()
-        if dt.tzinfo is None and tz_naive:
-            # naive → 시스템 로컬 타임존 기준으로 간주하고 epoch 환산
-            # (여기서는 naive 그대로 timestamp() 호출; 로컬 시스템 가정)
-            return dt.timestamp()
-        return dt.timestamp()
+        ts = float(raw_ts)
+        # epoch ms(13자리 이상) → 초로 변환
+        if ts > 1e12:
+            ts = ts / 1000.0
     except Exception:
-        # 마지막 fallback: 숫자로 들어온 epoch 문자열
-        try:
-            return float(s)
-        except Exception:
-            return None
+        return None
+    tag = parts[1]
+    kv = dict(re.findall(r'([A-Za-z0-9_]+)=([^\s]+)', " ".join(parts[2:])))
+    return ts, tag, kv
+
+def _to_num(x):
+    try:
+        return float(str(x).replace("%",""))
+    except Exception:
+        return None
+
+def apply_rules(tag: str, kv: dict, rules: dict):
+    if not rules:
+        return None
+    r = None
+    # 액션 키 다 인식
+    action = kv.get("action") or kv.get("intensity") or kv.get("level") or kv.get("grade")
+    if action == "mid":
+        action = "medium"
+    if tag in rules and isinstance(rules[tag], dict):
+        if action and action in rules[tag]:
+            r = rules[tag][action]
+        elif "action" in kv and kv["action"] in rules[tag]:
+            r = rules[tag][kv["action"]]
+        elif "_default" in rules[tag]:
+            r = rules[tag]["_default"]
+    if not r and "_global" in rules and tag in rules["_global"]:
+        r = rules["_global"][tag]
+    if not r:
+        return None
+    out = {}
+    for f in FIELDS:
+        n = _to_num(r.get(f))
+        if n is not None:
+            out[f] = n
+    return out or None
+
+def load_rules(path: str):
+    if not path:
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        print(f"[WARN] rules load fail: {e}", file=sys.stderr)
+        return {}
+
+def write_csv(rows, out_path):
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    with open(out_path, "w", newline="") as o:
+        w = csv.writer(o)
+        w.writerow(["t"] + FIELDS)
+        for r in rows:
+            w.writerow([r["t"]] + [r.get(f, "") for f in FIELDS])
 
 def main():
-    args = parse_args()
+    ap = argparse.ArgumentParser()
+    ap.add_argument("buslog", help="path to bus.log")
+    ap.add_argument("-o", "--out", default="attack_output/effect_timeline.csv")
+    ap.add_argument("--rules", default=None, help="optional effects_rules.json")
+    ap.add_argument("--mode", choices=["sparse","hold","sample"], default="hold")
+    ap.add_argument("--rate", type=float, default=10.0, help="sample Hz for --mode sample")
+    ap.add_argument("--duration", type=float, default=None, help="force end time (sec)")
+    args = ap.parse_args()
 
-    # 경로 검증
-    if not os.path.isfile(args.buslog):
-        print(f"[ERR] bus.log not found: {args.buslog}", file=sys.stderr)
+    if not os.path.exists(args.buslog):
+        print(f"[ERR] no bus.log at {args.buslog}", file=sys.stderr)
         sys.exit(2)
-    if not os.path.isfile(args.rules):
-        print(f"[ERR] effects_rules.json not found: {args.rules}", file=sys.stderr)
-        sys.exit(2)
 
-    # 규칙 로드
-    with open(args.rules, "r", encoding="utf-8") as f:
-        rules = json.load(f)
+    rules = load_rules(args.rules)
 
-    rows = []
+    events = []  # (ts_abs, {field:value})
     with open(args.buslog, "r", encoding="utf-8", errors="ignore") as f:
         for line in f:
-            m = RE_LINE.match(line.strip())
-            if not m: 
+            p = parse_line(line)
+            if not p:
                 continue
-            ts_raw, mod_raw, kv_str = m.groups()
-            mod = (mod_raw or "").strip().lower()
+            ts, tag, kv = p
 
-            # k=v 파싱
-            kv = {}
-            for tok in kv_str.split():
-                if "=" in tok:
-                    k, v = tok.split("=", 1)
-                    kv[k.strip().lower()] = v.strip()
-
-            # 강도 선택: phase 우선 → intensity → default=low
-            phase = (kv.get("phase") or "").lower()
-            intensity = (kv.get("intensity") or "low").lower()
-
-            eff = None
-            if mod in rules:
-                r = rules[mod]
-                if phase and phase in r:
-                    eff = r[phase]
-                elif intensity in r:
-                    eff = r[intensity]
-
-            if eff is None:
-                # 규칙 없음 → 0으로 채움
-                eff = {
-                    "loss_pct": 0.0, "delay_ms": 0.0, "jitter_ms": 0.0,
-                    "dup_pct": 0.0, "rate_limit_mbps": 0.0
-                }
-
-            t = parse_ts(ts_raw, tz_naive=args.tz_naive)
-            if t is None:
-                # 타임스탬프 파싱 실패 라인 스킵
+            if tag == "effect":
+                eff = {}
+                for k in FIELDS:
+                    if k in kv:
+                        n = _to_num(kv[k])
+                        if n is not None:
+                            eff[k] = n
+                if eff:
+                    events.append((ts, eff))
                 continue
 
-            rows.append((
-                t,
-                float(eff.get("loss_pct", 0.0)),
-                float(eff.get("delay_ms", 0.0)),
-                float(eff.get("jitter_ms", 0.0)),
-                float(eff.get("dup_pct", 0.0)),
-                float(eff.get("rate_limit_mbps", 0.0)),
-                mod,                               # 참고용: 어떤 모듈의 효과인지
-                phase if phase else intensity      # 참고용: 강도
-            ))
+            eff2 = apply_rules(tag, kv, rules)
+            if eff2:
+                events.append((ts, eff2))
 
-    rows.sort(key=lambda x: x[0])
+    if not events:
+        write_csv([], args.out)
+        print("[OK] effect timeline ->", args.out, "rows=0")
+        return
 
-    # 출력
-    outp = args.out
-    os.makedirs(os.path.dirname(outp), exist_ok=True)
-    with open(outp, "w", newline="", encoding="utf-8") as f:
-        w = csv.writer(f)
-        w.writerow(["t","loss_pct","delay_ms","jitter_ms","dup_pct","rate_limit_mbps","module","level"])
-        for r in rows:
-            w.writerow(r)
+    t0 = min(ts for ts, _ in events)
+    events.sort(key=lambda x: x[0])
+    events_rel = [(ts - t0, d) for ts, d in events]
 
-    print(f"[OK] effect timeline -> {outp} rows={len(rows)}")
+    rows = []
+    if args.mode == "sparse":
+        for t, d in events_rel:
+            row = {"t": round(float(t), 6)}
+            row.update(d)
+            rows.append(row)
+
+    elif args.mode == "hold":
+        state = {f: 0.0 for f in FIELDS}
+        rows.append({"t": 0.0, **state})
+        last_t = 0.0
+        for t, d in events_rel:
+            state.update(d)
+            last_t = round(float(t), 6)
+            rows.append({"t": last_t, **state})
+        if args.duration is not None and args.duration > last_t:
+            rows.append({"t": float(args.duration), **state})
+
+    elif args.mode == "sample":
+        dur = args.duration if args.duration is not None else events_rel[-1][0]
+        dur = max(dur, events_rel[-1][0])
+        hz = max(0.1, float(args.rate))
+        dt = 1.0 / hz
+        state = {f: 0.0 for f in FIELDS}
+        idx = 0
+        t = 0.0
+        while t <= dur + 1e-9:
+            while idx < len(events_rel) and events_rel[idx][0] <= t + 1e-9:
+                state.update(events_rel[idx][1])
+                idx += 1
+            rows.append({"t": round(t, 6), **state})
+            t += dt
+
+    write_csv(rows, args.out)
+    print(f"[OK] effect timeline -> {args.out} rows={len(rows)}")
 
 if __name__ == "__main__":
     main()
