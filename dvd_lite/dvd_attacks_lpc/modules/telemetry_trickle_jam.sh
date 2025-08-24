@@ -1,23 +1,41 @@
 #!/usr/bin/env bash
+# Low-profile telemetry jamming: add small delay/jitter/loss cycles.
 set -euo pipefail
-ATTACK_NAME="telemetry_trickle_jam"
-. "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")"/.. && pwd)/sh_core/attack_std.shlib"
+BASE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+. "$BASE/00_env.sh"; . "$BASE/sh_core/lpc_bus.sh"; . "$BASE/sh_core/netem.sh"; . "$BASE/sh_core/metrics.sh"
 
-: "${INTENSITY:=low}"
-: "${PPS_LIMIT:=auto}"
-: "${LATENCY_INCREASE:=auto}"
+: "${INTENSITY:=low}"   # low|medium|high
+: "${DUR:=12}"          # total seconds
+: "${STEP:=2}"          # on/off step seconds
 
-case "$INTENSITY" in
-  low)    PPS_LIMIT=${PPS_LIMIT/auto/5};  LATENCY_INCREASE=${LATENCY_INCREASE/auto/2}  ;;
-  medium) PPS_LIMIT=${PPS_LIMIT/auto/15}; LATENCY_INCREASE=${LATENCY_INCREASE/auto/8}  ;;
-  high)   PPS_LIMIT=${PPS_LIMIT/auto/30}; LATENCY_INCREASE=${LATENCY_INCREASE/auto/20} ;;
-esac
+effects(){ case "$INTENSITY" in
+  low)    echo "delay_ms=2 jitter_ms=1 loss_pct=0.05" ;;
+  medium) echo "delay_ms=5 jitter_ms=2 loss_pct=0.20" ;;
+  high)   echo "delay_ms=12 jitter_ms=5 loss_pct=0.80";;
+esac; }
 
-_act(){
-  local jitter; jitter=$(awk "BEGIN {srand(); print int(rand()*3)+1}")
-  local effective_latency=$((LATENCY_INCREASE + jitter))
-  _log_bus "$ATTACK_NAME" "intensity=$INTENSITY" "pps_limit=$PPS_LIMIT" "latency_increase_ms=$effective_latency" "jitter_ms=$jitter"
-  return 0
+apply_real(){
+  case "$INTENSITY" in
+    low)    netem_apply "$DVD_C_GCS" delay 2ms 1ms loss 0.05% ;;
+    medium) netem_apply "$DVD_C_GCS" delay 5ms 2ms loss 0.20% ;;
+    high)   netem_apply "$DVD_C_GCS" delay 12ms 5ms loss 0.80% ;;
+  esac
 }
 
-run_lpc_loop _act "${DUR:-0}"
+main(){
+  log "[telemetry_trickle_jam] mode=$LPC_MODE int=$INTENSITY dur=$DUR step=$STEP target=$DVD_C_GCS/$DVD_TARGET_IF"
+  local eff="$(effects)"; local t=0
+  local before after; before=$(obs_snapshot "$DVD_C_GCS" "$DVD_TARGET_IF")
+  while [ "$t" -lt "$DUR" ]; do
+    if [ "${ALLOW_REAL_EFFECTS:-0}" -eq 1 ]; then apply_real; fi
+    bus_emit "telemetry" "target=$DVD_C_GCS qdisc=netem $eff"
+    effect_emit $eff
+    sleep "$STEP"
+    netem_clear "$DVD_C_GCS" || true
+    sleep "$STEP"
+    t=$((t + STEP*2))
+  done
+  after=$(obs_snapshot "$DVD_C_GCS" "$DVD_TARGET_IF"); delta_emit "$before" "$after" "telemetry_obs"
+  netem_clear "$DVD_C_GCS" || true
+}
+main "$@"
