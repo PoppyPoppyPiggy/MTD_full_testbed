@@ -1,167 +1,151 @@
+# dvd_lite/dvd_attacks_lpc/tools/gen_effects_timeline.py
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
-bus.log -> effect_timeline.csv 생성기 (LPC 확장)
-- 'effect' 라인 우선, 없으면 룰로 보강
-- dup_pct 포함, action/intensity/level/grade 모두 인식
-- epoch-ms/epoch-s 모두 인식
-모드:
-  sparse : 이벤트 시점만 1행
-  hold   : 마지막 값 유지 스냅샷(권장)
-  sample : 일정 Hz로 균일 샘플
+bus.log -> effect_timeline.csv (LPC 표준/강도 매핑)
+- tools/effects_rules.json 하나만 사용(네가 준 구조 유지)
+- event 우선순위: 'effect' 직접값 > rules[kind] > rules[tag][action] > rules[tag]['_default']
+- 강도 키: intensity|level|grade|severity|lvl (문자/숫자 모두 허용)
+- 출력: t,loss_pct,delay_ms,jitter_ms,dup_pct,rate_limit_mbps
 """
-import argparse, csv, json, os, re, sys
+import os, sys, json, csv, argparse
 
-FIELDS = ["loss_pct", "delay_ms", "jitter_ms", "dup_pct", "rate_limit_mbps"]
+FIELDS = ["loss_pct","delay_ms","jitter_ms","dup_pct","rate_limit_mbps"]
 
-def parse_line(line: str):
-    parts = line.rstrip("\n").split("\t")
-    if len(parts) < 3:
-        return None
-    raw_ts = parts[0]
+def _norm_intensity(ev):
+    cand = (ev.get("intensity") or ev.get("level") or ev.get("grade") or ev.get("severity") or ev.get("lvl") or "").strip().lower()
+    if cand in ("mid","med"): return "medium"
+    if cand in ("low","medium","high"): return cand
+    # 숫자도 허용
     try:
-        ts = float(raw_ts)
-        # epoch ms(13자리 이상) → 초로 변환
-        if ts > 1e12:
-            ts = ts / 1000.0
-    except Exception:
-        return None
-    tag = parts[1]
-    kv = dict(re.findall(r'([A-Za-z0-9_]+)=([^\s]+)', " ".join(parts[2:])))
-    return ts, tag, kv
+        n = int(cand)
+        return {1:"low",2:"medium",3:"high"}.get(n,"low")
+    except: return "low"
 
-def _to_num(x):
-    try:
-        return float(str(x).replace("%",""))
-    except Exception:
-        return None
+def _parse_bus(bus_path):
+    ev=[]
+    if not os.path.isfile(bus_path): return ev
+    with open(bus_path,"r",encoding="utf-8",errors="ignore") as f:
+        for line in f:
+            line=line.strip()
+            if not line: continue
+            # 탭 우선, 없으면 스페이스
+            parts=line.split("\t")
+            if len(parts)<2:
+                parts=line.split(" ",2)
+            if len(parts)<2: continue
+            ts, tag = parts[0], parts[1]
+            rest = parts[2] if len(parts)>2 else ""
+            try:
+                ts_ms = int(ts)
+            except: 
+                # epoch-sec도 지원
+                try:
+                    ts_ms = int(float(ts)*1000)
+                except: continue
+            kv={}
+            for tok in rest.split():
+                if "=" in tok:
+                    k,v=tok.split("=",1)
+                    kv[k]=v
+            kv["ts_ms"]=ts_ms; kv["tag"]=tag
+            ev.append(kv)
+    return ev
 
-def apply_rules(tag: str, kv: dict, rules: dict):
-    if not rules:
-        return None
-    r = None
-    # 액션 키 다 인식
-    action = kv.get("action") or kv.get("intensity") or kv.get("level") or kv.get("grade")
-    if action == "mid":
-        action = "medium"
-    if tag in rules and isinstance(rules[tag], dict):
-        if action and action in rules[tag]:
-            r = rules[tag][action]
-        elif "action" in kv and kv["action"] in rules[tag]:
-            r = rules[tag][kv["action"]]
-        elif "_default" in rules[tag]:
-            r = rules[tag]["_default"]
-    if not r and "_global" in rules and tag in rules["_global"]:
-        r = rules["_global"][tag]
-    if not r:
-        return None
-    out = {}
-    for f in FIELDS:
-        n = _to_num(r.get(f))
-        if n is not None:
-            out[f] = n
-    return out or None
-
-def load_rules(path: str):
-    if not path:
+def _load_rules(tools_dir):
+    p=os.path.join(tools_dir,"effects_rules.json")
+    if not os.path.isfile(p):
         return {}
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception as e:
-        print(f"[WARN] rules load fail: {e}", file=sys.stderr)
-        return {}
+    with open(p,"r",encoding="utf-8") as f:
+        return json.load(f)
 
-def write_csv(rows, out_path):
-    os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    with open(out_path, "w", newline="") as o:
-        w = csv.writer(o)
-        w.writerow(["t"] + FIELDS)
-        for r in rows:
-            w.writerow([r["t"]] + [r.get(f, "") for f in FIELDS])
+def _merge(dst, src):
+    for k in FIELDS:
+        dst[k]=dst.get(k,0.0)+float(src.get(k,0.0))
+
+def _apply_rules(events, rules, horizon=300):
+    if not events: return []
+    t0 = min(e["ts_ms"] for e in events)//1000
+    t1 = min(t0+horizon, max(e["ts_ms"] for e in events)//1000 + 60)
+    # 초기화
+    base=[{"t":float(t),"loss_pct":0.0,"delay_ms":0.0,"jitter_ms":0.0,"dup_pct":0.0,"rate_limit_mbps":0.0} 
+          for t in range(int(t0), int(t1)+1)]
+    # 이벤트 반영
+    for e in events:
+        tag=e.get("tag","")
+        kind=e.get("kind","")
+        action=e.get("action","")
+        inten=_norm_intensity(e)
+
+        # 1) effect 직접값
+        if tag=="effect":
+            val={k:float(e.get(k,0.0)) for k in FIELDS}
+            # 즉시 시점 t에 합산
+            t= int(e["ts_ms"]//1000)
+            if t < base[0]["t"] or t > base[-1]["t"]: continue
+            _merge(base[t-int(t0)], val)
+            continue
+
+        # 2) 룰 탐색
+        # 2-1) rules[kind] 에 강도맵이 있으면 우선
+        spec=None
+        rk=rules.get(kind) if kind else None
+        if isinstance(rk, dict) and any(x in rk for x in ("low","medium","mid","high")):
+            spec = rk.get(inten) or rk.get("mid") if inten=="medium" else None
+        # 2-2) rules[tag][action] 또는 rules[tag]["_default"]
+        if spec is None:
+            sec = rules.get(tag) if tag in rules else None
+            if isinstance(sec, dict):
+                if action and isinstance(sec.get(action), dict):
+                    spec = sec.get(action)
+                elif isinstance(sec.get("_default"), dict):
+                    spec = sec.get("_default")
+        if spec is None: 
+            continue
+
+        hold = int(e.get("hold_s", spec.get("hold_s", 10)))
+        decay= int(spec.get("decay_s", 5))
+        start = int(e["ts_ms"]//1000)
+        end   = start + hold + decay
+
+        for b in base:
+            t = int(b["t"])
+            if t < start: 
+                continue
+            if t <= start + hold:
+                w = 1.0
+            elif t <= end:
+                rem=end - t
+                w = max(0.0, rem/float(decay) if decay>0 else 0.0)
+            else:
+                continue
+            for k in FIELDS:
+                b[k]+= w*float(spec.get(k,0.0))
+
+    # sanitize
+    for b in base:
+        for k in ("loss_pct","dup_pct","rate_limit_mbps"):
+            if b[k] < 0.0: b[k]=0.0
+    return base
 
 def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("buslog", help="path to bus.log")
-    ap.add_argument("-o", "--out", default="attack_output/effect_timeline.csv")
-    ap.add_argument("--rules", default=None, help="optional effects_rules.json")
-    ap.add_argument("--mode", choices=["sparse","hold","sample"], default="hold")
-    ap.add_argument("--rate", type=float, default=10.0, help="sample Hz for --mode sample")
-    ap.add_argument("--duration", type=float, default=None, help="force end time (sec)")
-    args = ap.parse_args()
+    ap=argparse.ArgumentParser()
+    ap.add_argument("bus_log")
+    ap.add_argument("-o","--out", default=None)
+    ap.add_argument("--tools-dir", default=os.path.dirname(__file__))
+    ap.add_argument("--horizon", type=int, default=300)
+    args=ap.parse_args()
 
-    if not os.path.exists(args.buslog):
-        print(f"[ERR] no bus.log at {args.buslog}", file=sys.stderr)
-        sys.exit(2)
+    rules=_load_rules(args.tools_dir)
+    ev=_parse_bus(args.bus_log)
+    rows=_apply_rules(ev, rules, horizon=args.horizon)
 
-    rules = load_rules(args.rules)
+    out=args.out or os.path.join(os.path.dirname(args.bus_log), "effect_timeline.csv")
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+    with open(out,"w",newline="",encoding="utf-8") as f:
+        w=csv.writer(f); w.writerow(["t"]+FIELDS)
+        for r in rows: w.writerow([r["t"]]+[r[k] for k in FIELDS])
+    print(f"[OK] wrote {out} rows={len(rows)}")
 
-    events = []  # (ts_abs, {field:value})
-    with open(args.buslog, "r", encoding="utf-8", errors="ignore") as f:
-        for line in f:
-            p = parse_line(line)
-            if not p:
-                continue
-            ts, tag, kv = p
-
-            if tag == "effect":
-                eff = {}
-                for k in FIELDS:
-                    if k in kv:
-                        n = _to_num(kv[k])
-                        if n is not None:
-                            eff[k] = n
-                if eff:
-                    events.append((ts, eff))
-                continue
-
-            eff2 = apply_rules(tag, kv, rules)
-            if eff2:
-                events.append((ts, eff2))
-
-    if not events:
-        write_csv([], args.out)
-        print("[OK] effect timeline ->", args.out, "rows=0")
-        return
-
-    t0 = min(ts for ts, _ in events)
-    events.sort(key=lambda x: x[0])
-    events_rel = [(ts - t0, d) for ts, d in events]
-
-    rows = []
-    if args.mode == "sparse":
-        for t, d in events_rel:
-            row = {"t": round(float(t), 6)}
-            row.update(d)
-            rows.append(row)
-
-    elif args.mode == "hold":
-        state = {f: 0.0 for f in FIELDS}
-        rows.append({"t": 0.0, **state})
-        last_t = 0.0
-        for t, d in events_rel:
-            state.update(d)
-            last_t = round(float(t), 6)
-            rows.append({"t": last_t, **state})
-        if args.duration is not None and args.duration > last_t:
-            rows.append({"t": float(args.duration), **state})
-
-    elif args.mode == "sample":
-        dur = args.duration if args.duration is not None else events_rel[-1][0]
-        dur = max(dur, events_rel[-1][0])
-        hz = max(0.1, float(args.rate))
-        dt = 1.0 / hz
-        state = {f: 0.0 for f in FIELDS}
-        idx = 0
-        t = 0.0
-        while t <= dur + 1e-9:
-            while idx < len(events_rel) and events_rel[idx][0] <= t + 1e-9:
-                state.update(events_rel[idx][1])
-                idx += 1
-            rows.append({"t": round(t, 6), **state})
-            t += dt
-
-    write_csv(rows, args.out)
-    print(f"[OK] effect timeline -> {args.out} rows={len(rows)}")
-
-if __name__ == "__main__":
+if __name__=="__main__":
     main()
