@@ -42,3 +42,4 @@ ENV/
 attack_results/
 *.pcap
 *.dump
+*.xml
