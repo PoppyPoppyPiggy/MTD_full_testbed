@@ -5,3 +5,7 @@
     ignore = dirty
 [submodule "ardupilot"]
     ignore = dirty
+[submodule "ardupilot"]
+    path = ardupilot
+    url = https://github.com/ArduPilot/ardupilot.git
+    ignore = dirty
