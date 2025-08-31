@@ -1,7 +1,0 @@
-
-BSSID, First time seen, Last time seen, channel, Speed, Privacy, Cipher, Authentication, Power, # beacons, # IV, LAN IP, ID-length, ESSID, Key
-4A:47:33:37:3B:A6, 2025-07-31 16:20:56, 2025-07-31 16:21:21,  6,  54, WEP, WEP,   , -28,       19,        0,   0.  0.  0.  0,  10, Drone_Wifi, 
-
-Station MAC, First time seen, Last time seen, Power, # packets, BSSID, Probed ESSIDs
-02:00:00:00:03:00, 2025-07-31 16:21:06, 2025-07-31 16:21:14, -29,        7, 4A:47:33:37:3B:A6,Drone_Wifi
-

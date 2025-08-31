@@ -1,4 +1,0 @@
-.logbox { height: 320px; overflow: auto; padding: 12px; border-radius: 8px; }
-.logbox-sm { height: 220px; overflow: auto; padding: 12px; border-radius: 8px; background: #f8f9fa; }
-.card-header { font-weight: 600; }
-pre { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, "Liberation Mono", monospace; }
