@@ -78,24 +78,83 @@ python3 dvd_lite/dvd_attacks_lpc/tools/gen_effects_timeline.py \
   --rules dvd_lite/dvd_attacks_lpc/tools/effects_rules.json \
   --out  dvd_lite/dvd_attacks_lpc/attack_output/effect_timeline.csv
 
-(D) NS-3 실행
+D) NS-3 실행 (./ns3 런처 사용)
 
-단일 드론 평가
+먼저 ns-3 루트로 이동:
 
 cd ns-3.45/ns-3-dev
-./waf build
-./waf --run "scratch/drone_lpc_eval \
-  --module=follow_flood --level=med --mtd=1 --simTime=60"
-# 출력: attack_output/<module>/<mtd|no_mtd>/
-#  - ns3_metrics_*.csv, ns3_metrics_summary_*.csv, <module>_<tag>.xml
+
+1) 설정 & 빌드
+# (최초 1회) 구성
+./ns3 configure --build-profile=optimized --enable-examples --enable-tests
+
+# 빌드
+./ns3 build
 
 
-허니드론 네트워크 평가
+참고
 
-./waf --run "scratch/honeydrone_netanim \
+scratch/drone_lpc_eval.cc, scratch/honeydrone_netanim.cc가 그대로 감지되어 빌드됩니다.
+
+다시 빌드 없이 바로 실행하려면 뒤의 run에 --no-build 옵션을 붙이세요.
+
+2) 단일 드론 평가 — drone_lpc_eval
+./ns3 run "drone_lpc_eval \
+  --module=follow_flood \
+  --level=med \
+  --mtd=1 \
+  --simTime=60 \
+  --animMaxPkts=200000"
+
+# 출력(변경 없음):
+# dvd_lite/dvd_attacks_lpc/attack_output/follow_flood/mtd/
+#  ├─ ns3_metrics_follow_flood_mtd.csv
+#  ├─ ns3_metrics_summary_follow_flood_mtd.csv
+#  └─ follow_flood_mtd.xml (NetAnim)
+
+
+옵션 요약
+
+--module: 공격 모듈(follow_flood | wifi_slow_scan | telemetry_trickle_jam …)
+
+--level: low | med | high (효과 매핑 테이블 적용)
+
+--mtd=1: 포트홉/아이피 셔플/브리지 홉 스케줄 적용
+
+--simTime: 시뮬레이션 총 시간(초)
+
+--animMaxPkts: NetAnim 기록 패킷 상한(0=무제한)
+
+3) 허니드론 네트워크 평가 — honeydrone_netanim
+./ns3 run "honeydrone_netanim \
   --timeline=../../dvd_lite/dvd_attacks_lpc/attack_output/effect_timeline.csv \
-  --module=follow_flood --simTime=60 --honey=4 --pcap=1"
-# 출력: attack_output/ns3_wifi-*.pcap, ns3_metrics.csv, ns3_metrics_summary.csv, module.xml
+  --module=follow_flood \
+  --simTime=60 \
+  --honey=4 \
+  --pcap=1"
+
+# 출력(변경 없음):
+# dvd_lite/dvd_attacks_lpc/attack_output/
+#  ├─ ns3_wifi-*.pcap
+#  ├─ ns3_metrics.csv
+#  ├─ ns3_metrics_summary.csv
+#  └─ follow_flood.xml (NetAnim)
+
+
+옵션 요약
+
+--timeline: gen_effects_timeline.py로 만든 effect_timeline.csv 경로
+
+--honey: 가상 허니드론 노드 수
+
+--pcap=1: 무선 캡처 파일 저장
+
+4) (선택) 빠른 재실행
+
+빌드된 상태에서 빠르게 돌릴 땐:
+
+./ns3 run --no-build "drone_lpc_eval --module=wifi_slow_scan --mtd=0 --simTime=30"
+./ns3 run --no-build "honeydrone_netanim --timeline=../../dvd_lite/dvd_attacks_lpc/attack_output/effect
 
 (E) MTD 점수 산출(정량)
 python3 dvd_lite/dvd_attacks_lpc/tools/score_mtd.py \
