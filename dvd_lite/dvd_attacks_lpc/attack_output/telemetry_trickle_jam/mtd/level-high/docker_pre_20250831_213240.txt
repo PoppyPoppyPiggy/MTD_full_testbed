@@ -1,0 +1,34 @@
+### docker ps -a
+CONTAINER ID   IMAGE                                                           COMMAND                  CREATED       STATUS                      PORTS                                                                                                NAMES
+4859c367afb6   n1ckaleks/damn-vulnerable-drone-ground-control-station:latest   "/bin/bash -euxo pip…"   9 hours ago   Up 9 hours                                                                                                                       ground-control-station
+48b32bf86a3d   n1ckaleks/damn-vulnerable-drone-companion-computer:latest       "/start.sh"              9 hours ago   Up 9 hours                  22/tcp, 5000/tcp, 0.0.0.0:3000->3000/tcp, [::]:3000->3000/tcp                                        companion-computer
+70ce9a592138   n1ckaleks/damn-vulnerable-drone-simulator:latest                "/bin/sh -c 'rm -rf …"   9 hours ago   Up 9 hours                  0.0.0.0:8000->8000/tcp, [::]:8000->8000/tcp, 0.0.0.0:8080->8080/tcp, [::]:8080->8080/tcp, 9002/tcp   simulator
+91527ecd0bb0   n1ckaleks/damn-vulnerable-drone-flight-controller:latest        "/bin/sh -c mgmt/ini…"   9 hours ago   Up 9 hours                  5760/tcp, 9003/tcp                                                                                   flight-controller
+4359e5d6f459   dejavu-python                                                   "/bin/bash"              5 days ago    Exited (129) 4 days ago                                                                                                          dejavu-python-run-2c11257611a5
+1a95caa57c71   dejavu-python                                                   "python3"                5 days ago    Exited (0) 4 days ago                                                                                                            dejavu-python-1
+2f0b29e9eb88   dejavu-db                                                       "docker-entrypoint.s…"   5 days ago    Exited (255) 14 hours ago   5432/tcp                                                                                             dejavu-db-1
+
+### docker stats --no-stream
+CONTAINER ID   NAME                     CPU %     MEM USAGE / LIMIT     MEM %     NET I/O           BLOCK I/O        PIDS
+4859c367afb6   ground-control-station   2.22%     85.33MiB / 15.62GiB   0.53%     84.1MB / 72.9kB   55.5MB / 791kB   8
+48b32bf86a3d   companion-computer       10.20%    404.5MiB / 15.62GiB   2.53%     72.5GB / 1.59GB   205MB / 1.16MB   39
+70ce9a592138   simulator                157.89%   1.461GiB / 15.62GiB   9.35%     1.59GB / 72.5GB   360MB / 291kB    119
+91527ecd0bb0   flight-controller        0.00%     14.68MiB / 15.62GiB   0.09%     79.8MB / 126B     13MB / 0B        6
+
+### docker network ls
+NETWORK ID     NAME                DRIVER    SCOPE
+ccf72147409e   bridge              bridge    local
+4b15700bf996   dejavu_db_network   bridge    local
+d1e2b7c15d07   host                host      local
+94c0861160b3   none                null      local
+6644b048edf7   simulator           bridge    local
+
+### docker images
+REPOSITORY                                               TAG       IMAGE ID       CREATED       SIZE
+dejavu-python                                            latest    3a63e657c398   5 days ago    2.75GB
+dejavu-db                                                latest    eac195689f8f   5 days ago    70.7MB
+n1ckaleks/damn-vulnerable-drone-simulator                latest    548df0c12a5b   5 weeks ago   5.07GB
+n1ckaleks/damn-vulnerable-drone-companion-computer       latest    545f5c83c77e   5 weeks ago   4.64GB
+n1ckaleks/damn-vulnerable-drone-flight-controller        latest    2bcaabd2ac67   5 weeks ago   4.56GB
+n1ckaleks/damn-vulnerable-drone-ground-control-station   latest    3d032906b222   5 weeks ago   2.21GB
+osrg/ryu                                                 latest    ab10e91ba3b6   6 years ago   294MB

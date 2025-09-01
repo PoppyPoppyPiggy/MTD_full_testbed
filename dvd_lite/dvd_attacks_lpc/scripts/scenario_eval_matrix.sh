@@ -1,62 +1,62 @@
 #!/usr/bin/env bash
-# dvd_lite/dvd_attacks_lpc/scripts/scenario_eval_matrix.sh
-# Baseline vs MTD 평가를 모듈/레벨별로 실행하고 산출물을 자동 폴더에 정리.
-
 set -Eeuo pipefail
 
-ROOT="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-OUT_DIR="${ROOT}/attack_output"
-BUS="${OUT_DIR}/bus.log"
-TOOLS_DIR="${ROOT}/tools"
+: "${NS3_ROOT:?NS3_ROOT not set}"
+: "${ATK_DIR:?ATK_DIR not set}"
+: "${SIM_TIME:=60}"
+: "${PKT_SIZE:=10000}"
+: "${ANIM_MAX_PKTS:=100000000}"
 
-NS3_ROOT="${NS3_ROOT:?set NS3_ROOT}"
-NS3_PROG="${NS3_PROG:-drone_lpc_eval}"   # 기본: 새 eval 사용
-SIM_TIME="${SIM_TIME:-60}"
-PKT_SIZE="${PKT_SIZE:-10000}"
-ANIM_MAX_PKTS="${ANIM_MAX_PKTS:-0}"
-TIMELINE_DT="${TIMELINE_DT:-1.0}"        # 0.1 or 0.01 권장시 바꿔
-HORIZON="${HORIZON:-$SIM_TIME}"
+MODULES_DEFAULT=("follow_flood" "follow_mavlink" "telemetry_trickle_jam" "wifi_slow_scan")
+LEVELS_DEFAULT=("low" "med" "high")
+read -r -a MODULES <<< "${MODULES:-${MODULES_DEFAULT[*]}}"
+read -r -a LEVELS  <<< "${LEVELS:-${LEVELS_DEFAULT[*]}}"
 
-MODULES=(${MODULES:-follow_flood follow_mavlink telemetry_trickle_jam})
-LEVELS=(${LEVELS:-low med high})
+TL_BASE="${ATK_DIR}/attack_output/effect_timeline.baseline.csv"
+TL_MTD="${ATK_DIR}/attack_output/effect_timeline.mtd.csv"
 
-mkdir -p "$OUT_DIR"
+if [[ ! -s "$TL_BASE" || ! -s "$TL_MTD" ]]; then
+  echo "[scenario_eval_matrix] timelines missing → generating..."
+  bash "${ATK_DIR}/scripts/gen_timelines.sh"
+fi
 
-gen_timeline() {
-  local mode="$1"    # baseline|mtd
-  local out_csv="${OUT_DIR}/effect_timeline.${mode}.csv"
-  python3 "${TOOLS_DIR}/gen_effects_timeline.py" "${BUS}" \
-    -o "${out_csv}" --tools-dir "${TOOLS_DIR}" --horizon "${HORIZON}" --dt "${TIMELINE_DT}" || true
-  echo "${out_csv}"
+cd "$NS3_ROOT"
+
+run_one() {
+  local mode="$1" module="$2" level="$3" tl_global="$4"
+  local mtd_flag="0"; [[ "$mode" == "mtd" ]] && mtd_flag="1"
+  local OUT_DIR="${ATK_DIR}/attack_output/${module}/${mode}/level-${level}"
+  mkdir -p "$OUT_DIR"
+
+  # 전역 타임라인 → 시나리오별 타임라인(포트 주석 포함)
+  local TL_SCEN="${OUT_DIR}/timeline_${module}_${mode}_${level}.csv"
+  bash "${ATK_DIR}/scripts/mk_timeline_for_scenario.sh" "$module" "$mode" "$level" "$tl_global" "$TL_SCEN"
+
+  # 선/후 도커 스냅샷
+  bash "${ATK_DIR}/scripts/docker_observer.sh" "$OUT_DIR" "pre" || true
+
+  ./ns3 run "scratch/drone_lpc_eval \
+    --module=${module} \
+    --level=${level} \
+    --mtd=${mtd_flag} \
+    --simTime=${SIM_TIME} \
+    --pktSize=${PKT_SIZE} \
+    --animMaxPkts=${ANIM_MAX_PKTS} \
+    --timeline=${TL_SCEN} \
+    --outRoot=${ATK_DIR}/attack_output" >/dev/null
+
+  bash "${ATK_DIR}/scripts/docker_observer.sh" "$OUT_DIR" "post" || true
+
+  test -s "${OUT_DIR}/ns3_metrics_summary_${module}_${mode}_${level}.csv"
+  test -s "${OUT_DIR}/${module}_${mode}_${level}.xml"
+  echo "[run] ${module}/${mode}/level-${level} done."
 }
 
-ns3_run_one() {
-  local module="$1" level="$2" mode_flag="$3" timeline_csv="$4"
-  local mode_name; [[ "$mode_flag" == "1" ]] && mode_name="mtd" || mode_name="no_mtd"
-  # drone_lpc_eval 은 anim/out 자동 경로 생성하므로 최소 인자만 전달
-  ( cd "$NS3_ROOT" && \
-    ./ns3 run "${NS3_PROG} \
-      --module=${module} --level=${level} --mtd=${mode_flag} \
-      --simTime=${SIM_TIME} --pktSize=${PKT_SIZE} --animMaxPkts=${ANIM_MAX_PKTS} \
-      --timeline=${timeline_csv}" )
-}
-
-echo "=== [A] Baseline: Attack Only ==="
-base_tl="$(gen_timeline baseline)"
 for m in "${MODULES[@]}"; do
   for lv in "${LEVELS[@]}"; do
-    echo "[Baseline] module=${m}, level=${lv}"
-    ns3_run_one "${m}" "${lv}" "0" "${base_tl}"
+    run_one "no_mtd" "$m" "$lv" "$TL_BASE"
+    run_one "mtd"    "$m" "$lv" "$TL_MTD"
   done
 done
 
-echo "=== [B] MTD → Probe → Attack ==="
-mtd_tl="$(gen_timeline mtd)"
-for m in "${MODULES[@]}"; do
-  for lv in "${LEVELS[@]}"; do
-    echo "[MTD] module=${m}, level=${lv}"
-    ns3_run_one "${m}" "${lv}" "1" "${mtd_tl}"
-  done
-done
-
-echo "[DONE] outputs under: ${OUT_DIR}/<module>/(no_mtd|mtd)/level-<lv>/"
+echo "[scenario_eval_matrix] all done."
