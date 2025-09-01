@@ -1,0 +1,9 @@
+{
+  "Privileged": true,
+  "CapAdd": null,
+  "CapDrop": null,
+  "SecurityOpt": [
+    "label=disable"
+  ],
+  "CgroupnsMode": "private"
+}

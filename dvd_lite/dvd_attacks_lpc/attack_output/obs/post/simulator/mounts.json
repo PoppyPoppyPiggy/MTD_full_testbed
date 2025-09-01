@@ -1,0 +1,18 @@
+[
+  {
+    "Type": "bind",
+    "Source": "/var/run/docker.sock",
+    "Destination": "/var/run/docker.sock",
+    "Mode": "rw",
+    "RW": true,
+    "Propagation": "rprivate"
+  },
+  {
+    "Type": "bind",
+    "Source": "/home/kali/MTD/MTD_full_testbed/Damn-Vulnerable-Drone/simulator/mgmt",
+    "Destination": "/Simulator/mgmt",
+    "Mode": "rw",
+    "RW": true,
+    "Propagation": "rprivate"
+  }
+]

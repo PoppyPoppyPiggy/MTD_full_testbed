@@ -1,0 +1,36 @@
+[
+    {
+        "Name": "dejavu_db_network",
+        "Id": "4b15700bf996bf64f46ae1d8ca8c40b8d85b3953ffe09c96f45bd4253a3b34a1",
+        "Created": "2025-08-26T10:53:38.529976144-04:00",
+        "Scope": "local",
+        "Driver": "bridge",
+        "EnableIPv4": true,
+        "EnableIPv6": false,
+        "IPAM": {
+            "Driver": "default",
+            "Options": null,
+            "Config": [
+                {
+                    "Subnet": "172.18.0.0/16",
+                    "Gateway": "172.18.0.1"
+                }
+            ]
+        },
+        "Internal": false,
+        "Attachable": false,
+        "Ingress": false,
+        "ConfigFrom": {
+            "Network": ""
+        },
+        "ConfigOnly": false,
+        "Containers": {},
+        "Options": {},
+        "Labels": {
+            "com.docker.compose.config-hash": "4fb09ccf4452b9b1c95ce24a516568a3232779beac05e8e5126baa645fb5e7d4",
+            "com.docker.compose.network": "db_network",
+            "com.docker.compose.project": "dejavu",
+            "com.docker.compose.version": "2.37.2"
+        }
+    }
+]

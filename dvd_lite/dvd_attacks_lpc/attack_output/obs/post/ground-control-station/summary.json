@@ -1,0 +1,9 @@
+{
+  "Id": "4859c367afb6cdc4bac2abb8dc1b78ac8dfca322403451a9b51b0d89079d1d3b",
+  "Name": "/ground-control-station",
+  "Image": "n1ckaleks/damn-vulnerable-drone-ground-control-station:latest",
+  "Status": "running",
+  "Running": true,
+  "Pid": 163227,
+  "StartedAt": "2025-08-31T16:52:02.822867076Z"
+}
