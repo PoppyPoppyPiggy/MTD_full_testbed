@@ -1,0 +1,20 @@
+{
+    "docker_monitoring": {
+      "monitored_containers": [
+        "flight-controller",
+        "ground-control-station",
+        "companion-computer",
+        "simulator"
+      ],
+      "thresholds": {
+        "cpu_percent": { "medium": 50.0, "high": 75.0, "critical": 90.0 },
+        "memory_percent": { "medium": 60.0, "high": 80.0, "critical": 95.0 }
+      }
+    },
+    "integration": {
+      "score_calculation_interval": 30.0,
+      "enable_realtime_scoring": true,
+      "enable_adaptive_thresholds": false
+    }
+  }
+  

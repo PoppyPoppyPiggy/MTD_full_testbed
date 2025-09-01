@@ -1,0 +1,27 @@
+{
+  "timestamp": "2025-09-01T02:29:05.759638",
+  "total": 54.340179166666665,
+  "grade": "F",
+  "components": {
+    "diversity": 0.0,
+    "shuffle": 58.33333333333333,
+    "redundancy": 57.0,
+    "survivability": 100.0,
+    "energy": 62.735125
+  },
+  "counters": {
+    "ip_changes": 0,
+    "port_changes": 0,
+    "route_changes": 0,
+    "network_reconfigs": 0,
+    "container_restarts": 0,
+    "resource_alerts": 0,
+    "filesystem_changes": 0
+  },
+  "containers": [
+    "ground-control-station",
+    "companion-computer",
+    "simulator",
+    "flight-controller"
+  ]
+}

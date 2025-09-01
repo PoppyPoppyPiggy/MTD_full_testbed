@@ -1,0 +1,30 @@
+{
+    "weights": {
+      "diversity": 0.25,
+      "shuffle": 0.20,
+      "redundancy": 0.20,
+      "survivability": 0.25,
+      "energy": 0.10
+    },
+    "baseline": {
+      "max_ip_changes_per_min": 10,
+      "max_port_changes_per_min": 15,
+      "max_route_changes_per_min": 5,
+      "target_shuffle_frequency": 2.0,
+      "max_recovery_time": 30.0,
+      "max_shuffle_cost": 100.0,
+      "target_redundancy_ratio": 0.8,
+      "target_survivability": 0.95,
+      "max_cpu_cost_percent": 20.0,
+      "max_network_overhead_percent": 15.0,
+      "max_battery_cost_percent": 10.0
+    },
+    "thresholds": {
+      "diversity": { "excellent": 80, "good": 60, "fair": 40, "poor": 20 },
+      "shuffle": { "excellent": 85, "good": 70, "fair": 50, "poor": 30 },
+      "redundancy": { "excellent": 90, "good": 75, "fair": 55, "poor": 35 },
+      "survivability": { "excellent": 95, "good": 85, "fair": 70, "poor": 50 },
+      "energy": { "excellent": 20, "good": 40, "fair": 60, "poor": 80 }
+    }
+  }
+  
