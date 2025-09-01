@@ -1,49 +1,62 @@
-# dvd_lite/dvd_attacks_lpc/scripts/run_ns3_eval.sh
 #!/usr/bin/env bash
-# ns-3 실행기(표준): dvd_lite/dvd_attacks_lpc 하위에서만 입출력
+# dvd_lite/dvd_attacks_lpc/scripts/run_ns3_eval.sh
+# Run ns-3 (cmake launcher ./ns3, fallback to waf) with effect timeline.
 set -Eeuo pipefail
-IFS=$'\n\t'
 
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-ROOT="$(cd "$HERE/.." && pwd)"
-cd "$ROOT"
+TIMELINE="${TIMELINE:?set TIMELINE path}"
+OUT="${OUT:-attack_output/ns3_metrics.csv}"
 
-[[ -f 00_env.sh ]] && source 00_env.sh || true
-
-LPC_LOG_DIR="${LPC_LOG_DIR:-$ROOT/attack_output}"
-TIMELINE="${TIMELINE:-$LPC_LOG_DIR/effect_timeline.csv}"
-OUT_CSV="$LPC_LOG_DIR/ns3_metrics.csv"
-ANIM_OUT="${ANIM_OUT:-$LPC_LOG_DIR/netanim.xml}"
+# ns-3 위치/프로그램명
+NS3_ROOT="${NS3_ROOT:-/home/kali/MTD/MTD_full_testbed/ns-3.45/ns-3-dev}"
+NS3_PROG="${NS3_PROG:-honeydrone_netanim}"   # scratch/<name>.cc
 SIM_TIME="${SIM_TIME:-60}"
-VDRONES="${VDRONES:-4}"
 
-# ns-3 위치(없으면 기본 경로 추정)
-NS3_ROOT="${NS3_ROOT:-$HOME/MTD/MTD_full_testbed/ns-3.45/ns-3-dev}"
-SCRATCH="$NS3_ROOT/scratch"
-SRC_LOCAL="$ROOT/eval/ns3/honeydrone_netanim.cc"
-SRC_TARGET="$SCRATCH/honeydrone_netanim.cc"
+# 추가 파라미터 전달 (없으면 기본값)
+ANIM_MAX_PKTS="${ANIM_MAX_PKTS:-0}"  # 0=unlimited
+PKT_SIZE="${PKT_SIZE:-600}"
 
-if [ ! -f "$TIMELINE" ]; then
-  echo "[run_ns3_eval] missing timeline: $TIMELINE" >&2
-  exit 1
+if [[ ! -f "${TIMELINE}" ]]; then
+  echo "[ERR] timeline not found: ${TIMELINE}" >&2; exit 2
+fi
+if [[ ! -d "${NS3_ROOT}" ]]; then
+  echo "[ERR] ns-3 root not found: ${NS3_ROOT}" >&2; exit 2
 fi
 
-# 코드 싱크
-mkdir -p "$SCRATCH"
-cp -f "$SRC_LOCAL" "$SRC_TARGET"
+cd "${NS3_ROOT}"
 
-# 빌드 & 실행
-pushd "$NS3_ROOT" >/dev/null
-./waf configure --enable-examples --enable-tests  >/dev/null
-./waf build >/dev/null
-set +e
-./waf --run scratch/honeydrone_netanim --command-template="%s --timeline='$TIMELINE' --out='$OUT_CSV' --anim='$ANIM_OUT' --simTime=${SIM_TIME} --virtualDrones=${VDRONES}"
-RC=$?
-set -e
-popd >/dev/null
-
-if [ $RC -ne 0 ]; then
-  echo "[run_ns3_eval] ns-3 run failed (rc=$RC)"; exit $RC
+if [[ ! -f "scratch/${NS3_PROG}.cc" ]]; then
+  echo "[ERR] scratch/${NS3_PROG}.cc not found."
+  exit 3
 fi
 
-echo "[run_ns3_eval] OK -> $OUT_CSV ; summary -> $LPC_LOG_DIR/ns3_metrics_summary.csv ; NetAnim -> $ANIM_OUT"
+# 빌드
+if [[ -x ./ns3 ]]; then
+  ./ns3 build
+elif [[ -x ./waf ]]; then
+  ./waf -d optimized build
+else
+  echo "[ERR] ns-3 launcher not found"; exit 4
+fi
+
+# 실행 (cmake 우선)
+RUN_ARGS="scratch/${NS3_PROG} --timeline=${TIMELINE} --simTime=${SIM_TIME} --pcap=1 --animMaxPkts=${ANIM_MAX_PKTS} --pktSize=${PKT_SIZE}"
+if [[ -x ./ns3 ]]; then
+  ./ns3 run "${RUN_ARGS}"
+else
+  ./waf --run "${RUN_ARGS}"
+fi
+
+# 결과 csv 집계
+if [[ -f "attack_output/ns3_metrics.csv" ]]; then
+  cp -f "attack_output/ns3_metrics.csv" "${OUT}"
+elif [[ -f "../../dvd_lite/dvd_attacks_lpc/attack_output/ns3_metrics.csv" ]]; then
+  cp -f "../../dvd_lite/dvd_attacks_lpc/attack_output/ns3_metrics.csv" "${OUT}"
+elif ls attack_output/ns3_metrics_*.csv >/dev/null 2>&1; then
+  cat attack_output/ns3_metrics_*.csv > "${OUT}"
+elif ls ../../dvd_lite/dvd_attacks_lpc/attack_output/ns3_metrics_*.csv >/dev/null 2>&1; then
+  cat ../../dvd_lite/dvd_attacks_lpc/attack_output/ns3_metrics_*.csv > "${OUT}"
+else
+  echo "[WARN] NS-3 metrics csv not found"
+fi
+
+echo "[OK] ns-3 done -> ${OUT}"

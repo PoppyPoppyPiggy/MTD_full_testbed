@@ -1,0 +1,27 @@
+{
+  "simulator": {
+    "IPAMConfig": {
+      "IPv4Address": "10.13.0.3"
+    },
+    "Links": null,
+    "Aliases": [
+      "companion-computer",
+      "companion-computer"
+    ],
+    "MacAddress": "f6:37:b0:49:ce:14",
+    "DriverOpts": null,
+    "GwPriority": 0,
+    "NetworkID": "6644b048edf717c22a936085cf123f2f5ca1fbf60962c33108bf29004821b5a1",
+    "EndpointID": "073a9631b8e1b0c21557836449c15bc49b78d28fa420445b270c0925b1dd0f7c",
+    "Gateway": "10.13.0.1",
+    "IPAddress": "10.13.0.3",
+    "IPPrefixLen": 24,
+    "IPv6Gateway": "",
+    "GlobalIPv6Address": "",
+    "GlobalIPv6PrefixLen": 0,
+    "DNSNames": [
+      "companion-computer",
+      "48b32bf86a3d"
+    ]
+  }
+}
