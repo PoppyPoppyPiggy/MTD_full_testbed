@@ -1,0 +1,18 @@
+version: 1
+docker_network: "${DVD_NET}"   # <- 기본 문법만 사용 (default는 해석기에서 보완)
+
+roles:
+  gcs:
+    container: "${DVD_C_GCS}"
+    services: { mavlink: 14550, http_cam: 8080, rtsp: 8554 }
+  companion:
+    container: "${DVD_C_CC}"
+    services: { mavlink: 14550, http_cam: 8080, rtsp: 8554 }
+  flight:
+    container: "${DVD_C_FC}"
+    services: { mavlink: 14540 }
+  sim:
+    container: "${DVD_C_SIM}"
+    services: { rtsp: 8554 }
+
+subnet: ""
