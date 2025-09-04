@@ -1,0 +1,40 @@
+scenario_id: "mitre-wifi-recon-v1"
+stages:
+  - mode: seq
+    steps:
+      - type: attack
+        id: s1_scan_slow
+        module: wifi_slow_scan
+        level: low
+        duration_s: 6
+        mitre:
+          tactic: Discovery
+          tactic_id: TA0007
+          technique: "Network Service Scanning"
+          technique_id: T1046
+        params: { iface: "wlan0mon", burst_pct: 0.1 }
+
+      - type: attack
+        id: s2_telemetry_trickle
+        module: telemetry_trickle_jam
+        level: med
+        duration_s: 8
+        mitre:
+          tactic: Impact
+          tactic_id: TA0040
+          technique: "Network Denial of Service"
+          technique_id: T1498
+        params: { rate_kpps: 5 }
+
+      - type: mtd
+        id: s3_mtd_port_shuffle
+        action: mtd_port_shuffle
+        params: {}
+
+      - type: probe
+        id: s4_probe_dvd
+        kind: dvd_status
+
+      - type: wait
+        id: s5_settle
+        seconds: 2

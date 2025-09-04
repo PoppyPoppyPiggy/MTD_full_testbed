@@ -1,5 +1,0 @@
-modules/wifi_slow_scan.sh            LPC_DUTY=0.05 LPC_INTERVAL_MS=30000
-modules/mavlink_param_drift.sh       LPC_STEP=0.02 LPC_DUTY=0.08 LPC_INTERVAL_MS=17000
-modules/telemetry_trickle_jam.sh     LPC_DUTY=0.08 LPC_INTERVAL_MS=12000
-modules/gps_slow_spoof.sh            LPC_STEP=0.4  LPC_DUTY=0.06 LPC_INTERVAL_MS=20000
-modules/battery_route_drain.sh       LPC_DUTY=0.07 LPC_INTERVAL_MS=18000 LPC_STEP=0.05
