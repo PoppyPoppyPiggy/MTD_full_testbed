@@ -1,69 +1,76 @@
 #!/usr/bin/env bash
-# pcap 토글: docker 브릿지 자동탐지 + 타깃 IP 필터
+# pcap 토글: start <SCN> [role service] [--all] [--iface=NAME]
+#            stop  <SCN>
 set -euo pipefail
+source "$(cd "$(dirname "$0")/../.." && pwd)/00_env_ext.sh"
 
-BASE="$(cd "$(dirname "$0")/../.." && pwd)"
-# shellcheck disable=SC1090
-source "$BASE/00_env_ext.sh"
+cmd="${1:-}"; shift || true
+SCN="${1:-}"; [[ -z "${SCN}" ]] && { echo "usage: $0 start|stop <SCN> [role service] [--all] [--iface=NAME]"; exit 2; }
+shift || true
 
-CMD="${1:-start}"                          # start|stop
-SCN="${2:-attack-$(date +%s)}"             # 시나리오/세션 이름
-ROLE="${3:-gcs}"                           # (옵션) 타깃 역할, 기본 gcs
-SERVICE="${4:-mavlink}"                    # (옵션) 서비스, 기본 mavlink
+ROLE="${1:-}"; [[ -n "${ROLE:-}" ]] && shift || true
+SERVICE="${1:-}"; [[ -n "${SERVICE:-}" ]] && shift || true
 
-OUTD="$OUT_DIR/captures/pcap/$SCN"
-mkdir -p "$OUTD"
-PIDF="$OUTD/tcpdump.pid"
-PCAP="$OUTD/${SCN}_$(date +%s).pcap"
+ALL=0; IFACE=""
+for a in "$@"; do
+  [[ "$a" == "--all" ]] && ALL=1
+  [[ "$a" == --iface=* ]] && IFACE="${a#--iface=}"
+done
 
-# --- 타깃/네트워크 해석 ---
-TJSON="$(python3 "$BASE/modules/attacks/resolve_target.py" "$BASE/modules/attacks/targets/targets.yml" "$ROLE" "$SERVICE" 2>/dev/null || true)"
-IP="$(echo "$TJSON"  | jq -r '.ip // empty')"
-NET_HINT="$(echo "$TJSON" | jq -r '.network // empty')"
-CNAME="$(echo "$TJSON"| jq -r '.container // empty')"
+SCN_DIR="$OUT_DIR/captures/pcap/$SCN"
+PIDF="$SCN_DIR/tcpdump.pid"
+PCAP="$SCN_DIR/${SCN}_$(date +%s).pcap"
 
-# 브릿지 탐색 순서:
-# 1) NET_HINT 유효 → docker network inspect 로 브릿지명
-# 2) 컨테이너의 NetworkID 로부터 br-<12>
-# 3) 호스트의 첫번째 br-*
-BR=""
-if [[ -n "$NET_HINT" ]] && docker network inspect "$NET_HINT" >/dev/null 2>&1; then
-  BR="$(docker network inspect "$NET_HINT" | jq -r '.[0].Options["com.docker.network.bridge.name"] // empty')"
-fi
-if [[ -z "$BR" ]] && [[ -n "${CNAME:-}" ]]; then
-  NID="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.NetworkID}}{{end}}' "$CNAME" 2>/dev/null || true)"
-  if [[ -n "$NID" ]]; then BR="br-${NID:0:12}"; fi
-fi
-if [[ -z "$BR" ]]; then
-  BR="$(ip -br link | awk '/^br-/{print $1; exit}')"
-fi
-if [[ -z "$BR" ]]; then
-  echo "[pcap] ERROR: docker bridge not found"; exit 2
-fi
-
-# 필터: 타깃 IP가 있으면 host 필터, 없으면 전체
-FILTER=""
-if [[ -n "${IP:-}" ]]; then FILTER="host ${IP}"; fi
-
-start() {
-  echo "[pcap] iface=${BR} file=${PCAP} filter='${FILTER}'"
-  # -U: 버퍼링 최소화, -nn: 이름해석 안함
-  tcpdump -i "$BR" ${FILTER:+$FILTER} -nn -U -w "$PCAP" &
-  echo $! > "$PIDF"
-  echo "[$(date +%s)] BUS ATK PROBE pcap_start scene=${SCN} iface=${BR} file=${PCAP}" >> "$BUS_LOG"
+resolve_target() {
+  local role="$1" svc="$2"
+  python3 "$DVD_BASE/modules/attacks/resolve_target.py" \
+    "$DVD_BASE/modules/attacks/targets/targets.yml" "$role" "${svc:-}" 2>/dev/null
 }
 
-stop() {
-  if [[ -f "$PIDF" ]]; then
-    kill "$(cat "$PIDF")" 2>/dev/null || true
-    rm -f "$PIDF"
-    echo "[$(date +%s)] BUS ATK PROBE pcap_stop  scene=${SCN}" >> "$BUS_LOG"
-  fi
-  if [[ -f "$PCAP" ]]; then ls -lh "$PCAP"; fi
-}
+case "$cmd" in
+  start)
+    mkdir -p "$SCN_DIR"; chmod -R a+rwX "$SCN_DIR"
+    # 네트워크 브리지 자동
+    if [[ -z "${IFACE:-}" ]]; then
+      NID="$(docker network inspect -f '{{.Id}}' "$DVD_NET" 2>/dev/null || true)"
+      [[ -n "$NID" ]] && IFACE="br-${NID:0:12}"
+      [[ -z "${IFACE:-}" ]] && IFACE="$(ip -br link | awk '/^br-/{print $1; exit}')"
+    fi
 
-case "$CMD" in
-  start) start ;;
-  stop)  stop ;;
-  *) echo "usage: $0 start|stop [scene] [role] [service]"; exit 2 ;;
+    # 대상 IP
+    IP=""
+    if [[ -n "${ROLE:-}" ]]; then
+      TJSON="$(resolve_target "$ROLE" "${SERVICE:-}")"
+      IP="$(echo "$TJSON" | jq -r '.ip // empty' 2>/dev/null || true)"
+    fi
+
+    FILTER=""
+    if [[ $ALL -eq 0 && -n "${IP:-}" ]]; then
+      FILTER="host ${IP}"
+    fi
+
+    echo "[pcap] iface=${IFACE:-null} file=$PCAP filter='${FILTER:-<none>}'"
+    # 백그라운드 실행 + pid 파일
+    if [[ -n "${FILTER:-}" ]]; then
+      tcpdump -i "$IFACE" $FILTER -nn -w "$PCAP" >/dev/null 2>&1 &
+    else
+      tcpdump -i "$IFACE" -nn -w "$PCAP" >/dev/null 2>&1 &
+    fi
+    echo $! > "$PIDF"
+    ;;
+
+  stop)
+    if [[ -f "$PIDF" ]]; then
+      PID="$(cat "$PIDF")"
+      # SIGINT로 flush
+      kill -2 "$PID" 2>/dev/null || kill "$PID" 2>/dev/null || true
+      sleep 1
+      rm -f "$PIDF"
+    else
+      echo "no pidfile: $PIDF"
+    fi
+    ;;
+
+  *)
+    echo "unknown cmd: $cmd"; exit 2;;
 esac

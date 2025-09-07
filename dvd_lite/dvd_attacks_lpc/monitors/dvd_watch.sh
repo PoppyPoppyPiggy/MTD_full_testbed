@@ -1,86 +1,77 @@
 #!/usr/bin/env bash
-#!/usr/bin/env bash
+# docker stats + 링크 바이트 + RTSP/HTTP/MAV 스냅샷
 set -euo pipefail
+source "$(cd "$(dirname "$0")/.." && pwd)/00_env_ext.sh"
 
-BASE="$(cd "$(dirname "$0")/.." && pwd)"
-source "$BASE/00_env_ext.sh"
-
-# --- 단일 실행 락 ---
 LOCK="$OUT_DIR/.dvd_watch.lock"
-exec {LOCKFD}>"$LOCK"
-if ! flock -n "$LOCKFD"; then
-  echo "[dvd_watch] already running (lock=$LOCK)"; exit 0
+MODE="${1:-loop}"   # once | loop
+INTERVAL="${INTERVAL:-2}"
+
+# 단일 인스턴스 보장
+exec 9>"$LOCK"
+flock -n 9 || { [[ "$MODE" = "once" ]] || exit 0; }
+
+log(){ printf '%s\n' "$*" >> "$BUS_DVD_LOG"; }
+
+emit_stats(){
+  docker stats --no-stream --format '{{json .}}' \
+  | while read -r j; do
+      ts=$(date -u +%FT%TZ)
+      echo "{\"ts\":\"$ts\",\"evt\":\"stats\",\"container\":$(echo "$j" | jq -r .Name),\"data\":$j}" >> "$BUS_DVD_LOG"
+    done
+}
+
+emit_link_bytes(){
+  local net="${DVD_NET:-simulator}"
+  # 각 컨테이너별 rx/tx 추정: /proc/net/dev를 컨테이너 내부에서 합산
+  for c in $(docker ps --format '{{.Names}}'); do
+    # 실패해도 전체 루프는 계속
+    local ts; ts=$(date -u +%FT%TZ)
+    local js
+    js=$(docker exec "$c" sh -lc "cat /proc/net/dev 2>/dev/null | tail -n +3" 2>/dev/null | \
+        awk '{rx+=$2; tx+=$10} END {printf(\"{\\\"rx_bytes\\\":%d,\\\"tx_bytes\\\":%d}\",rx,tx)}' 2>/dev/null || echo '{}')
+    [[ -z "$js" ]] && js='{}'
+    echo "{\"ts\":\"$ts\",\"evt\":\"link_bytes\",\"container\":\"$c\",$(echo "$js" | sed 's/^{//;s/}$//')}" >> "$BUS_DVD_LOG"
+  done
+}
+
+emit_service_probe(){
+  # RTSP / HTTP_CAM은 wiki 기준 포트 사용
+  local ts host
+  # companion RTSP/HTTP
+  host=$(python3 "$DVD_BASE/modules/attacks/resolve_target.py" "$DVD_BASE/modules/attacks/targets/targets.yml" companion rtsp | jq -r .ip)
+  ts=$(date -u +%FT%TZ)
+  python3 "$DVD_BASE/monitors/metrics_rtsp.py" --host "$host" --port 8554 >> "$BUS_DVD_LOG" 2>/dev/null || echo "{\"ts\":\"$ts\",\"evt\":\"rtsp_probe\",\"ok\":false}" >> "$BUS_DVD_LOG"
+
+  host=$(python3 "$DVD_BASE/modules/attacks/resolve_target.py" "$DVD_BASE/modules/attacks/targets/targets.yml" companion http_cam | jq -r .ip)
+  ts=$(date -u +%FT%TZ)
+  python3 "$DVD_BASE/monitors/metrics_http_cam.py" --host "$host" --port 8080 >> "$BUS_DVD_LOG" 2>/dev/null || echo "{\"ts\":\"$ts\",\"evt\":\"http_probe\",\"ok\":false}" >> "$BUS_DVD_LOG"
+}
+
+emit_mav_snapshot(){
+  # GCS mav.tlog 스냅샷 → 요약 추출
+  # (Damn-Vulnerable-Drone lite 기본 경로)
+  local gcs="ground-control-station-lite"
+  local ts; ts=$(date -u +%FT%TZ)
+  # 컨테이너 내부에서 mav.tlog를 /tmp로 복사 후 호스트 OUT_DIR로 가져옴
+  docker exec "$gcs" sh -lc 'test -s mav.tlog && cp mav.tlog /tmp/mav_copy.tlog || true' 2>/dev/null || true
+  docker cp "$gcs:/tmp/mav_copy.tlog" "$OUT_DIR/snapshots/mav_$(date +%s).tlog" >/dev/null 2>&1 || true
+  # 요약
+  python3 "$DVD_BASE/tools/extract_mav_metrics.py" --logdir "$OUT_DIR/snapshots" >> "$BUS_DVD_LOG" 2>/dev/null || true
+}
+
+run_once(){
+  emit_stats
+  emit_link_bytes
+  emit_service_probe
+  emit_mav_snapshot
+}
+
+if [[ "$MODE" = "once" ]]; then
+  run_once
+else
+  while :; do
+    run_once
+    sleep "$INTERVAL"
+  done
 fi
-
-
-MODE="${1:-loop}"   # loop|once
-INTERVAL="${INTERVAL:-3}"  # 초
-
-# 컨테이너 리스트
-_list_cont() { docker ps --format '{{.Names}}'; }
-
-# 컨테이너 net(bytes) 읽기 (eth0의 rx/tx)
-_cont_bytes() {
-  local c="$1"
-  local rx tx
-  rx="$(docker exec -i "$c" cat /sys/class/net/eth0/statistics/rx_bytes 2>/dev/null || echo 0)"
-  tx="$(docker exec -i "$c" cat /sys/class/net/eth0/statistics/tx_bytes 2>/dev/null || echo 0)"
-  echo "$rx $tx"
-}
-
-# docker stats 1회
-_push_stats_once() {
-  while read -r c; do
-    local J
-    J="$(docker stats --no-stream --format '{{json .}}' "$c" 2>/dev/null || true)"
-    [[ -n "$J" ]] && bus_dvd_json "{\"ts\":\"$(_log_now_ts)\",\"evt\":\"stats\",\"container\":\"$c\",\"data\":${J}}"
-    # 링크 바이트
-    read -r RX TX <<< "$(_cont_bytes "$c")"
-    bus_dvd_json "{\"ts\":\"$(_log_now_ts)\",\"evt\":\"link_bytes\",\"container\":\"$c\",\"rx_bytes\":$RX,\"tx_bytes\":$TX}"
-  done < <(_list_cont)
-}
-
-# GCS mav.tlog 스냅샷 요약
-_mav_snapshot() {
-  local gcs
-  gcs="$(_list_cont | grep -E 'ground-control-station|gcs' | head -n1)"
-  [[ -z "$gcs" ]] && return 0
-  local TMP="$OUT_DIR/snapshots"
-  mkdir -p "$TMP"
-  # 파일 위치: 이미지에 따라 다름. 기본 /root/mav.tlog 시도
-  if docker exec -i "$gcs" test -f /root/mav.tlog; then
-    local dst="$TMP/mav_$(date +%s).tlog"
-    docker cp "$gcs:/root/mav.tlog" "$dst" >/dev/null 2>&1 || return 0
-    python3 "$BASE/monitors/mav_tlog_summary.py" "$dst" >> "$BUS_DVD_LOG" 2>/dev/null || true
-  fi
-}
-
-# 서비스 프로빙 (RTSP/HTTP_CAM)
-_service_probe() {
-  local TJSON
-  # RTSP
-  TJSON="$(python3 "$BASE/modules/attacks/resolve_target.py" "$BASE/modules/attacks/targets/targets.yml" companion rtsp)"
-  local H="$(echo "$TJSON" | jq -r .ip)"; local P="$(echo "$TJSON" | jq -r .port)"
-  python3 "$BASE/monitors/http_rtsp_probe.py" companion "$H" "$P" "rtsp"
-  # HTTP_CAM
-  TJSON="$(python3 "$BASE/modules/attacks/resolve_target.py" "$BASE/modules/attacks/targets/targets.yml" companion http_cam)"
-  H="$(echo "$TJSON" | jq -r .ip)"; P="$(echo "$TJSON" | jq -r .port)"
-  python3 "$BASE/monitors/http_rtsp_probe.py" companion "$H" "$P" "http"
-}
-
-_once() {
-  _push_stats_once
-  _mav_snapshot
-  _service_probe
-}
-
-if [[ "$MODE" == "once" ]]; then
-  _once
-  exit 0
-fi
-
-# loop
-while :; do
-  _once
-  sleep "$INTERVAL"
-done

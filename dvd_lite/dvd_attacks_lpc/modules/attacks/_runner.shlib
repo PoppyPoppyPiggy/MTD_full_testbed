@@ -1,13 +1,17 @@
 #!/usr/bin/env bash
 set -euo pipefail
-BASE="$(cd "$(dirname "$0")/../.." && pwd)"
-source "$BASE/00_env_ext.sh"
+source "$(cd "$(dirname "$0")/../.." && pwd)/00_env_ext.sh"
 
-log_bus() { echo "[$(date +%s)] BUS ATK $*" >> "$BUS_LOG"; }
+log_bus() { printf '[%s] BUS ATK %s\n' "$(date +%s)" "$*" | tee -a "$BUS_LOG" >/dev/null; }
+
+_run_py() {
+  local key="$1" level="$2"
+  python3 "$DVD_BASE/modules/attacks/lpc_runner.py" "$key" "$level"
+}
 
 run_attack() {
-  local key="$1" level="${2:-low}"
+  local key="${1:?}"; local level="${2:-low}"
   log_bus "ATTACK_START key=${key} level=${level}"
-  # exec: 셸을 파이썬 프로세스로 치환 → 불필요한 포크/좀비 없음
-  exec python3 "$BASE/modules/attacks/lpc_runner.py" "$key" "$level"
+  _run_py "$key" "$level"
+  log_bus "ATTACK_END key=${key} level=${level}"
 }
