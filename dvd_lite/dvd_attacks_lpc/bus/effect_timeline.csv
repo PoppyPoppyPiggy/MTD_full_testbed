@@ -1,0 +1,4 @@
+t_start,t_end,src,dst,dst_port,loss_pct,delay_ms,jitter_ms,rate_mbps,label
+1756948736,1756948748,attacker,10.13.0.4,14550,0.5,3,1,50,mavlink_statustext_noise:low
+1756948756,1756948768,attacker,10.13.0.4,14550,0.5,3,1,50,mavlink_statustext_noise:low
+1756950882,1756950891,attacker,10.13.0.4,14550,0.5,6,3,40,gps_slow_spoof:low
