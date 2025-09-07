@@ -1,0 +1,49 @@
+{
+  "network": "simulator",
+  "nodes": [
+    {
+      "order": 0,
+      "role": "GCS",
+      "container": "ground-control-station-lite",
+      "ip": "10.13.0.4"
+    },
+    {
+      "order": 1,
+      "role": "CC",
+      "container": "companion-computer-lite",
+      "ip": "10.13.0.3"
+    },
+    {
+      "order": 2,
+      "role": "FC",
+      "container": "flight-controller-lite",
+      "ip": "10.13.0.2"
+    },
+    {
+      "order": 3,
+      "role": "SIM",
+      "container": "simulator-lite",
+      "ip": "10.13.0.5"
+    },
+    {
+      "order": 4,
+      "role": "ATTACKER",
+      "container": null,
+      "ip": ""
+    }
+  ],
+  "labels": "GCS,CC,FC,SIM,ATTACKER",
+  "posCSV": "20.0:20.0;60.0:40.0;60.0:0.0;100.0:20.0;0.0:60.0",
+  "links": [
+    {
+      "from": "FC",
+      "to": "GCS",
+      "label": "MAVLink/UDP:14550"
+    },
+    {
+      "from": "ATTACKER",
+      "to": "GCS",
+      "label": "ATTACK"
+    }
+  ]
+}

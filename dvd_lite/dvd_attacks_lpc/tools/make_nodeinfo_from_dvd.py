@@ -1,32 +1,63 @@
 #!/usr/bin/env python3
-import re, csv, sys, time
-from pathlib import Path
+import json, subprocess, sys, os
 
-RE_S = re.compile(r'ATTACK_START .*role=(\S+) host=(\S+) port=(\d+)')
+# 기대 컨테이너명과 역할(표시 순서 고정: GCS, CC, FC, SIM, ATTACKER)
+ROLES = [
+  ("ground-control-station-lite","GCS"),
+  ("companion-computer-lite","CC"),
+  ("flight-controller-lite","FC"),
+  ("simulator-lite","SIM"),
+  # 공격자는 실제 도커 컨테이너일 수도/아닐 수도 있으므로 자리만 둠
+]
 
-def main():
-    if len(sys.argv)<3:
-        print("usage: make_nodeinfo_from_dvd.py <bus.log> <out_dir>"); sys.exit(2)
-    bus = Path(sys.argv[1]); out = Path(sys.argv[2]); out.mkdir(parents=True, exist_ok=True)
-    nodes = {"attacker": {"id":0, "name":"attacker", "x":10, "y":30}}
-    links = set()
-    nid = 1
-    for ln in bus.read_text(encoding="utf-8", errors="ignore").splitlines():
-        m = RE_S.search(ln)
-        if not m: continue
-        role, host, port = m.group(1), m.group(2), int(m.group(3))
-        name = f"{role}-{host}"
-        if name not in nodes:
-            nodes[name] = {"id": nid, "name": name, "x": 30 + 20*nid, "y": 30 + (nid%2)*10}
-            nid += 1
-        links.add((0, nodes[name]["id"], f"mav/rtsp:{port}"))
-    # nodes.csv
-    with (out/"nodes.csv").open("w", newline="", encoding="utf-8") as f:
-        w = csv.writer(f); w.writerow(["nodeId","name","x","y"])
-        for v in nodes.values(): w.writerow([v["id"], v["name"], v["x"], v["y"]])
-    # links.csv
-    with (out/"links.csv").open("w", newline="", encoding="utf-8") as f:
-        w = csv.writer(f); w.writerow(["srcId","dstId","label"])
-        for a,b,l in sorted(links): w.writerow([a,b,l])
+NETWORK = os.environ.get("DVD_DOCKER_NET","simulator")
 
-if __name__ == "__main__": main()
+def docker_out(args):
+  try: return subprocess.check_output(args, text=True).strip()
+  except Exception: return ""
+
+def ip_of(name):
+  j = docker_out(["bash","-lc", f"docker inspect {name} --format '{{{{json .NetworkSettings.Networks}}}}'"])
+  if not j: return ""
+  try:
+    nets = json.loads(j)
+    if NETWORK in nets: return nets[NETWORK].get("IPAddress","")
+    # 네트워크 이름이 다르면 첫 항목 임의 선택
+    for k,v in nets.items():
+      if v.get("IPAddress"): return v["IPAddress"]
+  except Exception:
+    pass
+  return ""
+
+nodes=[]
+for idx,(cname,role) in enumerate(ROLES):
+  ip = ip_of(cname)
+  nodes.append({"order":idx,"role":role,"container":cname,"ip":ip})
+
+# ATTACKER는 가상 노드로 추가
+nodes.append({"order":4,"role":"ATTACKER","container":None,"ip":""})
+
+# 기본 좌표(원하시면 여기 바꾸면 됨)
+pos = {
+  "GCS":[20.0,20.0], "CC":[60.0,40.0], "FC":[60.0,0.0],
+  "SIM":[100.0,20.0], "ATTACKER":[0.0,60.0]
+}
+
+# labels / posCSV 생성
+labels = ",".join([n["role"] for n in sorted(nodes,key=lambda x:x["order"])])
+posCSV = ";".join([f"{pos[n['role']][0]}:{pos[n['role']][1]}" for n in sorted(nodes,key=lambda x:x["order"])])
+
+nodeinfo = {
+  "network": NETWORK,
+  "nodes": nodes,
+  "labels": labels,
+  "posCSV": posCSV,
+  "links":[
+    {"from":"FC","to":"GCS","label":"MAVLink/UDP:14550"},
+    {"from":"ATTACKER","to":"GCS","label":"ATTACK"}
+  ]
+}
+
+os.makedirs("bus", exist_ok=True)
+with open("bus/nodeinfo.json","w") as f: json.dump(nodeinfo,f,indent=2)
+print("Wrote bus/nodeinfo.json")
