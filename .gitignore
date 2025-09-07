@@ -19,6 +19,7 @@ wheels/
 *.egg-info/
 .installed.cfg
 *.egg
+MANIFEST
 
 # IDE
 .vscode/
@@ -26,10 +27,14 @@ wheels/
 *.swp
 *.swo
 *~
+.spyderproject
+.spyproject
+.ropeproject
 
 # Logs
 *.log
 logs/
+*.out
 
 # Environment
 .env
@@ -37,10 +42,107 @@ logs/
 env/
 venv/
 ENV/
+env.bak/
+venv.bak/
 
-# DVD specific
-attack_results/
+# NS-3 Specific Files
+ns-3*/
+**/build/
+**/lib/
+**/*.so
+**/*.dylib
+**/*.dll
+**/waf
+**/waf-*
+**/.waf-*
+**/.lock-waf*
+
+# Network Simulation Output Files
 *.pcap
+*.cap
 *.dump
+*.tr
+*.nam
 *.xml
-*.xml
+*.flow
+
+# MAVLink and Telemetry Files
+*.tlog
+*.bin
+*.BIN
+mav_*.tlog
+snapshots/
+telemetry/
+
+# Attack and Simulation Results
+attack_output/
+attack_results/
+simulation_results/
+experiment_data/
+test_output/
+output/
+results/
+
+# Large Data Files
+*.dat
+*.data
+data/
+datasets/
+
+# Temporary Files
+tmp/
+temp/
+*.tmp
+*.temp
+*~
+
+# OS Generated Files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Research and Documentation
+drafts/
+papers/draft_*
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.synctex.gz
+
+# Configuration Files (sensitive)
+config.ini
+secrets.yaml
+*.key
+*.pem
+
+# DVD/DDoS Attack Specific
+dvd_p2p_*
+follow_flood/
+level-*/
+mtd/
+no_mtd/
+
+# Archive Files
+*.zip
+*.tar.gz
+*.rar
+*.7z
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json

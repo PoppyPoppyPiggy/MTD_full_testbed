@@ -1,0 +1,2 @@
+sim_t_s,tx_pkts,rx_pkts,drop_pkts,loss_pct,throughput_mbps,delay_ms_avg,jitter_ms_avg
+35,8300,8300,0,0,1.02446,0.663699,0.00479965
