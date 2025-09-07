@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+BASE="$(cd "$(dirname "$0")/../.." && pwd)"
+source "$BASE/00_env_ext.sh"
+
+log_bus() { echo "[$(date +%s)] BUS ATK $*" >> "$BUS_LOG"; }
+
+run_attack() {
+  local key="$1" level="${2:-low}"
+  log_bus "ATTACK_START key=${key} level=${level}"
+  # exec: 셸을 파이썬 프로세스로 치환 → 불필요한 포크/좀비 없음
+  exec python3 "$BASE/modules/attacks/lpc_runner.py" "$key" "$level"
+}

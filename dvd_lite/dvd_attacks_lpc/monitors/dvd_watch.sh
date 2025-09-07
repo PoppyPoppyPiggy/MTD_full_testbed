@@ -1,63 +1,86 @@
 #!/usr/bin/env bash
-# 종합 모니터 (도커 리소스 + 내부 지표 스냅샷)
+#!/usr/bin/env bash
 set -euo pipefail
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" && pwd -P)"
-BASE="$(cd "$SCRIPT_DIR/.." && pwd -P)"
-. "$BASE/00_env_ext.sh"
 
-MODE="${1:-loop}"  # loop | once
-mkdir -p "$(dirname "$BUS_DVD_LOG")"; : > /dev/null
+BASE="$(cd "$(dirname "$0")/.." && pwd)"
+source "$BASE/00_env_ext.sh"
 
-log(){ printf '%s\n' "$1" >> "$BUS_DVD_LOG"; }
+# --- 단일 실행 락 ---
+LOCK="$OUT_DIR/.dvd_watch.lock"
+exec {LOCKFD}>"$LOCK"
+if ! flock -n "$LOCKFD"; then
+  echo "[dvd_watch] already running (lock=$LOCK)"; exit 0
+fi
 
-do_stats() {
-  while read -r name; do
-    j="$(docker stats --no-stream --format '{{json .}}' "$name" 2>/dev/null || true)"
-    [ -z "$j" ] && continue
-    jq -n --argjson s "$j" --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-      '{ts:$ts, evt:"stats", container:($s|.Name),
-        data:{CPUPerc:($s|.CPUPerc), MemUsage:($s|.MemUsage), NetIO:($s|.NetIO), BlockIO:($s|.BlockIO), PIDs:($s|.PIDs)}}'
-  done < <(docker ps --format '{{.Names}}')
+
+MODE="${1:-loop}"   # loop|once
+INTERVAL="${INTERVAL:-3}"  # 초
+
+# 컨테이너 리스트
+_list_cont() { docker ps --format '{{.Names}}'; }
+
+# 컨테이너 net(bytes) 읽기 (eth0의 rx/tx)
+_cont_bytes() {
+  local c="$1"
+  local rx tx
+  rx="$(docker exec -i "$c" cat /sys/class/net/eth0/statistics/rx_bytes 2>/dev/null || echo 0)"
+  tx="$(docker exec -i "$c" cat /sys/class/net/eth0/statistics/tx_bytes 2>/dev/null || echo 0)"
+  echo "$rx $tx"
 }
 
-if [ "$MODE" = "once" ]; then
-  # 1) 도커 리소스 스냅샷
-  while read -r line; do log "$line"; done < <(do_stats)
+# docker stats 1회
+_push_stats_once() {
+  while read -r c; do
+    local J
+    J="$(docker stats --no-stream --format '{{json .}}' "$c" 2>/dev/null || true)"
+    [[ -n "$J" ]] && bus_dvd_json "{\"ts\":\"$(_log_now_ts)\",\"evt\":\"stats\",\"container\":\"$c\",\"data\":${J}}"
+    # 링크 바이트
+    read -r RX TX <<< "$(_cont_bytes "$c")"
+    bus_dvd_json "{\"ts\":\"$(_log_now_ts)\",\"evt\":\"link_bytes\",\"container\":\"$c\",\"rx_bytes\":$RX,\"tx_bytes\":$TX}"
+  done < <(_list_cont)
+}
 
-  # 2) 링크 바이트 1회
-  bash "$BASE/monitors/metrics_link_bytes.sh" once || true
+# GCS mav.tlog 스냅샷 요약
+_mav_snapshot() {
+  local gcs
+  gcs="$(_list_cont | grep -E 'ground-control-station|gcs' | head -n1)"
+  [[ -z "$gcs" ]] && return 0
+  local TMP="$OUT_DIR/snapshots"
+  mkdir -p "$TMP"
+  # 파일 위치: 이미지에 따라 다름. 기본 /root/mav.tlog 시도
+  if docker exec -i "$gcs" test -f /root/mav.tlog; then
+    local dst="$TMP/mav_$(date +%s).tlog"
+    docker cp "$gcs:/root/mav.tlog" "$dst" >/dev/null 2>&1 || return 0
+    python3 "$BASE/monitors/mav_tlog_summary.py" "$dst" >> "$BUS_DVD_LOG" 2>/dev/null || true
+  fi
+}
 
-  # 3) RTSP/HTTP 1회
-  python3 "$BASE/monitors/metrics_rtsp.py" once || true
-  python3 "$BASE/monitors/metrics_http_cam.py" once || true
+# 서비스 프로빙 (RTSP/HTTP_CAM)
+_service_probe() {
+  local TJSON
+  # RTSP
+  TJSON="$(python3 "$BASE/modules/attacks/resolve_target.py" "$BASE/modules/attacks/targets/targets.yml" companion rtsp)"
+  local H="$(echo "$TJSON" | jq -r .ip)"; local P="$(echo "$TJSON" | jq -r .port)"
+  python3 "$BASE/monitors/http_rtsp_probe.py" companion "$H" "$P" "rtsp"
+  # HTTP_CAM
+  TJSON="$(python3 "$BASE/modules/attacks/resolve_target.py" "$BASE/modules/attacks/targets/targets.yml" companion http_cam)"
+  H="$(echo "$TJSON" | jq -r .ip)"; P="$(echo "$TJSON" | jq -r .port)"
+  python3 "$BASE/monitors/http_rtsp_probe.py" companion "$H" "$P" "http"
+}
 
-  # 4) MAV 스냅샷(위치/배터리/레이트/파라미터 개수)
-  python3 "$BASE/tools/extract_mav_metrics.py" \
-      --container "${DVD_C_GCS}" \
-      --out "$OUT_DIR/mav_msgs_once.csv" \
-      --summary_json_to "$BUS_DVD_LOG" \
-      --window_s 10 || true
+_once() {
+  _push_stats_once
+  _mav_snapshot
+  _service_probe
+}
+
+if [[ "$MODE" == "once" ]]; then
+  _once
   exit 0
 fi
 
-# loop 모드
-( while true; do do_stats | while read -r L; do log "$L"; done; sleep 3; done ) &
-( docker events --format '{{json .}}' 2>/dev/null | while read -r line; do
-    [ -z "$line" ] && continue
-    jq -n --argjson e "$line" --arg ts "$(date -u +%Y-%m-%dT%H:%M:%SZ)" '{ts:$ts, evt:"docker_event", data:$e}'
-  done | while read -r L; do log "$L"; done ) &
-# 내부 지표 루프
-( python3 "$BASE/monitors/metrics_rtsp.py" loop >/dev/null 2>&1 ) &
-( python3 "$BASE/monitors/metrics_http_cam.py" loop >/dev/null 2>&1 ) &
-( bash "$BASE/monitors/metrics_link_bytes.sh" loop >/dev/null 2>&1 ) &
-( while true; do
-    python3 "$BASE/tools/extract_mav_metrics.py" \
-      --container "${DVD_C_GCS}" \
-      --out "$OUT_DIR/mav_msgs_loop.csv" \
-      --summary_json_to "$BUS_DVD_LOG" \
-      --window_s 10 || true
-    sleep 10
-  done ) &
-
-echo "[dvd_watch] monitors running → $BUS_DVD_LOG"
-wait -n || true
+# loop
+while :; do
+  _once
+  sleep "$INTERVAL"
+done

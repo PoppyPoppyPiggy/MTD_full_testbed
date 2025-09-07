@@ -1,5 +1,5 @@
 {
-  "version": "1.0",
+  "version": "1.1",
   "defaults": {
     "mavlink_host_env": "MAVLINK_HOST",
     "mavlink_port_env": "MAVLINK_PORT",
@@ -11,36 +11,22 @@
   "attacks": {
     "mavlink_param_poll": {
       "engine": "mavlink_param_poll",
-      "target_role": "gcs",
-      "service": "mavlink",
-      "mitre": {
-        "tactic": "Discovery",
-        "tactic_id": "TA0007",
-        "technique": "Query Device Parameters",
-        "technique_id": "T1046"
-      },
+      "mitre": { "tactic": "Discovery", "tactic_id": "TA0007", "technique": "Query Device Parameters", "technique_id": "T1046" },
       "levels": {
-        "low":  { "count": 5,  "interval_s": 1.5, "names": ["SYSID_THISMAV","STAT_RUNTIME","ARMING_CHECK"] },
-        "mid":  { "count": 12, "interval_s": 1.0, "names": ["SYSID_THISMAV","STAT_RUNTIME","ARMING_CHECK","ATC_ANG_RLL_P","ATC_ANG_PIT_P","LOIT_SPEED"] },
-        "high": { "count": 20, "interval_s": 0.7, "names": ["*"] }
+        "low":  { "count": 12, "interval_s": 1.0, "names": ["SYSID_THISMAV","STAT_RUNTIME","ARMING_CHECK","ATC_ANG_RLL_P"] },
+        "mid":  { "count": 24, "interval_s": 0.6, "names": ["SYSID_THISMAV","STAT_RUNTIME","ARMING_CHECK","ATC_ANG_RLL_P","ATC_ANG_PIT_P","LOIT_SPEED"] },
+        "high": { "count": 48, "interval_s": 0.35, "names": ["*"] }
       }
     },
     "mavlink_statustext_noise": {
       "engine": "mavlink_inject",
       "message": "STATUSTEXT",
       "severity": 5,
-      "target_role": "gcs",
-      "service": "mavlink",
-      "mitre": {
-        "tactic": "Protocol Tampering",
-        "tactic_id": "TA0005",
-        "technique": "MAVLink Message Injection",
-        "technique_id": "T1565"
-      },
+      "mitre": { "tactic": "Protocol Tampering", "tactic_id": "TA0005", "technique": "MAVLink Message Injection", "technique_id": "T1565" },
       "levels": {
-        "low":  { "pps": 2,  "burst_ms": 800,  "sleep_ms": 1200, "text": "dbg:keepalive" },
-        "mid":  { "pps": 5,  "burst_ms": 1200, "sleep_ms": 1000, "text": "dbg:status" },
-        "high": { "pps": 10, "burst_ms": 1500, "sleep_ms": 800,  "text": "dbg:noise" }
+        "low":  { "pps": 5,  "burst_ms": 1500, "sleep_ms": 500,  "text": "dbg:keepalive" },
+        "mid":  { "pps": 10, "burst_ms": 1800, "sleep_ms": 400,  "text": "dbg:status" },
+        "high": { "pps": 20, "burst_ms": 2000, "sleep_ms": 300,  "text": "dbg:noise" }
       }
     },
     "mavlink_cmdlong_tease": {
@@ -48,83 +34,66 @@
       "message": "COMMAND_LONG",
       "command": 511,
       "params": [0,0,0,0,0,0,0],
-      "target_role": "gcs",
-      "service": "mavlink",
-      "mitre": {
-        "tactic": "Protocol Tampering",
-        "tactic_id": "TA0005",
-        "technique": "MAVLink Command Teasing",
-        "technique_id": "T1565"
-      },
+      "mitre": { "tactic": "Protocol Tampering", "tactic_id": "TA0005", "technique": "MAVLink Command Teasing", "technique_id": "T1565" },
       "levels": {
-        "low":  { "pps": 1, "burst_ms": 1000, "sleep_ms": 2000 },
-        "mid":  { "pps": 2, "burst_ms": 1500, "sleep_ms": 1500 },
-        "high": { "pps": 4, "burst_ms": 2000, "sleep_ms": 1200 }
+        "low":  { "pps": 2,  "burst_ms": 1200, "sleep_ms": 800 },
+        "mid":  { "pps": 5,  "burst_ms": 1600, "sleep_ms": 600 },
+        "high": { "pps": 10, "burst_ms": 2000, "sleep_ms": 400 }
       }
     },
     "mavlink_mission_trickle": {
       "engine": "mavlink_mission_trickle",
-      "target_role": "gcs",
-      "service": "mavlink",
-      "mitre": {
-        "tactic": "Injection",
-        "tactic_id": "TA0003",
-        "technique": "Waypoint Injection",
-        "technique_id": "T1059"
-      },
+      "mitre": { "tactic": "Injection", "tactic_id": "TA0003", "technique": "Waypoint Injection", "technique_id": "T1059" },
       "levels": {
-        "low":  { "items": 1, "interval_s": 2.0, "offset_m": 2 },
-        "mid":  { "items": 3, "interval_s": 1.5, "offset_m": 5 },
-        "high": { "items": 5, "interval_s": 1.0, "offset_m": 8 }
+        "low":  { "items": 2, "interval_s": 1.5, "offset_m": 2 },
+        "mid":  { "items": 4, "interval_s": 1.0, "offset_m": 5 },
+        "high": { "items": 8, "interval_s": 0.7, "offset_m": 8 }
       }
     },
     "gps_slow_spoof": {
       "engine": "mavlink_inject",
       "message": "GPS_INPUT",
-      "target_role": "gcs",
-      "service": "mavlink",
-      "mitre": {
-        "tactic": "Protocol Tampering",
-        "tactic_id": "TA0005",
-        "technique": "GPS Spoofing-lite",
-        "technique_id": "T1592"
-      },
+      "mitre": { "tactic": "Protocol Tampering", "tactic_id": "TA0005", "technique": "GPS Spoofing-lite", "technique_id": "T1592" },
       "levels": {
-        "low":  { "pps": 1, "burst_ms": 1500, "sleep_ms": 1500, "delta_m": 2  },
-        "mid":  { "pps": 2, "burst_ms": 1500, "sleep_ms": 1200, "delta_m": 5  },
-        "high": { "pps": 3, "burst_ms": 2000, "sleep_ms": 1000, "delta_m": 10 }
+        "low":  { "pps": 3,  "burst_ms": 1200, "sleep_ms": 800,  "delta_m": 2  },
+        "mid":  { "pps": 6,  "burst_ms": 1500, "sleep_ms": 600,  "delta_m": 6  },
+        "high": { "pps": 10, "burst_ms": 2000, "sleep_ms": 400,  "delta_m": 12 }
       }
     },
     "rtsp_slowpull": {
       "engine": "rtsp_slowpull",
-      "target_role": "companion",
-      "service": "rtsp",
-      "mitre": {
-        "tactic": "Discovery",
-        "tactic_id": "TA0007",
-        "technique": "Camera Stream Enumeration",
-        "technique_id": "T1046"
-      },
+      "mitre": { "tactic": "Discovery", "tactic_id": "TA0007", "technique": "Camera Stream Enumeration", "technique_id": "T1046" },
       "levels": {
-        "low":  { "requests": 3,  "think_ms": 1200 },
-        "mid":  { "requests": 6,  "think_ms": 900  },
-        "high": { "requests": 10, "think_ms": 700  }
+        "low":  { "requests": 5,  "think_ms": 500  },
+        "mid":  { "requests": 10, "think_ms": 350  },
+        "high": { "requests": 20, "think_ms": 250  }
       }
     },
     "telemetry_slow_exfil": {
       "engine": "telemetry_siphon",
-      "target_role": "gcs",
-      "service": "mavlink",
-      "mitre": {
-        "tactic": "Exfiltration",
-        "tactic_id": "TA0010",
-        "technique": "Telemetry Eavesdropping",
-        "technique_id": "T1041"
-      },
+      "mitre": { "tactic": "Exfiltration", "tactic_id": "TA0010", "technique": "Telemetry Eavesdropping", "technique_id": "T1041" },
       "levels": {
-        "low":  { "duration_s": 15, "rate_limit_pps": 20 },
-        "mid":  { "duration_s": 25, "rate_limit_pps": 40 },
-        "high": { "duration_s": 35, "rate_limit_pps": 60 }
+        "low":  { "duration_s": 20, "rate_limit_pps": 40 },
+        "mid":  { "duration_s": 30, "rate_limit_pps": 80 },
+        "high": { "duration_s": 45, "rate_limit_pps": 120 }
+      }
+    },
+    "rtsp_udp_trickle": {
+      "engine": "udp_trickle",
+      "mitre": { "tactic": "Impact", "tactic_id": "TA0040", "technique": "Service Degradation (RTP/RTSP)", "technique_id": "T1499" },
+      "levels": {
+        "low":  { "pps": 50,  "duration_s": 15, "payload": 200 },
+        "mid":  { "pps": 200, "duration_s": 20, "payload": 300 },
+        "high": { "pps": 600, "duration_s": 25, "payload": 400 }
+      }
+    },
+    "httpcam_slowloris": {
+      "engine": "slowloris",
+      "mitre": { "tactic": "Impact", "tactic_id": "TA0040", "technique": "Application Layer DoS", "technique_id": "T1499.004" },
+      "levels": {
+        "low":  { "connections": 20, "interval_s": 2.0, "duration_s": 20 },
+        "mid":  { "connections": 60, "interval_s": 1.5, "duration_s": 25 },
+        "high": { "connections": 100,"interval_s": 1.0, "duration_s": 30 }
       }
     }
   }
