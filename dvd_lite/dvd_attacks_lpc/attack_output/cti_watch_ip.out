@@ -1,2 +1,0 @@
-[2025-08-31 13:06:47] [cti_watch_ip] container=ground-control-station if=eth0 every 1s
-Cannot connect to the Docker daemon at unix:///var/run/docker.sock. Is the docker daemon running?

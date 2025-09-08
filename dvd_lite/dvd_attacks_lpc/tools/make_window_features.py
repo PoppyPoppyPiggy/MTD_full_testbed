@@ -110,3 +110,61 @@ def main():
         print("[WARN] skipped non-standard XML names:")
         for b,_ in bad[-10:]: print(" -",b)
 if __name__=="__main__": main()
+
+
+# --- RESCUE_FROM_METRICS: if no rows, backfill from ns3_metrics_* ---
+def _rescue_from_metrics(out_csv):
+    import glob, csv
+    from pathlib import Path
+    rows=[]
+    def parse_xml_name(p):
+        b=Path(p).stem
+        if not b.startswith("dvd_netanim_"): return None
+        b=b[len("dvd_netanim_"):]
+        parts=b.split("_")
+        if len(parts)<4: return None
+        scn=parts[-1]
+        mtd=parts[-2].lower()
+        if mtd in ('true','on'): mtd='on'
+        elif mtd in ('false','off'): mtd='off'
+        lv=parts[-3]; atk="_".join(parts[:-3])
+        return scn, atk, lv, mtd
+    for xml in sorted(glob.glob("bus/dvd_netanim_*.xml")):
+        parsed=parse_xml_name(xml)
+        if not parsed: continue
+        scn,atk,lv,mtd=parsed
+        mets=sorted(glob.glob(f"bus/ns3_metrics_*_{scn}.csv"))
+        if not mets: mets=sorted(glob.glob(f"bus/ns3_metrics_{atk}_{lv}_{mtd}_{scn}.csv"))
+        if not mets: continue
+        met=mets[-1]
+        # metrics 포맷: time_s,rx_bytes,drop_cnt,dup_cnt
+        last=None
+        with open(met) as f:
+            for line in f: last=line.strip()
+        if not last or "," not in last: continue
+        parts=last.split(",")
+        try:
+            t=float(parts[0]); rx=int(parts[1])
+        except: 
+            continue
+        pps = (rx/100.0/t) if t>0 else 0.0
+        rows.append({"scn":scn,"atk":atk,"lv":lv,"mtd":mtd,
+                     "t0":0.0,"t1":t,"pps":pps,"bytes":rx,
+                     "loss_pct":0.0,"delay_ms":0.0,"jitter_ms":0.0,"dup_pct":0.0})
+    if rows:
+        with open(out_csv,"w",newline="") as f:
+            w=csv.DictWriter(f, fieldnames=["scn","atk","lv","mtd","t0","t1","pps","bytes","loss_pct","delay_ms","jitter_ms","dup_pct"])
+            w.writeheader(); w.writerows(rows)
+        print(f"[RESCUE_FROM_METRICS] wrote {out_csv} rows={len(rows)}")
+    else:
+        print("[RESCUE_FROM_METRICS] nothing to write")
+
+if __name__=="__main__":
+    try:
+        import csv
+        with open("bus/window_features.csv") as f:
+            r=list(csv.DictReader(f))
+        if not r:
+            _rescue_from_metrics("bus/window_features.csv")
+    except Exception as e:
+        print("[RESCUE_FROM_METRICS] skip due to", e)

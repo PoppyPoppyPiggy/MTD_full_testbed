@@ -24,7 +24,8 @@ for e in BUS.glob("dvd_netanim_*_*.xml"):
 scn=sorted(set(scns))[-1] if scns else "unknown"
 
 # 모델/정책
-clf=joblib.load(BUS/"models/attack_clf.pkl")
+obj=joblib.load(BUS/"models/attack_clf.pkl")
+clf=obj
 policy=json.loads((BUS/"models/mtd_policy.json").read_text())["policy"]
 
 # 특징은 window_features의 마지막 행 사용(실전이면 스트리밍 윈도 생성 필요)
@@ -35,7 +36,31 @@ feat=[c for c in ["pps","bytes","loss_pct","delay_ms","jitter_ms","dup_pct",
                   "status_len_mean","param_id_nuniq","atk_pps_mean"] if c in wf_sc.columns]
 X=wf_sc[feat].fillna(0.0)
 
-proba=clf.predict_proba(X)[0]
+# --- centroid(dict) 모델 가드 + softmax 확률 흉내 ---
+proba=None
+try:
+    if isinstance(clf,dict) and clf.get("type")=="centroid_v1":
+        import math
+        feats=clf["feats"]; labs=clf["labels"]
+        C=clf["centroids"]; S=clf["stdevs"]
+        # NOTE: infer 코드에 이미 row(피처 dict)가 준비되어 있음
+        x=[float(row.get(f,0.0)) for f in feats]
+        scores=[]
+        for lab in labs:
+            mu=C[lab]; sd=S[lab]
+            z=[ (xi-mui)/(sdi if sdi!=0 else 1.0) for xi,mui,sdi in zip(x,mu,sd) ]
+            # 음의 L2 거리 = 점수(클수록 좋게)
+            scores.append(-math.sqrt(sum(v*v for v in z)))
+        # softmax
+        m=max(scores) if scores else 0.0
+        ex=[math.exp(v-m) for v in scores]
+        ssum=sum(ex) or 1.0
+        proba=[v/ssum for v in ex]
+    else:
+        proba=list(clf.predict_proba(X)[0])
+except Exception:
+    proba=None
+# --- end guard ---
 labels=clf.classes_.tolist()
 idx=int(proba.argmax())
 pred,conf=labels[idx],float(proba[idx])

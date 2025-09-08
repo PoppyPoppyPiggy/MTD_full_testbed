@@ -1,4 +1,0 @@
-t_start,t_end,attack_key,level,role,host,port,label,severity
-1756948736,1756948748,mavlink_statustext_noise,low,gcs,10.13.0.4,14550,mavlink_statustext_noise:low,1
-1756948756,1756948768,mavlink_statustext_noise,low,gcs,10.13.0.4,14550,mavlink_statustext_noise:low,1
-1756950444,1756950891,gps_slow_spoof,low,gcs,10.13.0.4,14550,gps_slow_spoof:low,1

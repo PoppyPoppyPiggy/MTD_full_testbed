@@ -27,13 +27,8 @@
       "args": {}
     },
     "unknown": {
-      "action": "tc_filter",
-      "args": {
-        "loss_pct": 0.5,
-        "delay_ms": 1,
-        "jitter_ms": 1,
-        "dup_pct": 0.0
-      }
+      "action": "none",
+      "args": {}
     }
   }
 }

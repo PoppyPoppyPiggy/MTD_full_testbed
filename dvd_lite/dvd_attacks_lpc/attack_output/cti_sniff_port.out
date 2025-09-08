@@ -1,4 +1,0 @@
-  File "/home/kali/MTD/MTD_full_testbed/dvd_lite/dvd_attacks_lpc/cti/cti_sniff_mavlink.py", line 38
-    nonlocal counter, last_update
-    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-SyntaxError: no binding for nonlocal 'counter' found
