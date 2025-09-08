@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-set -euo pipefail
+set -exuo pipefail
 THIS_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-YAML="${1:-$THIS_DIR/pipelines/user_defined_template.yml}"
-python3 "$THIS_DIR/run_pipeline.py" "$YAML"
+PIPE="${1:-}"; [[ -f "$PIPE" ]] || { echo "Usage: $0 <pipeline.yml>" >&2; exit 2; }
+export PYTHONUNBUFFERED=1
+stdbuf -oL -eL python3 -u "$THIS_DIR/run_pipeline.py" "$PIPE"

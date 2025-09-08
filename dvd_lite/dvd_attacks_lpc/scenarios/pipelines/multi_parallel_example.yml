@@ -1,35 +1,32 @@
-scenario_id: "parallel-mix-v1"
-stages:
-  - mode: parallel
-    steps:
-      - type: attack
-        id: p1_wifi_scan_high
-        module: wifi_slow_scan
-        level: high
-        duration_s: 10
-        mitre: { tactic: Discovery, tactic_id: TA0007, technique: "Network Service Scanning", technique_id: T1046 }
-        params: { iface: "wlan0mon", sweep: "aggressive" }
+scenario: multi-parallel
+desc: 병렬 공격 예시(STATUS_TEXT 노이즈 + GPS 표류) → 중간에 MTD 후 평가
+defaults:
+  role: gcs
+  svc: mavlink
+  atk_level: medium
+  sim_time: 40
+  mtd: off
+  udp_probe: { count: 60, interval: 0.02 }
 
-      - type: attack
-        id: p2_mav_param_drift
-        module: mavlink_param_drift
-        level: med
-        duration_s: 10
-        mitre: { tactic: Impact, tactic_id: TA0040, technique: "Modify Controller Behavior", technique_id: T1565 }
-        params: { drift: 0.2 }
+steps:
+  - pcap_start: {}
+  - udp_probe: {}
 
-      - type: attack
-        id: p3_gps_slow_spoof
-        module: gps_slow_spoof
-        level: low
-        duration_s: 12
-        mitre: { tactic: Impact, tactic_id: TA0040, technique: "GPS Spoofing", technique_id: "x-TECH-gps" }
-        params: { offset_m: 5 }
-  - mode: seq
-    steps:
-      - type: mtd
-        id: p4_mtd_port_shuffle
-        action: mtd_port_shuffle
-      - type: probe
-        id: p5_probe
-        kind: dvd_status
+  # 병렬: 주입 + GPS
+  - parallel:
+      - attack: { name: mavlink_statustext_noise, level: high, duration_s: 18, pps: 60 }
+      - attack: { name: gps_slow_spoof,        level: medium, duration_s: 28 }
+
+  - mtd_apply: { loss_pct: 1.0, delay_ms: 2, jitter_ms: 1, dup_pct: 0.0 }
+  - sleep: { sec: 2 }
+
+  # 병렬 한 번 더(짧게)
+  - parallel:
+      - attack: { name: mavlink_param_poll, level: low, duration_s: 10 }
+      - udp_probe: { count: 30, interval: 0.02 }
+
+  - mtd_revert: {}
+  - pcap_stop: {}
+
+  - gen_effects: {}
+  - ns3_eval: { sim_time: 40 }

@@ -1,0 +1,9 @@
+scn,atk,lv,mtd,time_s,rx_bytes,drop_cnt,dup_cnt,throughput_mbps,file
+eval-1756952086,eval-1756952086,dvd,netanim,40.0,47880,0,0,0.009576,bus/ns3_metrics_eval-1756952086_dvd_netanim_eval-1756952086.csv
+eval-1756952086,fanet_eval-1756952086,netanim,fanet,40.0,47880,0,0,0.009576,bus/ns3_metrics_fanet_eval-1756952086_netanim_fanet_eval-1756952086.csv
+eval-1757258612,mavlink_statustext_noise,high,off,40.0,47880,0,0,0.009576,bus/ns3_metrics_mavlink_statustext_noise_high_off_eval-1757258612.csv
+eval-1757261082,mavlink_statustext_noise,high,off,40.0,47880,0,0,0.009576,bus/ns3_metrics_mavlink_statustext_noise_high_off_eval-1757261082.csv
+eval-1757261092-mtd,mavlink_statustext_noise,high,on,40.0,47880,0,0,0.009576,bus/ns3_metrics_mavlink_statustext_noise_high_on_eval-1757261092-mtd.csv
+multi-parallel-1757266529,mavlink_param_poll,low,off,40.0,47880,0,0,0.009576,bus/ns3_metrics_mavlink_param_poll_low_off_multi-parallel-1757266529.csv
+onoff-off-1757283247,gps_slow_spoof,medium,off,40.0,47880,0,0,0.009576,bus/ns3_metrics_gps_slow_spoof_medium_off_onoff-off-1757283247.csv
+onoff-on-1757283254,gps_slow_spoof,medium,off,40.0,47880,0,0,0.009576,bus/ns3_metrics_gps_slow_spoof_medium_off_onoff-on-1757283254.csv

@@ -1,3 +1,9 @@
+container_exists(){ [ -n "$1" ] && docker ps --format "{{.Names}}" | grep -Fxq "$1"; }
+_docker_inspect(){ container_exists "$1" && _docker_inspect "$@"; }
+
+container_exists(){ [ -n "$1" ] && docker ps --format "{{.Names}}" | grep -Fxq "$1"; }
+_docker_inspect(){ container_exists "$1" && _docker_inspect "$@"; }
+
 #!/usr/bin/env bash
 # docker stats + 링크 바이트 + RTSP/HTTP/MAV 스냅샷
 set -euo pipefail

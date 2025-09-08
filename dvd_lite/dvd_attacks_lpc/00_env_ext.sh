@@ -34,3 +34,11 @@ echo "BUS_LOG=$BUS_LOG"
 echo "BUS_DVD_LOG=$BUS_DVD_LOG"
 echo "DVD_NET=${DVD_NET:-<unset>}"
 umask 0002 || true
+
+# ---- sane defaults for DVD containers ----
+export DVD_GCS="${DVD_GCS:-ground-control-station-lite}"
+export DVD_CC="${DVD_CC:-companion-computer-lite}"
+export DVD_FC="${DVD_FC:-flight-controller-lite}"
+export DVD_SIM="${DVD_SIM:-simulator-lite}"
+# avoid sudo noise
+alias docker='docker'

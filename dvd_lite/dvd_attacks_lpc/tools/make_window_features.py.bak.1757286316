@@ -1,0 +1,124 @@
+import os,glob,csv,math,subprocess,json,statistics as st
+from collections import defaultdict
+BASE="."
+OUT="bus/window_features.csv"; os.makedirs("bus",exist_ok=True)
+WINDOW_S=float(os.environ.get("WIN_S",5.0))
+# 1) NetAnim 파일명으로 SCN/ATK/LV/MTD 복원
+def parse_xml(b):
+    b=os.path.basename(b)[:-4] # drop .xml
+    assert b.startswith("dvd_netanim_")
+    rest=b[len("dvd_netanim_"):]
+    scn=rest.split("_")[-1]
+    mtd=rest.split("_")[-2]
+    lv =rest.split("_")[-3]
+    atk="_".join(rest.split("_")[:-3])
+    mtd=("on" if mtd.lower() in ("true","on") else "off") if mtd.lower() in ("true","false","on","off") else mtd
+    return scn, atk, lv, mtd
+# 2) events->timeline 보장
+def ensure_timeline(scn):
+    tl=f"bus/effect_timeline_{scn}.csv"
+    if os.path.exists(tl): return tl
+    ev=f"bus/events_{scn}.csv"
+    if os.path.exists(ev):
+        subprocess.run(["python3","tools/events_to_timeline.py","--events",ev,"--sim","40","-o",tl], check=False)
+    return tl if os.path.exists(tl) else None
+# 3) pcap에서 윈도우별 pps/bytes 추출 (tshark 필요, 실패시 None)
+def pcap_stats(scn):
+    pdir=f"bus/captures/pcap/{scn}"
+    cand=[]
+    if os.path.isdir(pdir):
+        for f in os.listdir(pdir):
+            if f.endswith(".pcap"): cand.append(os.path.join(pdir,f))
+    if not cand: return None
+    pcap=sorted(cand)[0]
+    try:
+        # epoch, len
+        cmd=f"tshark -r '{pcap}' -Y 'udp.port==14550' -T fields -e frame.time_epoch -e frame.len"
+        out=subprocess.check_output(["bash","-lc",cmd], text=True)
+        ts=[]; ln=[]
+        for line in out.splitlines():
+            parts=line.strip().split("\t")
+            if len(parts)<2: continue
+            t=float(parts[0]); l=int(parts[1])
+            ts.append(t); ln.append(l)
+        if not ts: return None
+        t0=min(ts); t1=max(ts); duration=max(1e-6,t1-t0)
+        # 윈도우 index
+        bins=defaultdict(lambda: {"pkts":0,"bytes":0})
+        for t,l in zip(ts,ln):
+            w=int(math.floor((t-t0)/WINDOW_S))
+            bins[w]["pkts"]+=1; bins[w]["bytes"]+=l
+        # normalize to list
+        mx=max(bins.keys())
+        out=[]
+        for w in range(mx+1):
+            d=bins[w]
+            out.append({"win":w,"pps": d["pkts"]/WINDOW_S, "bytes": d["bytes"]})
+        return out, t0, t1, duration
+    except Exception as e:
+        return None
+# 4) timeline에서 윈도우별 impairment 보간(최근값 유지)
+def impair_series(tl, sim=40.0):
+    events=[]
+    with open(tl) as f:
+        R=csv.DictReader(f)
+        for r in R:
+            events.append((float(r["t_apply_s"]), float(r["loss_pct"]), float(r["delay_ms"]), float(r["jitter_ms"]), float(r["dup_pct"])))
+    events.sort()
+    series=[]
+    cur=(0.0,0.0,0.0,0.0)
+    t=0.0
+    while t<=sim+1e-9:
+        for e in events:
+            if e[0]<=t: cur=e[1:]
+        series.append({"t":t, "loss_pct":cur[0],"delay_ms":cur[1],"jitter_ms":cur[2],"dup_pct":cur[3]})
+        t+=WINDOW_S
+    return series
+# 5) ns3 metrics로 duration 추정
+def sim_time_for_scn(scn):
+    for f in glob.glob(f"bus/ns3_metrics_*_{scn}.csv"):
+        with open(f) as fh:
+            L=fh.read().strip().splitlines()
+            if len(L)>=2:
+                try: return float(L[-1].split(",")[0])
+                except: pass
+    return 40.0
+
+rows=[]
+for xml in sorted(glob.glob("bus/dvd_netanim_*.xml")):
+    scn, atk, lv, mtd = parse_xml(xml)
+    simT = sim_time_for_scn(scn)
+    tl = ensure_timeline(scn)
+    imp = impair_series(tl, simT) if tl else [{"t":t,"loss_pct":0,"delay_ms":0,"jitter_ms":0,"dup_pct":0} for t in [0,simT]]
+    pcap = pcap_stats(scn)
+    # pcap 윈도우 채우기
+    if pcap:
+        wins, t0, t1, dur = pcap
+        for w in wins:
+            t0s=w["win"]*WINDOW_S; t1s=min(simT, t0s+WINDOW_S)
+            idx=int(round(t0s/WINDOW_S))
+            e=imp[idx] if idx < len(imp) else imp[-1]
+            rows.append({
+                "scn":scn,"atk":atk,"lv":lv,"mtd":mtd,
+                "t0":t0s,"t1":t1s,
+                "pps":round(w["pps"],4),"bytes":w["bytes"],
+                "loss_pct":e["loss_pct"],"delay_ms":e["delay_ms"],"jitter_ms":e["jitter_ms"],"dup_pct":e["dup_pct"],
+            })
+    else:
+        # fallback: 총량을 균등 분배(rough)
+        n=int(math.ceil(simT/WINDOW_S))
+        for i in range(n):
+            t0s=i*WINDOW_S; t1s=min(simT,t0s+WINDOW_S)
+            idx=i if i < len(imp) else len(imp)-1
+            e=imp[idx]
+            rows.append({
+                "scn":scn,"atk":atk,"lv":lv,"mtd":mtd,
+                "t0":t0s,"t1":t1s,
+                "pps":0.0,"bytes":0,
+                "loss_pct":e["loss_pct"],"delay_ms":e["delay_ms"],"jitter_ms":e["jitter_ms"],"dup_pct":e["dup_pct"],
+            })
+# CSV 출력
+with open(OUT,"w",newline="") as f:
+    w=csv.DictWriter(f, fieldnames=["scn","atk","lv","mtd","t0","t1","pps","bytes","loss_pct","delay_ms","jitter_ms","dup_pct"])
+    w.writeheader(); [w.writerow(r) for r in rows]
+print("WROTE", OUT, "rows=",len(rows))
