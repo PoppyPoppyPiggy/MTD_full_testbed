@@ -1,0 +1,34 @@
+scenario: lpc-matrix
+desc: 여러 공격×강도 조합을 자동 반복 평가
+defaults:
+  role: gcs
+  svc: mavlink
+  atk_level: low
+  sim_time: 35
+  mtd: off
+  udp_probe: { count: 60, interval: 0.02 }
+store:
+  artifacts_dir: /tmp/MTD_bus
+  compress_pcaps: true
+  retention: { keep_last: 12 }
+
+steps:
+  - matrix:
+      vars:
+        ATK: [mavlink_statustext_noise, mavlink_param_poll, gps_slow_spoof]
+        LV:  [low, medium]
+      template:
+        - new_scn: { name: "suite-${ATK}-${LV}" }
+        - pcap_start: {}
+        - udp_probe: {}
+        - attack: { name: "${ATK}", level: "${LV}", duration_s: 15 }
+        - mtd_apply: { loss_pct: 1.0, delay_ms: 2, jitter_ms: 1, dup_pct: 0.0 }
+        - repeat:
+            times: 2
+            steps:
+              - attack: { name: "${ATK}", level: "${LV}", duration_s: 8 }
+              - sleep: { sec: 1 }
+        - mtd_revert: {}
+        - pcap_stop: {}
+        - gen_effects: {}
+        - ns3_eval: { sim_time: 35 }

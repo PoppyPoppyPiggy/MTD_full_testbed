@@ -1,40 +1,35 @@
-scenario_id: "mitre-wifi-recon-v1"
-stages:
-  - mode: seq
-    steps:
-      - type: attack
-        id: s1_scan_slow
-        module: wifi_slow_scan
-        level: low
-        duration_s: 6
-        mitre:
-          tactic: Discovery
-          tactic_id: TA0007
-          technique: "Network Service Scanning"
-          technique_id: T1046
-        params: { iface: "wlan0mon", burst_pct: 0.1 }
+scenario: mitre-wifi-recon-chain
+desc: MITRE Recon → low-slow jam → param poll chain
+defaults:
+  role: gcs
+  svc: mavlink
+  atk_level: low
+  sim_time: 35
+  mtd: off
+  udp_probe: { count: 100, interval: 0.01 }
+store:
+  artifacts_dir: /tmp/MTD_bus     # 공간 모자라면 /tmp에 저장
+  compress_pcaps: true
+  retention: { keep_last: 10 }
 
-      - type: attack
-        id: s2_telemetry_trickle
-        module: telemetry_trickle_jam
-        level: med
-        duration_s: 8
-        mitre:
-          tactic: Impact
-          tactic_id: TA0040
-          technique: "Network Denial of Service"
-          technique_id: T1498
-        params: { rate_kpps: 5 }
+steps:
+  - pcap_start: {}
+  - udp_probe: {}
 
-      - type: mtd
-        id: s3_mtd_port_shuffle
-        action: mtd_port_shuffle
-        params: {}
+  # Recon(저강도) — 외부 스크립트로 실행됨
+  - attack: { name: wifi_slow_scan, level: low, duration_s: 45 }
 
-      - type: probe
-        id: s4_probe_dvd
-        kind: dvd_status
+  # Jam
+  - attack: { name: telemetry_trickle_jam, level: medium, duration_s: 35, pps: 40 }
 
-      - type: wait
-        id: s5_settle
-        seconds: 2
+  # 방어
+  - mtd_apply: { loss_pct: 2.0, delay_ms: 3, jitter_ms: 1, dup_pct: 0.5 }
+
+  # 저주기 주입
+  - attack: { name: mavlink_param_poll, level: low, duration_s: 20 }
+
+  - mtd_revert: {}
+  - pcap_stop: {}
+
+  - gen_effects: {}
+  - ns3_eval: {}
