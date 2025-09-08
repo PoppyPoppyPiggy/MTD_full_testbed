@@ -42,3 +42,12 @@ export DVD_FC="${DVD_FC:-flight-controller-lite}"
 export DVD_SIM="${DVD_SIM:-simulator-lite}"
 # avoid sudo noise
 alias docker='docker'
+
+
+# --- added defaults for stability ---
+export DVD_NET=${DVD_NET:-simulator}
+export DVD_GCS_CNAME=${DVD_GCS_CNAME:-}   # empty -> skip docker inspect
+export DVD_PCAP_IFACE=${DVD_PCAP_IFACE:-$(ip -o link show | awk -F': ' '/br-/{print $2;exit}')}
+[ -z "$DVD_PCAP_IFACE" ] && DVD_PCAP_IFACE="any"
+export OUT_DIR="${PWD}/bus"
+
