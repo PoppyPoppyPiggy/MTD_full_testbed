@@ -1,53 +1,38 @@
 {
   "policy": {
-    "fanet_eval-1756952086": {
-      "name": "none",
-      "mtd": "off",
-      "netem": {
-        "loss_pct": 0,
-        "delay_ms": 0,
-        "jitter_ms": 0,
-        "dup_pct": 0
-      }
-    },
     "mavlink_statustext_noise": {
-      "name": "none",
-      "mtd": "off",
-      "netem": {
-        "loss_pct": 0,
-        "delay_ms": 0,
-        "jitter_ms": 0,
-        "dup_pct": 0
-      }
-    },
-    "gps_slow_spoof": {
-      "name": "none",
-      "mtd": "off",
-      "netem": {
-        "loss_pct": 0,
-        "delay_ms": 0,
-        "jitter_ms": 0,
-        "dup_pct": 0
-      }
-    },
-    "eval-1756952086": {
-      "name": "none",
-      "mtd": "off",
-      "netem": {
-        "loss_pct": 0,
-        "delay_ms": 0,
-        "jitter_ms": 0,
-        "dup_pct": 0
+      "action": "tc_filter",
+      "args": {
+        "loss_pct": 1.0,
+        "delay_ms": 2,
+        "jitter_ms": 1,
+        "dup_pct": 0.0
       }
     },
     "mavlink_param_poll": {
-      "name": "none",
-      "mtd": "off",
-      "netem": {
-        "loss_pct": 0,
-        "delay_ms": 0,
-        "jitter_ms": 0,
-        "dup_pct": 0
+      "action": "tc_filter",
+      "args": {
+        "loss_pct": 0.5,
+        "delay_ms": 1,
+        "jitter_ms": 1,
+        "dup_pct": 0.0
+      }
+    },
+    "gps_slow_spoof": {
+      "action": "port_shuffle",
+      "args": {}
+    },
+    "baseline": {
+      "action": "none",
+      "args": {}
+    },
+    "unknown": {
+      "action": "tc_filter",
+      "args": {
+        "loss_pct": 0.5,
+        "delay_ms": 1,
+        "jitter_ms": 1,
+        "dup_pct": 0.0
       }
     }
   }
