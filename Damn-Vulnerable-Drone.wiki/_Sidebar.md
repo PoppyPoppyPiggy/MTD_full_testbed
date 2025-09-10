@@ -32,7 +32,7 @@
     - [Protocol Fingerprinting](/nicholasaleks/Damn-Vulnerable-Drone/wiki/Protocol-Fingerprinting)
     - [Wifi Analysis & Cracking](/nicholasaleks/Damn-Vulnerable-Drone/wiki/Wifi-Analysis-&-Cracking)
     - [Drone Discovery](/nicholasaleks/Damn-Vulnerable-Drone/wiki/Drone-Discovery)
-    - [Companion Computer Detection](/nicholasaleks/Damn-Vulnerable-Drone/wiki/Companion-Computer-Detection)
+    - [Companion Computer Discovery](/nicholasaleks/Damn-Vulnerable-Drone/wiki/Companion-Computer-Discovery)
     - [Ground Control Station Discovery](/nicholasaleks/Damn-Vulnerable-Drone/wiki/Ground-Control-Station-Discovery)
     - [Packet Sniffing](/nicholasaleks/Damn-Vulnerable-Drone/wiki/Packet-Sniffing)
     - [Drone GPS & Telemetry Detection](/nicholasaleks/Damn-Vulnerable-Drone/wiki/Drone-GPS-&-Telemetry-Detection)

@@ -1,3 +1,1 @@
 scn,atk,lv,mtd,t0,t1,pps,bytes,loss_pct,delay_ms,jitter_ms,dup_pct
-dvd,attacker,baseline,off,0.0,59.0,30.342881355932203,179023,0.0,0.0,0.0,0.0
-ns3_metrics_summary,unknown,baseline,off,0.0,1.0,145.0,14500,0.0,0.0,0.0,0.0
