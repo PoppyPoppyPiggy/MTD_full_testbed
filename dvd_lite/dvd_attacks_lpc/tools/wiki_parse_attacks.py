@@ -15,7 +15,7 @@ from datetime import datetime
 
 # ---------------- Paths ----------------
 BASE = Path(os.environ.get("BASE", os.getcwd()))
-WIKI_DIR = Path(os.environ.get("WIKI_DIR", str(BASE / "Damn-Vulnerable-Drone.wiki")))
+WIKI_DIR = Path(os.environ.get("WIKI_DIR", str("/home/kali/MTD_full_testbed/Damn-Vulnerable-Drone.wiki")))
 OUT_DIR = Path("../modules/attacks_wiki")
 META_DIR = Path(os.environ.get("OUT_META", str(BASE / "attack_output")))
 META_DIR.mkdir(parents=True, exist_ok=True)
