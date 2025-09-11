@@ -1,2 +1,0 @@
-qdisc noqueue 0: dev lo root refcnt 2 
-qdisc noqueue 0: dev eth0 root refcnt 2 

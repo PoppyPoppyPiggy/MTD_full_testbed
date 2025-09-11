@@ -1,9 +1,0 @@
-{
-  "Id": "48b32bf86a3d8b09911230e90168cb66e73997d8e6b41c402f804d598ab18826",
-  "Name": "/companion-computer",
-  "Image": "n1ckaleks/damn-vulnerable-drone-companion-computer:latest",
-  "Status": "running",
-  "Running": true,
-  "Pid": 163108,
-  "StartedAt": "2025-08-31T16:52:02.53415846Z"
-}

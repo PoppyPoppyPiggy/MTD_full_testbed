@@ -1,9 +1,0 @@
-{
-  "Id": "70ce9a592138e9ce9764a00c1e9ab9a43bbbda0b3b0df27f6847620eab7bd616",
-  "Name": "/simulator",
-  "Image": "n1ckaleks/damn-vulnerable-drone-simulator:latest",
-  "Status": "running",
-  "Running": true,
-  "Pid": 162935,
-  "StartedAt": "2025-08-31T16:52:02.258061817Z"
-}
