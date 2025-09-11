@@ -1,4 +1,12 @@
 #!/usr/bin/env bash
+set -euo pipefail
+export BASE="${BASE:-$PWD}"
+if [[ -f "$BASE/00_env.sh" ]]; then . "$BASE/00_env.sh"; else
+  DVD_LOG="${DVD_LOG:-$BASE/attack_output/dvd.log}"; mkdir -p "$(dirname "$DVD_LOG")"
+  log(){ printf '[%(%F_%T)T] %s
+' -1 "$*"; }
+fi
+
 # Auto-generated from: /home/kali/MTD_full_testbed/Damn-Vulnerable-Drone.wiki/Emergency-Status-Spoofing.md
 # Created: 2025-09-10 04:31:52
 # NOTE: 설명/서사는 제거되었고, 코드블록/프롬프트 명령만 포함됩니다.

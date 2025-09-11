@@ -1,0 +1,46 @@
+# MTD 정책 (테스트값, 환경 맞춰 조정)
+enable: true
+bridge_iface: auto              # 'auto'면 첫 번째 br-* 사용
+gcs_target: "10.13.0.4:14550"   # 기본 GCS(컨테이너 IP:포트)
+listen_cidr: "10.13.0.0/24"     # DVD docker 네트워크
+
+# LPC 민감도/임계
+thresholds:
+  ewma_alpha: 0.2
+  cusum_k: 0.5             # 민감도(작을수록 민감)
+  cusum_h: 5.0             # 트리거 경계
+  anomaly_weights:
+    net_loss: 0.4          # 손실율 가중
+    net_jitter: 0.2
+    net_delay: 0.2
+    mav_residual: 0.2      # MAVLink 잔차(ATTITUDE, 옵션)
+
+# 하이브리드 트리거
+trigger:
+  periodic_sec: 60                 # 주기 셔플(0이면 비활성)
+  event_min_interval_sec: 20       # 이벤트 트리거 최소 간격(스파이크 억제)
+  min_steady_sec_after_action: 15  # 액션 후 안정 대기
+
+# 예산/쿨다운(Churn Guard)
+budget:
+  max_actions_per_10min: 6
+  cooldown_sec: 10
+
+# 액션 집합(우선순위)
+actions:
+  - type: port_shuffle
+    service_name: "mavlink"
+    from_port: 14550
+    pool: [14551,14552,14553,14554]
+  - type: dnat_rotate
+    dst_ip_pool: ["10.13.0.4"]   # 필요시 다중 GCS/프록시
+    dst_port: 14550
+
+# Probe 설정
+probe:
+  tcp_check: false
+  udp_check: true
+  mav_heartbeat:
+    enable: true
+    timeout_sec: 3
+    target: "udp:0.0.0.0:14550"  # 호스트 리스너에 도착 확인

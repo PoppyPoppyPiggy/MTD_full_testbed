@@ -1,9 +1,0 @@
-{
-  "Id": "91527ecd0bb074d2352bf85818d24f86df68ceb5785b7bdf6ef65b07ab28a197",
-  "Name": "/flight-controller",
-  "Image": "n1ckaleks/damn-vulnerable-drone-flight-controller:latest",
-  "Status": "running",
-  "Running": true,
-  "Pid": 162937,
-  "StartedAt": "2025-08-31T16:52:02.259485093Z"
-}
