@@ -12,8 +12,8 @@ aiohttp>=3.8.0
 websockets>=10.0
 
 # Docker 관리
-docker>=5.0.0
-docker-compose>=1.29.0
+#docker>=5.0.0
+#docker-compose>=1.29.0
 
 # 로깅 및 모니터링
 elasticsearch>=7.15.0

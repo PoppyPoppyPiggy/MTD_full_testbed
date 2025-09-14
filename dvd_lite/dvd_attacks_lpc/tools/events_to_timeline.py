@@ -1,33 +1,47 @@
-import csv, sys, re, os, argparse
-def parse_imp(s,k,default=0.0):
-    m=re.search(rf"{k}\s*=\s*([0-9]+(?:\.[0-9]+)?)",s,re.I); return float(m.group(1)) if m else default
-ap=argparse.ArgumentParser()
-ap.add_argument("--events"); ap.add_argument("--scn"); ap.add_argument("-o","--out"); ap.add_argument("--sim",type=float,default=40.0)
-a=ap.parse_args()
-ev=a.events or (f"bus/events_{a.scn}.csv" if a.scn else None)
-assert ev and os.path.exists(ev), f"events csv not found: {ev}"
-rows=[]; 
-with open(ev, newline="") as f:
-    head=f.readline(); f.seek(0)
-    delim="," if head.count(",")>=head.count(";") else ";"
-    R=csv.reader(f, delimiter=delim); header=None
-    for i,cols in enumerate(R):
-        if i==0: header=[c.strip().lower() for c in cols]; continue
-        d={header[j]: cols[j] if j<len(cols) else "" for j in range(len(header))}
-        rows.append(d)
-out=a.out or f"bus/effect_timeline_{os.path.basename(ev).split('events_')[-1]}"
-with open(out,"w",newline="") as f:
-    w=csv.writer(f); w.writerow(["t_apply_s","loss_pct","delay_ms","jitter_ms","dup_pct"])
-    for d in rows:
-        j=" ".join(f"{k}={v}" for k,v in d.items()); up=j.upper()
-        if "MTD" in up and "APPLY" in up:
-            t=float(d.get("t_s") or d.get("time_s") or d.get("t") or 0.0)
-            w.writerow([t, parse_imp(j,"loss_pct"), parse_imp(j,"delay_ms"), parse_imp(j,"jitter_ms"), parse_imp(j,"dup_pct")])
-    # revert(0) 기록
-    for d in rows:
-        j=" ".join(f"{k}={v}" for k,v in d.items()); up=j.upper()
-        if "MTD" in up and "REVERT" in up:
-            t=float(d.get("t_s") or d.get("time_s") or d.get("t") or 0.0)
-            w.writerow([t,0,0,0,0])
-    w.writerow([a.sim,0,0,0,0])
-print("WROTE", out)
+import pandas as pd
+import os
+import argparse
+
+def main():
+    ap = argparse.ArgumentParser(description="Generate NS-3 effect timeline from MTD effects log.")
+    ap.add_argument("--log_dir", default="bus", help="Directory containing the effects.csv log file.")
+    ap.add_argument("--sim_duration", type=int, default=120, help="Total simulation duration in seconds.")
+    ap.add_argument("-o", "--out", help="Output file path for the timeline.")
+    a = ap.parse_args()
+
+    effects_log_file = os.path.join(a.log_dir, "effects.csv")
+    ns3_timeline_file = a.out or os.path.join(a.log_dir, "effect_timeline.csv")
+    
+    if not os.path.exists(effects_log_file):
+        print(f"Error: Effects log file not found at {effects_log_file}")
+        return
+
+    try:
+        df = pd.read_csv(effects_log_file)
+        
+        # NS-3가 이해하는 컬럼명으로 변경
+        df.rename(columns={
+            "sim_time": "t_apply_s",
+            "packet_loss": "loss_pct",
+            "delay": "delay_ms",
+            "jitter": "jitter_ms"
+        }, inplace=True)
+        # dup_pct 컬럼 추가 (필요시)
+        df["dup_pct"] = 0 
+
+        timeline = pd.DataFrame({'t_apply_s': range(a.sim_duration + 1)})
+        df = df.sort_values('t_apply_s').reset_index(drop=True)
+        
+        # merge_asof를 사용하여 각 시간 지점의 네트워크 상태를 결정
+        merged_df = pd.merge_asof(timeline, df, on='t_apply_s', direction='backward').fillna(0)
+        
+        # 필요한 컬럼만 선택하여 저장
+        final_df = merged_df[["t_apply_s", "loss_pct", "delay_ms", "jitter_ms", "dup_pct"]]
+        final_df.to_csv(ns3_timeline_file, index=False)
+        
+        print(f"NS-3 timeline generated successfully at: {ns3_timeline_file}")
+    except Exception as e:
+        print(f"An error occurred during timeline generation: {e}")
+
+if __name__ == "__main__":
+    main()
