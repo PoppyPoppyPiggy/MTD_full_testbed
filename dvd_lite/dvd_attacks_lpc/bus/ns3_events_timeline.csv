@@ -1,0 +1,50 @@
+sim_time,event,target,params
+506.02974152565,MTD_DISCONNECT,companion-computer-lite,
+521.0776312351227,MTD_CONNECT,companion-computer-lite,
+536.2018485069275,MTD_DISCONNECT,companion-computer-lite,
+551.2509286403656,MTD_CONNECT,companion-computer-lite,
+566.398656129837,MTD_DISCONNECT,companion-computer-lite,
+915.5183010101318,MTD_CONNECT,companion-computer-lite,
+930.6620516777039,MTD_DISCONNECT,companion-computer-lite,
+945.7112612724304,MTD_CONNECT,companion-computer-lite,
+960.8342733383179,MTD_DISCONNECT,companion-computer-lite,
+975.8994557857513,MTD_CONNECT,companion-computer-lite,
+991.0500752925873,MTD_DISCONNECT,companion-computer-lite,
+1006.0970470905304,MTD_CONNECT,companion-computer-lite,
+1021.2378678321838,MTD_DISCONNECT,companion-computer-lite,
+1036.2866690158844,MTD_CONNECT,companion-computer-lite,
+1209.3941719532013,MTD_DISCONNECT,companion-computer-lite,
+1224.458845615387,MTD_CONNECT,companion-computer-lite,
+1239.6138882637024,MTD_DISCONNECT,companion-computer-lite,
+1243.517697095871,AttackStart,10.13.0.100,"{""target"": ""10.13.0.100:14550""}"
+1254.6705231666565,MTD_CONNECT,companion-computer-lite,
+1258.5203521251678,AttackStart,10.13.0.3,"{""target"": ""10.13.0.3:14550""}"
+1269.7982261180878,MTD_DISCONNECT,companion-computer-lite,
+1273.5224170684814,AttackStart,10.13.0.100,"{""target"": ""10.13.0.100:14550""}"
+1284.8493571281433,MTD_CONNECT,companion-computer-lite,
+1288.5246753692627,AttackStart,10.13.0.3,"{""target"": ""10.13.0.3:14550""}"
+1299.993637561798,MTD_DISCONNECT,companion-computer-lite,
+1303.5277171134949,AttackStart,10.13.0.100,"{""target"": ""10.13.0.100:14550""}"
+1315.0412244796753,MTD_CONNECT,companion-computer-lite,
+1318.530041694641,AttackStart,10.13.0.3,"{""target"": ""10.13.0.3:14550""}"
+1867.0341818332672,MTD_DISCONNECT,companion-computer-lite,
+1882.0810344219208,MTD_CONNECT,companion-computer-lite,
+1897.2100524902344,MTD_DISCONNECT,companion-computer-lite,
+1912.2541465759277,MTD_CONNECT,companion-computer-lite,
+1922.0462758541107,AttackStart,10.13.0.3,"{""script"": ""gps-spoofing.sh"", ""target"": ""10.13.0.3:14550""}"
+1927.3980722427368,MTD_DISCONNECT,companion-computer-lite,
+1932.0485105514526,AttackStart,10.13.0.100,"{""script"": ""gps-spoofing.sh"", ""target"": ""10.13.0.100:14550""}"
+1942.4470958709717,MTD_CONNECT,companion-computer-lite,
+1947.0508105754852,AttackStart,10.13.0.3,"{""script"": ""gps-spoofing.sh"", ""target"": ""10.13.0.3:14550""}"
+1957.5756514072418,MTD_DISCONNECT,companion-computer-lite,
+1962.053559064865,AttackStart,10.13.0.100,"{""script"": ""gps-spoofing.sh"", ""target"": ""10.13.0.100:14550""}"
+1972.633241891861,MTD_CONNECT,companion-computer-lite,
+1977.0555067062378,AttackStart,10.13.0.3,"{""script"": ""gps-spoofing.sh"", ""target"": ""10.13.0.3:14550""}"
+2364.4757056236267,MTD_DISCONNECT,companion-computer-lite,
+2372.863447189331,AttackStart,10.13.0.100,"{""script"": ""gps-spoofing.sh"", ""target"": ""10.13.0.100:14550""}"
+2379.5257375240326,MTD_CONNECT,companion-computer-lite,
+2382.866796731949,AttackStart,10.13.0.3,"{""script"": ""gps-spoofing.sh"", ""target"": ""10.13.0.3:14550""}"
+2394.678378343582,MTD_DISCONNECT,companion-computer-lite,
+2397.870547771454,AttackStart,10.13.0.100,"{""script"": ""gps-spoofing.sh"", ""target"": ""10.13.0.100:14550""}"
+2409.725296974182,MTD_CONNECT,companion-computer-lite,
+2412.8743348121643,AttackStart,10.13.0.3,"{""script"": ""gps-spoofing.sh"", ""target"": ""10.13.0.3:14550""}"
