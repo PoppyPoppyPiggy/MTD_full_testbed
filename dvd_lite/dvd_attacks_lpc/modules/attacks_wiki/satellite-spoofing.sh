@@ -8,10 +8,15 @@
 # MTD-aware Target Acquisition & Logging Setup
 # ==========================================================
 SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
-PROJECT_ROOT=$(realpath "$SCRIPT_DIR/../../../../")
+PROJECT_ROOT=$(realpath "$SCRIPT_DIR/../../..")
+
+# --- Python Module Path FIX ---
+# 파이썬이 우리 모듈을 찾을 수 있도록 프로젝트 루트를 PYTHONPATH에 추가합니다.
+export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH}"
 
 # MTD 타겟 조회
 pushd "$PROJECT_ROOT" > /dev/null
+# MTD 인터페이스 모듈 직접 실행
 TARGET_ADDR=$(python3 -m dvd_lite.dvd_attacks_lpc.interface)
 POP_RESULT=$?
 popd > /dev/null
@@ -21,22 +26,19 @@ if [ $POP_RESULT -ne 0 ] || [ -z "$TARGET_ADDR" ]; then
     exit 1
 fi
 
-TARGET_IP=$(echo $TARGET_ADDR | cut -d: -f1)
-TARGET_PORT=$(echo $TARGET_ADDR | cut -d: -f2)
+TARGET_IP=$(echo "$TARGET_ADDR" | cut -d: -f1)
+TARGET_PORT=14550 # SITL의 기본 UDP 포트
 
-# 중앙 로거 함수 정의 (정확한 타임스탬프를 위해 쉘의 log 함수와 통합)
-log() {{
-    # 쉘 표준 로그 출력
-    printf '[%(%F_%T)T] %s\n' -1 "$*"
-
-    # bus.log에 JSON 이벤트 로깅
+# 중앙 로거 함수 정의
+log() {
+    printf '[%(%F_T)T] %s\n' -1 "$*"
     EVENT_TYPE=$1
     shift
     EVENT_DATA_STR="$*"
     pushd "$PROJECT_ROOT" > /dev/null
-    python3 -c "from dvd_lite.dvd_attacks_lpc.bus.logger import log_bus_event; log_bus_event('$EVENT_TYPE', {{'message': '$EVENT_DATA_STR'}})"
+    python3 -c 'from dvd_lite.dvd_attacks_lpc.bus.logger import log_bus_event; import sys; log_bus_event(sys.argv[1], {"message": sys.argv[2]})' "$EVENT_TYPE" "$EVENT_DATA_STR"
     popd > /dev/null
-}}
+}
 # MTD_INTERFACE_END
 set -euo pipefail
 
