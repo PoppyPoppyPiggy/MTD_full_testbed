@@ -1,0 +1,312 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8"/>
+  <meta name="viewport" content="width=device-width,initial-scale=1"/>
+  <title>MTD Bus Visualizer</title>
+  <style>
+    :root {
+      --bg: #0b1020; --panel: #121a2b; --muted:#8aa0c2; --fg:#e7efff; --green:#44d17a; --red:#ff6b6b; --blue:#6ca0ff; --yellow:#ffd166;
+      --accent:#8b5cf6;
+    }
+    * { box-sizing: border-box; }
+    body { margin:0; font:14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Noto Sans KR, Helvetica, Arial, Apple Color Emoji, Segoe UI Emoji; background:var(--bg); color:var(--fg); }
+    header { position:sticky; top:0; z-index:10; background:linear-gradient(180deg, rgba(11,16,32,.95), rgba(11,16,32,.75)); backdrop-filter: blur(6px); border-bottom:1px solid #1f2940; }
+    .wrap { max-width:1200px; margin:0 auto; padding:16px; }
+    h1 { font-size:20px; margin:0 0 8px; letter-spacing:.2px; }
+    .grid { display:grid; gap:12px; grid-template-columns: repeat(12, 1fr); }
+    .card { background:var(--panel); border:1px solid #1f2940; border-radius:10px; padding:12px; }
+    .span-4 { grid-column:span 4; } .span-6{ grid-column:span 6;} .span-8{grid-column:span 8;} .span-12{ grid-column:span 12; }
+    .muted { color:var(--muted); }
+    .pill { display:inline-flex; gap:6px; align-items:center; border:1px solid #2a3757; padding:6px 10px; border-radius:999px; background:#0e1526; }
+    .ok { color:var(--green); } .bad{ color:var(--red); } .warn{ color:var(--yellow); }
+    .btn { background:#17223a; border:1px solid #273455; color:#cfe3ff; padding:6px 10px; border-radius:8px; cursor:pointer; }
+    .btn:active { transform: translateY(1px); }
+    .kpi { display:flex; align-items:center; gap:10px; }
+    .kpi .num { font-weight:700; font-size:24px; }
+    table { width:100%; border-collapse: collapse; }
+    th, td { border-bottom: 1px solid #1f2940; padding:6px 8px; vertical-align: top; }
+    th { text-align:left; color:#b7c6e3; font-weight:600; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; background:#0d1324; border:1px solid #202b47; padding:1px 4px; border-radius:6px; }
+    .row { display:flex; gap:8px; flex-wrap: wrap; align-items: center; }
+    input[type="text"], select { background:#0e1628; border:1px solid #243152; color:#dfe9ff; padding:6px 8px; border-radius:8px; }
+    .mini { font-size:12px; }
+    .list { max-height:220px; overflow:auto; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .flex { display:flex; gap:10px; align-items:center; flex-wrap: wrap; }
+  </style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <h1>🛰️ MTD Bus Visualizer</h1>
+    <div class="row">
+      <span class="pill">Bus: <code id="busPath"></code></span>
+      <span class="pill">Bus-DVD: <code id="busDvdPath"></code></span>
+      <span class="pill">MTD State: <code id="statePath"></code></span>
+      <button class="btn" id="btnToggle">⏸️ Auto Refresh</button>
+      <span class="muted mini">Interval: <code id="intervalLabel">1000ms</code></span>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <div class="grid">
+    <div class="card span-4">
+      <div class="row" style="justify-content:space-between;">
+        <div>
+          <div class="muted mini">현재 타겟</div>
+          <div id="currentTarget" class="kpi"><span class="num mono">…</span></div>
+        </div>
+        <div>
+          <div class="muted mini">마지막 업데이트</div>
+          <div id="lastUpdate" class="mono">–</div>
+        </div>
+      </div>
+      <hr style="border-color:#1f2940; margin:10px 0;">
+      <div class="kpi"><span>10.13.0.3</span><span class="num ok" id="hitReal">0</span><span class="muted mini">/ 60s</span></div>
+      <div class="kpi"><span>10.13.0.100</span><span class="num blue" id="hitDecoy">0</span><span class="muted mini">/ 60s</span></div>
+      <div class="kpi"><span>ip_shuffle</span><span class="num warn" id="shuffleCount">0</span><span class="muted mini">/ 5m</span></div>
+    </div>
+
+    <div class="card span-8">
+      <div class="row" style="justify-content:space-between;">
+        <strong>MTD 이벤트 타임라인</strong>
+        <div class="muted mini">최근 20개</div>
+      </div>
+      <div class="list" id="timeline"></div>
+    </div>
+
+    <div class="card span-6">
+      <div class="row" style="justify-content:space-between;">
+        <strong>공격 오케스트레이터 상태</strong>
+        <div class="muted mini">gate/attack 흐름</div>
+      </div>
+      <div class="list" id="orchestrator"></div>
+    </div>
+
+    <div class="card span-6">
+      <div class="row" style="justify-content:space-between;">
+        <strong>네트워크 스냅샷(최근)</strong>
+        <div class="muted mini">mtd_network_snapshot</div>
+      </div>
+      <div id="snapshot"></div>
+    </div>
+
+    <div class="card span-12">
+      <div class="row" style="justify-content:space-between;">
+        <strong>최근 이벤트</strong>
+        <div class="row">
+          <label class="muted mini">type</label>
+          <select id="typeFilter">
+            <option value="">(all)</option>
+            <option>udp_packet</option>
+            <option>udp_packet_rx</option>
+            <option>udp_packet_tx</option>
+            <option>mtd_action</option>
+            <option>mtd_applied</option>
+            <option>mtd_network_snapshot</option>
+            <option>attack_gate_open</option>
+            <option>attack_started_by_orchestrator</option>
+            <option>attack_terminated</option>
+          </select>
+          <label class="muted mini">source</label>
+          <select id="sourceFilter">
+            <option value="">(all)</option>
+            <option>ns3</option>
+            <option>mtd-engine</option>
+            <option>attack_orchestrator</option>
+            <option>prober</option>
+          </select>
+        </div>
+      </div>
+      <div style="overflow:auto; max-height:340px;">
+        <table id="eventsTbl">
+          <thead>
+            <tr><th style="width:150px">time(UTC)</th><th style="width:160px">type</th><th style="width:140px">source</th><th>summary</th></tr>
+          </thead>
+          <tbody id="eventsBody"></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+  // ---------- 설정 ----------
+  const API = (p) => p;
+  let auto = true;
+  let intervalMs = 1000;
+
+  // 서버가 알려주는 기본 경로 표시
+  document.getElementById('busPath').textContent     = 'default(bus.log)';
+  document.getElementById('busDvdPath').textContent  = 'default(bus_dvd.log)';
+  document.getElementById('statePath').textContent   = 'default(mtd_state.json)';
+
+  document.getElementById('btnToggle').onclick = () => {
+    auto = !auto;
+    document.getElementById('btnToggle').textContent = auto ? '⏸️ Auto Refresh' : '▶️ Auto Refresh';
+  };
+
+  // ---------- 상태 ----------
+  let lastTsBus = 0;
+  let lastTsDvd = 0;
+  let events = []; // 병합된 이벤트 (정렬용)
+
+  function tsOf(item) { return typeof item.ts === 'number' ? item.ts : Date.parse(item.iso)/1000; }
+
+  function summarize(it) {
+    const f = it.fields || {};
+    const t = it.type || '';
+    if (t === 'mtd_action' && f.action === 'ip_shuffle') {
+      return `ip_shuffle → <code>${(f.new_target||'').replace(':", "',': ')}</code>`;
+    }
+    if (t === 'udp_packet' || t === 'udp_packet_tx' || t === 'udp_packet_rx') {
+      const dir = t.endsWith('_rx') ? '⇠' : (t.endsWith('_tx') ? '⇢' : '→');
+      return `${f.proto||''} ${f.src_ip||'?'}:${f.src_port||'?'} ${dir} ${f.dst_ip||'?'}:${f.dst_port||'?'}`
+    }
+    if (t === 'mtd_network_snapshot') {
+      return `snapshot ${it.fields && it.fields.state ? Object.keys(it.fields.state).length : 0} nodes`;
+    }
+    if (t === 'attack_gate_open') {
+      return `gate OPEN (hits=${f.hits_in_window})`;
+    }
+    if (t === 'attack_started_by_orchestrator') {
+      return `attack START <code>${it.raw && it.raw.attack || it.fields.attack || ''}</code>`;
+    }
+    if (t === 'attack_terminated') {
+      return `attack END rc=${f.return_code}`;
+    }
+    return JSON.stringify(it.raw);
+  }
+
+  function renderTable() {
+    const typeSel = document.getElementById('typeFilter').value;
+    const srcSel  = document.getElementById('sourceFilter').value;
+    const tbody = document.getElementById('eventsBody');
+    tbody.innerHTML = '';
+    let filtered = events;
+    if (typeSel) filtered = filtered.filter(e => e.type === typeSel);
+    if (srcSel)  filtered = filtered.filter(e => e.source === srcSel);
+
+    const last = filtered.slice(-300).reverse(); // 최근 300
+    for (const it of last) {
+      const tr = document.createElement('tr');
+      tr.innerHTML = `
+        <td class="mono">${it.iso}</td>
+        <td><code>${it.type||''}</code></td>
+        <td><code>${it.source||''}</code></td>
+        <td>${summarize(it)}</td>
+      `;
+      tbody.appendChild(tr);
+    }
+  }
+
+  function renderTimeline() {
+    const el = document.getElementById('timeline');
+    const rows = events.filter(e =>
+      (e.type === 'mtd_action' && e.fields.action === 'ip_shuffle') || e.type === 'mtd_applied'
+    ).slice(-20).reverse().map(e => {
+      const target = e.fields.new_target || '';
+      return `<div>🟡 <span class="mono">${e.iso}</span> → <code>${target}</code></div>`;
+    });
+    el.innerHTML = rows.join('') || '<div class="muted">no events</div>';
+  }
+
+  function renderOrchestrator() {
+    const el = document.getElementById('orchestrator');
+    const rel = events.filter(e => e.source === 'attack_orchestrator')
+                      .slice(-30).reverse()
+                      .map(e => `<div>🧩 <span class="mono">${e.iso}</span> <code>${e.type}</code> — ${summarize(e)}</div>`);
+    el.innerHTML = rel.join('') || '<div class="muted">no events</div>';
+  }
+
+  function renderSnapshot() {
+    const snap = [...events].reverse().find(e => e.type === 'mtd_network_snapshot');
+    const el = document.getElementById('snapshot');
+    if (!snap || !snap.fields || !snap.fields.state) { el.innerHTML = '<div class="muted">no snapshot</div>'; return; }
+    const state = snap.fields.state;
+    let rows = Object.keys(state).sort().map(name => {
+      const n = state[name] || {};
+      return `<tr><td>${name}</td><td><code>${n.ip_address||''}</code></td><td class="mono">${n.id||''}</td></tr>`;
+    }).join('');
+    el.innerHTML = `
+      <table><thead><tr><th>container</th><th>ip</th><th>id</th></tr></thead>
+      <tbody>${rows}</tbody></table>
+      <div class="muted mini" style="margin-top:6px">updated: <span class="mono">${snap.iso}</span></div>
+    `;
+  }
+
+  function renderKpis() {
+    const now = Date.now()/1000;
+    const last60 = events.filter(e => now - tsOf(e) <= 60);
+    const hits3   = last60.filter(e => ['udp_packet','udp_packet_tx','udp_packet_rx'].includes(e.type)
+                                   && e.fields && e.fields.dst_ip === '10.13.0.3' && +e.fields.dst_port === 14550).length;
+    const hits100 = last60.filter(e => ['udp_packet','udp_packet_tx','udp_packet_rx'].includes(e.type)
+                                   && e.fields && e.fields.dst_ip === '10.13.0.100' && +e.fields.dst_port === 14550).length;
+    document.getElementById('hitReal').textContent  = hits3;
+    document.getElementById('hitDecoy').textContent = hits100;
+
+    const last5m = events.filter(e => now - tsOf(e) <= 300);
+    const shuffles = last5m.filter(e => (e.type === 'mtd_action' && e.fields.action === 'ip_shuffle') || e.type === 'mtd_applied').length;
+    document.getElementById('shuffleCount').textContent = shuffles;
+  }
+
+  async function fetchState() {
+    const r = await fetch(API('/api/state'));
+    const j = await r.json();
+    if (j.ok) {
+      const s = j.state || {};
+      document.getElementById('statePath').textContent = j.path;
+      document.getElementById('currentTarget').innerHTML = `<span class="num mono">${s.current_target || '–'}</span>`;
+      document.getElementById('lastUpdate').textContent = s.last_updated || '–';
+    }
+  }
+
+  async function poll() {
+    if (!auto) return;
+
+    // bus (공용)
+    try {
+      const r1 = await fetch(API(`/api/read?source=bus&since_ts=${lastTsBus}&limit=800`));
+      const j1 = await r1.json();
+      if (j1.ok) {
+        lastTsBus = j1.last_ts || lastTsBus;
+        events.push(...j1.items);
+      }
+    } catch (_) {}
+
+    // bus_dvd (내부)
+    try {
+      const r2 = await fetch(API(`/api/read?source=dvdbus&since_ts=${lastTsDvd}&limit=800`));
+      const j2 = await r2.json();
+      if (j2.ok) {
+        lastTsDvd = j2.last_ts || lastTsDvd;
+        events.push(...j2.items);
+      }
+    } catch (_) {}
+
+    // 정렬 및 최대 크기 제한
+    events.sort((a,b) => tsOf(a) - tsOf(b));
+    if (events.length > 5000) events = events.slice(-5000);
+
+    renderKpis();
+    renderTimeline();
+    renderOrchestrator();
+    renderSnapshot();
+    renderTable();
+  }
+
+  // 필터 변경 시 즉시 반영
+  document.getElementById('typeFilter').onchange = renderTable;
+  document.getElementById('sourceFilter').onchange = renderTable;
+
+  // 루프
+  (async function main(){
+    await fetchState();
+    setInterval(fetchState, 5000);
+    setInterval(() => { if (auto) poll(); }, intervalMs);
+  })();
+</script>
+</body>
+</html>
