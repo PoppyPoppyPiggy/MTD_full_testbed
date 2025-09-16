@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+
 import argparse
 import os
 import subprocess
@@ -47,6 +48,12 @@ def write_bus(event: Dict[str, Any]) -> None:
     except Exception as e:
         print(f"[bus] 로그 쓰기 실패: {e}")
 
+def hr(title: str = ""):
+    print("\n" + "-" * 60)
+    if title:
+        print(title)
+        print("-" * 60)
+
 # -----------------------------
 # attack_process 접근 헬퍼
 # -----------------------------
@@ -86,7 +93,7 @@ def read_mtd_target(state_file: str) -> Tuple[Optional[str], Optional[int]]:
         return None, None
 
 # -----------------------------
-# 공격 프로필/목록
+# 공격 프로필/목록/브리핑
 # -----------------------------
 def load_attack_profiles():
     try:
@@ -104,6 +111,68 @@ def get_available_attacks():
         return []
     return sorted([f for f in os.listdir(ATTACKS_DIR) if f.endswith('.sh')])
 
+def brief_attack(attack_name: str, profiles: Dict[str, Any], state_file: str, args: argparse.Namespace):
+    prof = profiles.get(attack_name, {})
+    a_type = prof.get('type', 'IMMEDIATE')
+    desc = prof.get('description') or prof.get('summary') or '(설명 없음)'
+    notes = prof.get('notes', '')
+    duration = prof.get('duration_sec', None)
+    ip, port = read_mtd_target(state_file)
+
+    hr("📋 공격 브리핑")
+    print(f"  • 공격 스크립트 : {attack_name}")
+    print(f"  • 공격 타입     : {a_type}")
+    print(f"  • 개요/목적     : {desc}")
+    if notes:
+        print(f"  • 비고/노트     : {notes}")
+    if duration:
+        print(f"  • 예상 실행시간 : ~{duration}s (프로필)")
+    print(f"  • 현재 MTD 타깃 : {ip}:{port}" if ip and port else "  • 현재 MTD 타깃 : (알 수 없음)")
+    print("  • 게이트 설정   : " + ("활성화" if args.gate_enable else "비활성화"))
+    if args.gate_enable:
+        print(f"      - 윈도우 {args.gate_window_sec}s / 최소 히트 {args.gate_min_hits} / 타입 {args.gate_types}")
+    print("  • MTD 감시      : " + ("발생시 중단" if args.stop_on_mtd else "무시"))
+    print(f"      - 유예 {args.mtd_grace_sec}s / 타입 {args.mtd_stop_types}")
+    write_bus({
+        "source": "attack_orchestrator",
+        "type": "attack_briefing_shown",
+        "attack": attack_name,
+        "profile": prof,
+        "mtd_target": f"{ip}:{port}" if ip and port else None
+    })
+
+# -----------------------------
+# 대화형 선택
+# -----------------------------
+def choose_attack_interactively(attacks: List[str], profiles: Dict[str, Any]) -> Optional[str]:
+    if not attacks:
+        print("⛔ 사용 가능한 공격 스크립트가 없습니다.")
+        return None
+    hr("🧰 대화형 공격 선택 메뉴")
+    print("번호를 입력해 공격을 선택하세요. (q = 취소)\n")
+    for i, name in enumerate(attacks, 1):
+        t = profiles.get(name, {}).get('type', 'IMMEDIATE')
+        d = profiles.get(name, {}).get('description') or ''
+        d_short = (d[:60] + '…') if d and len(d) > 60 else d
+        print(f"  [{i:2d}] {name:<30}  ({t})  {d_short}")
+    print()
+    write_bus({"source": "attack_orchestrator", "type": "attack_menu_opened", "count": len(attacks)})
+
+    while True:
+        sel = input("선택 > ").strip().lower()
+        if sel in ("q", "quit", "exit"):
+            print("취소되었습니다.")
+            write_bus({"source": "attack_orchestrator", "type": "attack_menu_cancelled"})
+            return None
+        if sel.isdigit():
+            idx = int(sel)
+            if 1 <= idx <= len(attacks):
+                choice = attacks[idx-1]
+                print(f"✅ 선택: {choice}")
+                write_bus({"source": "attack_orchestrator", "type": "attack_selected", "attack": choice})
+                return choice
+        print("잘못된 입력입니다. 번호 또는 q 를 입력하세요.")
+
 # -----------------------------
 # Docker 네트워크 스냅샷 (CLI 기반)
 # -----------------------------
@@ -114,12 +183,16 @@ def _docker_ps_ids(name_prefix: Optional[str], label: Optional[str]) -> List[str
     if label:
         cmd += ["--filter", f"label={label}"]
     try:
-        out = subprocess.check_output(cmd, text=True, encoding="utf-8", errors="replace").strip()
-        if not out:
-            return []
-        return [x for x in out.splitlines() if x]
+        out = subprocess.checkoutput(cmd, text=True, encoding="utf-8", errors="replace").strip()  # type: ignore
     except Exception:
+        # 일부 파이썬 환경에선 checkoutput 대소문자 차이 없음. fallback:
+        try:
+            out = subprocess.check_output(cmd, text=True, encoding="utf-8", errors="replace").strip()
+        except Exception:
+            return []
+    if not out:
         return []
+    return [x for x in out.splitlines() if x]
 
 def _docker_inspect(cid: str) -> Optional[Dict[str, Any]]:
     try:
@@ -175,12 +248,12 @@ def snapshot_docker_networks(context: str, name_prefix: Optional[str], label: Op
     })
 
 # -----------------------------
-# 프로세스 제어/출력 스트림
+# 프로세스 제어/출력 스트림/상태표시
 # -----------------------------
 def terminate_attack_process(reason: str = "manual"):
     ap = get_attack_process()
     if ap and ap.poll() is None:
-        print(f"\n공격 프로세스 그룹 종료 중... (pid={ap.pid}, reason={reason})")
+        print(f"\n⛔ 공격 프로세스 그룹 종료 중... (pid={ap.pid}, reason={reason})")
         write_bus({
             "source": "attack_orchestrator",
             "type": "attack_terminating",
@@ -207,7 +280,29 @@ def _stream_reader(pipe, stream_name: str, attack_name: str):
             "attack": attack_name,
             "line": line
         })
-    pipe.close()
+    try:
+        pipe.close()
+    except Exception:
+        pass
+
+def _live_status_printer(attack_name: str, interval: float = 5.0):
+    start = time.time()
+    while not stop_event.is_set():
+        ap = get_attack_process()
+        if not ap or ap.poll() is not None:
+            break
+        elapsed = int(time.time() - start)
+        msg = f"[⏱️ 진행] '{attack_name}' 공격 실행 중… 경과 {elapsed}초 (중지: Ctrl+C)"
+        print(msg, end="\r")
+        write_bus({
+            "source": "attack_orchestrator",
+            "type": "attack_live_status",
+            "attack": attack_name,
+            "elapsed_sec": elapsed
+        })
+        time.sleep(interval)
+    # 줄 개행 정리
+    print(" " * 80, end="\r")
 
 # -----------------------------
 # 히트 이벤트 파싱(유연)
@@ -464,7 +559,7 @@ def watch_bus_for_mtd(
     if not stop_on_mtd:
         return
 
-    print(f"MTD 이벤트 감시 시작: {BUS_LOG_PATH} (grace={mtd_grace_sec}s)")
+    print(f"🛰️  MTD 이벤트 감시 시작: {BUS_LOG_PATH} (grace={mtd_grace_sec}s)")
     try:
         with open(BUS_LOG_PATH, 'r', encoding='utf-8') as f:
             f.seek(0, os.SEEK_END)
@@ -498,7 +593,7 @@ def watch_bus_for_mtd(
                     new_ip, new_port = _extract_target_from_evt(evt)
                     if new_ip and new_port:
                         if (new_ip == attack_target_ip) and (new_port == attack_target_port):
-                            # 동일 타겟으로의 이벤트면 무시
+                            # 동일 타겟이면 무시
                             continue
 
                 write_bus({
@@ -507,7 +602,7 @@ def watch_bus_for_mtd(
                     "attack": attack_name,
                     "mtd_event": evt
                 })
-                print("🚨 MTD 이벤트 감지! 공격 중지.")
+                print("\n🚨  MTD 이벤트 감지! 공격 중지.")
                 terminate_attack_process(reason="mtd_detected")
                 break
     except FileNotFoundError:
@@ -527,15 +622,18 @@ def main():
     available_attacks = get_available_attacks()
 
     parser = argparse.ArgumentParser(description="MTD 테스트베드 공격 오케스트레이터")
-    parser.add_argument('-a', '--attack', required=True, choices=available_attacks,
-                        help="실행할 공격 스크립트(.sh)")
+    # -a는 선택사항으로 변경(없으면 대화형 메뉴)
+    parser.add_argument('-a', '--attack', help="실행할 공격 스크립트(.sh). 생략 시 대화형 메뉴가 열립니다.")
+    parser.add_argument('-y', '--yes', action='store_true', help="실행 전 확인을 자동으로 수락합니다.")
+    parser.add_argument('--non-interactive', action='store_true', help="프롬프트/상태출력 최소화(자동화용).")
+    parser.add_argument('--no-status', action='store_true', help="라이브 상태 메시지 비활성화.")
 
     # 스냅샷/필터
     parser.add_argument('--snapshot-interval', type=float, default=float(os.getenv("SNAPSHOT_INTERVAL", "5")),
                         help="Docker 네트워크 스냅샷 주기(초). 0이면 비활성")
     parser.add_argument('--name-prefix', type=str, default=os.getenv("ATTACK_CONTAINER_PREFIX", ""),
                         help="docker name 프리픽스 필터 (예: dvd_)")
-    parser.add_argument('--label', type=str, default=os.getenv("ATTACK_CONTAINER_LABEL", ""),
+    parser.add_argument('--label', type=str, default=os.getenv("ATTACK_CONTAINER_LABEL", "mtd=true"),
                         help="docker label 필터 (예: mtd=true)")
 
     # 게이트(타게팅 기반) 옵션
@@ -575,17 +673,30 @@ def main():
                         help="MTD 상태파일 경로 (current_target/decoy_target)")
     args = parser.parse_args()
 
-    attack_script_path = os.path.join(ATTACKS_DIR, args.attack)
-    attack_profiles = load_attack_profiles()
-    attack_profile = attack_profiles.get(args.attack, {})
-    attack_type = attack_profile.get('type', 'IMMEDIATE')
-
-    # 자식 프로세스가 repo 루트를 import 가능하도록 PYTHONPATH 추가
+    # 공용 환경(PYTHONPATH) 보강
     project_root = os.path.realpath(os.path.join(LPC_DIR, '..', '..'))
     process_env = os.environ.copy()
     process_env['PYTHONPATH'] = f"{project_root}:{process_env.get('PYTHONPATH','')}"
 
-    # 공격 시작 예정 이벤트(게이트 전에 기록)
+    # 공격 선택(대화형)
+    if not args.attack:
+        attacks = get_available_attacks()
+        sel = None if args.non_interactive else choose_attack_interactively(attacks, attack_profiles)
+        if not sel:
+            return
+        args.attack = sel
+    else:
+        # 사용자가 -a로 준 경우 존재 확인
+        attacks = get_available_attacks()
+        if args.attack not in attacks:
+            print(f"⛔ 스크립트를 찾을 수 없습니다: {args.attack}")
+            return
+
+    attack_script_path = os.path.join(ATTACKS_DIR, args.attack)
+    attack_profile = attack_profiles.get(args.attack, {})
+    attack_type = attack_profile.get('type', 'IMMEDIATE')
+
+    # 시작 의도 기록
     write_bus({
         "source": "attack_orchestrator",
         "type": "attack_start_intent",
@@ -593,6 +704,26 @@ def main():
         "profile": attack_profile,
         "script_path": attack_script_path
     })
+
+    # 브리핑 & 확인
+    brief_attack(args.attack, attack_profiles, args.state_file, args)
+
+    if args.non_interactive:
+        confirmed = args.yes  # 자동화 시엔 -y만 반영
+    else:
+        if args.yes:
+            confirmed = True
+        else:
+            hr("⚠️ 실행 전 확인")
+            ans = input(f"정말로 '{args.attack}' 공격을 시작하시겠습니까? (y/n) > ").strip().lower()
+            confirmed = ans in ("y", "yes")
+
+    if not confirmed:
+        print("취소되었습니다. (사용자 거부)")
+        write_bus({"source": "attack_orchestrator", "type": "attack_user_cancelled", "attack": args.attack})
+        return
+
+    write_bus({"source": "attack_orchestrator", "type": "attack_user_confirmed", "attack": args.attack})
 
     # 게이트: 타게팅 빈도 충족될 때까지 대기
     if args.gate_enable:
@@ -626,11 +757,11 @@ def main():
 
     # 실제 공격 시작
     try:
-        print("--- 공격 시작 ---")
-        print(f"  - 공격 이름: {args.attack}")
-        print(f"  - 공격 타입: {attack_type}")
-        print(f"  - 스크립트: {attack_script_path}")
-        print("-----------------")
+        hr("🚀 공격 시작")
+        print(f"  - 공격 이름 : {args.attack}")
+        print(f"  - 스크립트 : {attack_script_path}")
+        print("  - Ctrl+C 로 중단할 수 있습니다.")
+        print("-" * 60)
 
         write_bus({
             "source": "attack_orchestrator",
@@ -658,7 +789,7 @@ def main():
         t_err = threading.Thread(target=_stream_reader, args=(proc.stderr, "stderr", args.attack), daemon=True)
         t_out.start(); t_err.start()
 
-        # MTD 감시 스레드(옵션에 따라)
+        # MTD 감시 스레드(옵션)
         stop_types = set(t.strip() for t in args.mtd_stop_types.split(",") if t.strip())
         t_mtd = threading.Thread(
             target=watch_bus_for_mtd,
@@ -676,6 +807,12 @@ def main():
         )
         t_mtd.start()
 
+        # 라이브 상태 스레드
+        t_status = None
+        if not args.no_status and not args.non_interactive:
+            t_status = threading.Thread(target=_live_status_printer, args=(args.attack, 5.0), daemon=True)
+            t_status.start()
+
         # 주기 스냅샷 루프
         if args.snapshot_interval and args.snapshot_interval > 0:
             while not stop_event.is_set():
@@ -691,6 +828,8 @@ def main():
         stop_event.set()
         t_out.join(timeout=1.0)
         t_err.join(timeout=1.0)
+        if t_status:
+            t_status.join(timeout=1.0)
 
         # 종료 후 스냅샷
         snapshot_docker_networks("post_attack", args.name_prefix, args.label)
@@ -701,7 +840,7 @@ def main():
             "attack": args.attack,
             "return_code": rc
         })
-        print("\n--- 공격 스크립트 종료 ---")
+        hr("✅ 공격 스크립트 종료")
         print(f"Return Code: {rc}")
 
     except FileNotFoundError:
@@ -723,7 +862,7 @@ def main():
     finally:
         terminate_attack_process("finalize")
         set_attack_process(None)
-        print("공격 오케스트레이터 종료.")
+        print("🧹 정리 완료. 공격 오케스트레이터 종료.")
 
 if __name__ == "__main__":
     main()
