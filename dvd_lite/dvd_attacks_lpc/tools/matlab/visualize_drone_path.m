@@ -1,20 +1,20 @@
-% visualize_drone_path.m (v7.0 - Integrated Cyber/Physical Dashboard)
-% bus_dvd.log(물리)와 bus.log(사이버)를 함께 시각화하는 통합 대시보드입니다.
+% visualize_drone_path.m (v8.0 - Next-Gen Cyber/Physical Dashboard)
+% 개선된 로그 파이프라인(bus_dvd.log, bus_system_events.log)에 최적화된 통합 대시보드
 
 function visualize_drone_path()
     % --- 설정 ---
-    projectBasePath = '/home/kali/MTD_full_testbed/dvd_lite/dvd_attacks_lpc';
-    physLogPath = fullfile(projectBasePath, 'bus', 'bus_dvd.log'); % 물리 로그
-    cyberLogPath = fullfile(projectBasePath, 'bus', 'bus.log');      % 사이버 로그
+    projectBasePath = '/home/kali/MTD_full_testbed/dvd_lite/dvd_attacks_lpc'; % 사용자 환경에 맞게 수정
+    physLogPath = fullfile(projectBasePath, 'bus', 'bus_dvd.log'); % 물리 로그 (텔레메트리)
+    cyberLogPath = fullfile(projectBasePath, 'bus', 'bus_system_events.log'); % 사이버 로그 (핵심 이벤트)
 
-    updateInterval = 0.1;
-    pathDuration_s = 5;
+    updateInterval = 0.1; % (초) 화면 갱신 주기
+    pathDuration_s = 5;   % (초) 화면에 표시할 경로의 길이
     earthRadius_m = 6371000;
 
     % --- 초기화 ---
-    fprintf('>> 통합 사이버/물리 시각화 대시보드 (v7.0) 시작...\n');
+    fprintf('>> 통합 사이버/물리 시각화 대시보드 (v8.0) 시작...\n');
     
-    fig = figure('Name', '실시간 통합 시각화 대시보드', 'NumberTitle', 'off', 'Color', '#1e1e1e');
+    fig = figure('Name', '실시간 통합 시각화 대시보드', 'NumberTitle', 'off', 'Color', '#1e1e1e', 'Position', [100, 100, 1400, 600]);
     
     % 3D 플롯과 이벤트 로그를 위한 서브플롯 생성
     ax3D = subplot(1, 2, 1, 'Parent', fig); % 왼쪽: 3D 플롯
@@ -28,14 +28,14 @@ function visualize_drone_path()
     
     pathPlot = plot3(ax3D, NaN, NaN, NaN, '-c', 'LineWidth', 2.5);
     currentPosPlot = plot3(ax3D, NaN, NaN, NaN, 'o', 'MarkerSize', 10, 'MarkerFaceColor', 'm', 'MarkerEdgeColor', 'w');
-    infoText = text(ax3D, 0, 0, 0, '', 'FontSize', 10, 'Color', 'w', 'FontWeight', 'bold');
+    infoText = text(ax3D, 0, 0, 0, '', 'FontSize', 10, 'Color', 'w', 'FontWeight', 'bold', 'VerticalAlignment', 'bottom');
     
     % --- 이벤트 로그 패널 설정 ---
     set(axLog, 'Color', 'k', 'XColor', 'k', 'YColor', 'k', 'XTick', [], 'YTick', []);
-    title(axLog, '사이버 이벤트 (bus.log)', 'Color', 'w', 'FontSize', 12);
+    title(axLog, '사이버 이벤트 (bus_system_events.log)', 'Color', 'w', 'FontSize', 12);
     logTextHandles = gobjects(10, 1); % 최대 10개의 로그 라인을 표시할 핸들
     for i = 1:10
-        logTextHandles(i) = text(axLog, 0.05, 1 - (i * 0.09), '', 'Color', 'w', 'FontSize', 9, 'Interpreter', 'none');
+        logTextHandles(i) = text(axLog, 0.05, 1 - (i * 0.09), '', 'Color', 'w', 'FontSize', 9, 'Interpreter', 'none', 'FontName', 'Monospaced');
     end
     
     % --- 데이터 변수 ---
@@ -50,7 +50,7 @@ function visualize_drone_path()
             update3DGraphics(ax3D, pathPlot, currentPosPlot, infoText, pathData, lastLogData);
         end
         
-        % 사이버 이벤트 업데이트 (bus.log)
+        % 사이버 이벤트 업데이트 (bus_system_events.log)
         [cyberLogBuffer, lastCyberPos] = updateCyberLog(cyberLogPath, lastCyberPos, cyberLogBuffer);
         updateLogPanel(axLog, logTextHandles, cyberLogBuffer);
 
@@ -63,22 +63,12 @@ end
 % --- 헬퍼 함수들 ---
 function [pathData, origin, lastPos, lastLogData] = updatePhysicalPlot(logPath, lastPos, pathData, origin, R, duration)
     lastLogData = [];
-    file_info = dir(logPath);
-    if isempty(file_info) || file_info.bytes <= lastPos, return; end
+    newLines = readNewLines(logPath, lastPos);
+    if isempty(newLines), return; end
+    lastPos = newLines.newPos;
     
-    fid = fopen(logPath, 'r');
-    fseek(fid, lastPos, 'bof');
-    
-    newLines = {};
-    while ~feof(fid)
-        line = fgetl(fid);
-        if ischar(line) && ~isempty(line), newLines{end+1} = line; end
-    end
-    lastPos = ftell(fid);
-    fclose(fid);
-    
-    for i = 1:length(newLines)
-        [logData, success] = parseJsonLog(newLines{i});
+    for i = 1:length(newLines.lines)
+        [logData, success] = parsePhysicalLog(newLines.lines{i});
         if ~success, continue; end
         lastLogData = logData; % 마지막 유효 데이터 저장
         
@@ -106,38 +96,28 @@ function update3DGraphics(ax, pathPlot, currentPosPlot, infoText, pathData, last
     set(pathPlot, 'XData', pathData(:, 2), 'YData', pathData(:, 3), 'ZData', pathData(:, 4));
     set(currentPosPlot, 'XData', lastX, 'YData', lastY, 'ZData', lastZ);
     
-    armedStr = ternary(lastLogData.armed, 'ARMED', 'DISARMED');
-    infoContent = sprintf('Mode: %s | Armed: %s | Battery: %d%%', lastLogData.mode, armedStr, lastLogData.battery);
+    armedStr = 'DISARMED';
+    if lastLogData.armed, armedStr = 'ARMED'; end
+    
+    infoContent = sprintf('Mode: %s | %s | Battery: %d%%', lastLogData.mode, armedStr, lastLogData.battery);
     set(infoText, 'Position', [lastX, lastY, lastZ + max(5, lastZ*0.1)], 'String', infoContent);
     title(ax, sprintf('물리적 경로 | 고도: %.1f m', lastZ), 'Color', 'w');
 end
 
 function [logBuffer, lastPos] = updateCyberLog(logPath, lastPos, logBuffer)
-    file_info = dir(logPath);
-    if isempty(file_info) || file_info.bytes <= lastPos, return; end
+    newLines = readNewLines(logPath, lastPos);
+    if isempty(newLines), return; end
+    lastPos = newLines.newPos;
     
-    fid = fopen(logPath, 'r');
-    fseek(fid, lastPos, 'bof');
-    
-    while ~feof(fid)
-        line = fgetl(fid);
-        if ischar(line) && ~isempty(line)
-            try
-                event = jsondecode(line);
-                % 중요한 정보만 추출하여 한 줄로 만듦
-                type = event.type;
-                data_summary = jsonencode(event.data);
-                if strlength(data_summary) > 70
-                    data_summary = [extractBefore(data_summary, 67), '...}'];
-                end
-                logBuffer{end+1} = sprintf('[%s] %s', type, data_summary);
-            catch
-                % pass
-            end
+    for i = 1:length(newLines.lines)
+        try
+            event = jsondecode(newLines.lines{i});
+            summary = formatCyberEvent(event);
+            logBuffer{end+1} = summary;
+        catch ME
+            % fprintf('Cyber log JSON parsing error: %s\n', ME.message);
         end
     end
-    lastPos = ftell(fid);
-    fclose(fid);
     
     % 버퍼 크기를 10으로 유지
     if length(logBuffer) > 10
@@ -145,39 +125,86 @@ function [logBuffer, lastPos] = updateCyberLog(logPath, lastPos, logBuffer)
     end
 end
 
+function summary = formatCyberEvent(event)
+    % 주요 이벤트를 식별하여 가독성 좋은 포맷으로 변경
+    type = event.type;
+    data = event.data;
+    summary = sprintf('[%s] %s', type, jsonencode(data)); % 기본 포맷
+
+    if strcmp(type, 'attack_started') && isfield(data, 'attack')
+        summary = sprintf('ATTACK STARTED: %s on %s', data.attack, data.target);
+    elseif strcmp(type, 'attack_finished') && isfield(data, 'attack')
+        summary = sprintf('ATTACK FINISHED: %s (code: %d)', data.attack, data.return_code);
+    elseif strcmp(type, 'mtd_triggered') && isfield(data, 'strategy')
+        summary = sprintf('MTD TRIGGERED: %s -> %s', data.strategy, data.details);
+    elseif strcmp(type, 'ai_cti_classification') && isfield(data, 'predicted_category')
+        summary = sprintf('AI DETECTION: %s (%s)', data.predicted_category, data.confidence);
+    elseif strcmp(type, 'recon_found_target') && isfield(data, 'target')
+        summary = sprintf('RECON: Attacker found new target at %s', data.target);
+    end
+end
+
 function updateLogPanel(ax, textHandles, logBuffer)
     for i = 1:10
         if i <= length(logBuffer)
-            logLine = logBuffer{i};
+            logLine = logBuffer{end-i+1}; % 최신 로그가 위로 오도록 수정
             color = 'w'; % 기본 흰색
-            if contains(logLine, 'attack'), color = '#ff6b6b'; end % 공격은 빨간색
-            if contains(logLine, 'mtd'), color = '#48dbfb'; end    % MTD는 하늘색
-            if contains(logLine, 'ai_'), color = '#feca57'; end   % AI는 노란색
-            set(textHandles(i), 'String', logLine, 'Color', color);
+            if contains(logLine, 'ATTACK', 'IgnoreCase', true), color = '#ff6b6b'; end % 공격은 빨간색
+            if contains(logLine, 'MTD', 'IgnoreCase', true), color = '#48dbfb'; end    % MTD는 하늘색
+            if contains(logLine, 'AI', 'IgnoreCase', true), color = '#feca57'; end     % AI는 노란색
+            if contains(logLine, 'RECON', 'IgnoreCase', true), color = '#ff9f43'; end % 정찰은 주황색
+            set(textHandles(i), 'String', ['> ' logLine], 'Color', color);
         else
             set(textHandles(i), 'String', '');
         end
     end
 end
 
-function [result, success] = parseJsonLog(jsonStr)
+function [result, success] = parsePhysicalLog(jsonStr)
     result = struct(); success = false;
     try
-        if ~contains(jsonStr, '"drone_state_detailed"'), return; end
-        result.timestamp = str2double(extractField(jsonStr, '"ts": ([\d\.]+)'));
-        result.lat = str2double(extractField(jsonStr, '"lat": ([\d\.\-]+)'));
-        result.lon = str2double(extractField(jsonStr, '"lon": ([\d\.\-]+)'));
-        result.alt = str2double(extractField(jsonStr, '"alt_m": ([\d\.\-]+)'));
-        result.mode = extractField(jsonStr, '"mode": "([^"]+)"');
-        result.armed = contains(extractField(jsonStr, '"armed": (\w+)'), 'true');
-        result.battery = round(str2double(extractField(jsonStr, '"battery_pct": ([\d\.\-]+)')));
-        if ~isempty(result.timestamp) && ~isempty(result.lat), success = true; end
-    catch, success = false; end
+        logData = jsondecode(jsonStr);
+        if ~strcmp(logData.type, 'drone_state_detailed'), return; end
+        data = logData.data;
+        
+        % 필수 필드 존재 여부 확인
+        required_fields = {'lat', 'lon', 'alt_m', 'mode', 'armed', 'battery_pct'};
+        if ~all(isfield(data, required_fields)), return; end
+
+        result.timestamp = logData.ts;
+        result.lat = data.lat;
+        result.lon = data.lon;
+        result.alt = data.alt_m;
+        result.mode = data.mode;
+        result.armed = data.armed;
+        result.battery = round(data.battery_pct);
+        success = true;
+    catch
+        success = false;
+    end
 end
 
-function value = extractField(str, pattern)
-    tokens = regexp(str, pattern, 'tokens');
-    if ~isempty(tokens), value = tokens{1}{1}; else, value = ''; end
+function newLines = readNewLines(logPath, lastPos)
+    % 파일에서 마지막으로 읽은 위치 이후의 새로운 라인을 읽어옴
+    newLines = [];
+    file_info = dir(logPath);
+    if isempty(file_info) || file_info.bytes <= lastPos, return; end
+    
+    try
+        fid = fopen(logPath, 'r');
+        fseek(fid, lastPos, 'bof');
+        
+        lines = {};
+        while ~feof(fid)
+            line = fgetl(fid);
+            if ischar(line) && ~isempty(line), lines{end+1} = line; end
+        end
+        newPos = ftell(fid);
+        fclose(fid);
+        
+        newLines.lines = lines;
+        newLines.newPos = newPos;
+    catch
+        % 파일 접근 오류 발생 시 무시
+    end
 end
-
-function result = ternary(condition, true_val, false_val)
