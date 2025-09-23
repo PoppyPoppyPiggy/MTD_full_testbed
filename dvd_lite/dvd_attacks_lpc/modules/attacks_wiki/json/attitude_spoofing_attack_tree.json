@@ -1,0 +1,420 @@
+{
+    "attack_tree": {
+      "name": "Attitude Spoofing Attack",
+      "attack_id": "DVD-ATTITUDE-001",
+      "description": "Spoofing drone attitude data (pitch, roll, yaw) to mislead Ground Control Station about drone orientation and movements",
+      "attack_type": "Protocol Tampering",
+      "target_systems": ["Ground Control Station", "Flight Controller", "MAVLink Protocol", "Attitude Display Systems"],
+      "attack_goal": "Deceive operator about drone orientation to cause incorrect flight decisions",
+      "risk_level": "High",
+      "probability": "High",
+      "technical_difficulty": "Low",
+      "detection_difficulty": "Medium",
+      "business_impact": "High",
+      "overall_risk_score": 7.5,
+      
+      "prerequisites": {
+        "network_access": "MAVLink network connectivity",
+        "tools_required": ["Python 3", "pymavlink", "scapy", "nmap"],
+        "knowledge_required": ["MAVLink protocol", "Attitude representation", "Python scripting", "UDP networking"],
+        "privileges_required": "sudo for packet injection"
+      },
+      
+      "attack_phases": {
+        "reconnaissance": {
+          "tactic_id": "TA0043",
+          "tactic_name": "Reconnaissance",
+          "objective": "Gather information about target drone attitude and orientation systems",
+          "techniques": [
+            {
+              "technique_id": "T1046",
+              "technique_name": "Network Service Discovery",
+              "description": "Identify MAVLink UDP port 14550 and attitude data streams",
+              "implementation": "nmap -sU -p 14550 <target_range>",
+              "success_criteria": "MAVLink services and attitude telemetry discovered",
+              "impact_level": "Low",
+              "detection_signatures": ["Port scan patterns", "Service enumeration"],
+              "evasion_methods": ["Stealth scanning", "Distributed reconnaissance"]
+            },
+            {
+              "technique_id": "T1040",
+              "technique_name": "Network Sniffing",
+              "description": "Capture and analyze ATTITUDE and HEARTBEAT message patterns",
+              "implementation": "Wireshark filtering for ATTITUDE (ID: 30) and HEARTBEAT (ID: 0) messages",
+              "success_criteria": "Normal attitude telemetry patterns identified",
+              "impact_level": "Low",
+              "detection_signatures": ["Network monitoring tools", "Packet capture signatures"],
+              "evasion_methods": ["Passive monitoring", "Encrypted capture channels"],
+              "target_messages": [
+                "ATTITUDE (ID: 30)",
+                "HEARTBEAT (ID: 0)"
+              ]
+            },
+            {
+              "technique_id": "T1590.005",
+              "technique_name": "Gather Victim Network Info: IP Addresses",
+              "description": "Identify QGroundControl and MAVProxy endpoints",
+              "implementation": "Network mapping and GCS endpoint discovery",
+              "success_criteria": "GCS IP addresses and ports identified",
+              "impact_level": "Low",
+              "detection_signatures": ["Network reconnaissance", "ARP scanning"],
+              "evasion_methods": ["Passive network analysis"],
+              "target_endpoints": [
+                "QGroundControl: 10.13.0.6:14550",
+                "MAVProxy WiFi: 192.168.13.14:14550",
+                "MAVProxy Bridge: 10.13.0.4:14550"
+              ]
+            }
+          ]
+        },
+        
+        "initial_access": {
+          "tactic_id": "TA0001",
+          "tactic_name": "Initial Access",
+          "objective": "Gain access to drone communication network",
+          "techniques": [
+            {
+              "technique_id": "T1200",
+              "technique_name": "Hardware Additions",
+              "description": "Connect attack system to drone network infrastructure",
+              "implementation": "WiFi adapter or Ethernet connection to drone network",
+              "success_criteria": "Network connectivity to MAVLink systems established",
+              "impact_level": "Medium",
+              "detection_signatures": ["New device signatures", "MAC address changes"],
+              "evasion_methods": ["MAC spoofing", "Device fingerprint masking"],
+              "optional": true
+            },
+            {
+              "technique_id": "T1133",
+              "technique_name": "External Remote Services",
+              "description": "Access drone network through wireless or remote connection",
+              "implementation": "WiFi network association or remote MAVLink access",
+              "success_criteria": "Remote access to drone communication systems",
+              "impact_level": "Medium",
+              "detection_signatures": ["Authentication events", "Connection logs"],
+              "evasion_methods": ["Credential exploitation", "Network vulnerability exploitation"]
+            }
+          ]
+        },
+        
+        "execution": {
+          "tactic_id": "TA0002",
+          "tactic_name": "Execution",
+          "objective": "Execute attitude spoofing attack script",
+          "techniques": [
+            {
+              "technique_id": "T1059.006",
+              "technique_name": "Command & Scripting Interpreter: Python",
+              "description": "Execute Python-based attitude spoofing script",
+              "implementation": "sudo python3 attitude-spoofing.py <target_ip:port>",
+              "success_criteria": "Script execution with continuous attitude message injection",
+              "impact_level": "Medium",
+              "detection_signatures": ["Python process execution", "Script execution patterns"],
+              "evasion_methods": ["Process name obfuscation", "Compiled binary execution"]
+            },
+            {
+              "technique_id": "T1106",
+              "technique_name": "Native API",
+              "description": "Use MAVLink API for attitude message generation",
+              "implementation": "create_attitude(), create_heartbeat() functions via pymavlink",
+              "success_criteria": "Valid spoofed attitude messages generated",
+              "impact_level": "High",
+              "detection_signatures": ["MAVLink library usage", "API call patterns"],
+              "evasion_methods": ["Custom protocol implementation", "Library masquerading"]
+            },
+            {
+              "technique_id": "T1053.003",
+              "technique_name": "Scheduled Task/Job: Cron",
+              "description": "Maintain continuous attitude message transmission",
+              "implementation": "while True loop for persistent message injection",
+              "success_criteria": "Sustained attitude spoofing operation",
+              "impact_level": "Medium",
+              "detection_signatures": ["Persistent processes", "Regular transmission patterns"],
+              "evasion_methods": ["Randomized timing", "Process resurrection mechanisms"]
+            }
+          ]
+        },
+        
+        "impact": {
+          "tactic_id": "TA0040",
+          "tactic_name": "Impact",
+          "objective": "Manipulate attitude display and deceive operators",
+          "techniques": [
+            {
+              "technique_id": "T1565.002",
+              "technique_name": "Transmitted Data Manipulation",
+              "description": "Inject forged ATTITUDE and HEARTBEAT messages",
+              "implementation": "Randomized roll/pitch/yaw values with realistic ranges",
+              "success_criteria": "GCS displays spoofed attitude values",
+              "impact_level": "Critical",
+              "detection_signatures": ["Message injection patterns", "Attitude inconsistencies"],
+              "evasion_methods": ["Realistic attitude curves", "Gradual orientation changes"],
+              "target_message": {
+                "message_id": 30,
+                "message_name": "ATTITUDE",
+                "manipulated_fields": [
+                  "roll (±1.0 radians)",
+                  "pitch (±1.0 radians)", 
+                  "yaw (±π radians)",
+                  "rollspeed (±0.1 rad/s)",
+                  "pitchspeed (±0.1 rad/s)",
+                  "yawspeed (±0.1 rad/s)"
+                ]
+              }
+            },
+            {
+              "technique_id": "T1565.003",
+              "technique_name": "Runtime Data Manipulation",
+              "description": "Manipulate real-time attitude display during flight operations",
+              "implementation": "Continuous injection of false orientation data",
+              "success_criteria": "Operator receives incorrect attitude information",
+              "impact_level": "Critical",
+              "detection_signatures": ["Rapid attitude changes", "Impossible orientation patterns"],
+              "evasion_methods": ["Physics-based attitude simulation", "Smooth transition curves"]
+            },
+            {
+              "technique_id": "T1498.001",
+              "technique_name": "Network Denial of Service: Direct Network Flood",
+              "description": "Overwhelm legitimate attitude data with spoofed messages",
+              "implementation": "High-frequency message injection to crowd out authentic data",
+              "success_criteria": "Authentic attitude data masked by spoofed messages",
+              "impact_level": "High",
+              "detection_signatures": ["Message flooding", "Network congestion"],
+              "evasion_methods": ["Selective message replacement", "Timing-based injection"]
+            }
+          ]
+        },
+        
+        "collection": {
+          "tactic_id": "TA0009",
+          "tactic_name": "Collection",
+          "objective": "Monitor attack effectiveness and operator responses",
+          "techniques": [
+            {
+              "technique_id": "T1005",
+              "technique_name": "Data from Local System",
+              "description": "Collect authentic attitude data for baseline comparison",
+              "implementation": "Monitor normal ATTITUDE message patterns",
+              "success_criteria": "Baseline attitude behavior established",
+              "impact_level": "Low",
+              "detection_signatures": ["Data collection patterns", "Telemetry access"],
+              "evasion_methods": ["Passive data collection"]
+            },
+            {
+              "technique_id": "T1113",
+              "technique_name": "Screen Capture",
+              "description": "Monitor GCS attitude display for attack verification",
+              "implementation": "Observe QGroundControl attitude indicators",
+              "success_criteria": "Spoofed attitude values confirmed on GCS display",
+              "impact_level": "Low",
+              "detection_signatures": ["Screen recording software", "Display monitoring"],
+              "evasion_methods": ["Physical observation", "Remote screen access"]
+            },
+            {
+              "technique_id": "T1119",
+              "technique_name": "Automated Collection",
+              "description": "Automated monitoring of operator reactions and flight behavior",
+              "implementation": "Script-based monitoring of GCS responses",
+              "success_criteria": "Operator confusion or incorrect decisions detected",
+              "impact_level": "Low",
+              "detection_signatures": ["Automated monitoring tools", "Data correlation patterns"],
+              "evasion_methods": ["Distributed monitoring", "Covert data collection"]
+            }
+          ]
+        },
+        
+        "defense_evasion": {
+          "tactic_id": "TA0005",
+          "tactic_name": "Defense Evasion",
+          "objective": "Avoid detection while maintaining attitude deception",
+          "techniques": [
+            {
+              "technique_id": "T1036.005",
+              "technique_name": "Masquerade: Match Legitimate Name or Location",
+              "description": "Ensure spoofed messages match legitimate MAVLink format",
+              "implementation": "Standard MAVLink protocol compliance with proper checksums",
+              "success_criteria": "Messages pass protocol validation checks",
+              "impact_level": "Medium",
+              "detection_signatures": ["Protocol validation failures", "Checksum errors"],
+              "evasion_methods": ["Perfect protocol adherence", "Authentic message structure"]
+            },
+            {
+              "technique_id": "T1027",
+              "technique_name": "Obfuscated Files or Information",
+              "description": "Use realistic attitude patterns to avoid detection",
+              "implementation": "Gradual orientation changes within normal flight parameters",
+              "success_criteria": "Spoofed attitudes appear natural and flight-consistent",
+              "impact_level": "Medium",
+              "detection_signatures": ["Impossible attitude patterns", "Physics violations"],
+              "evasion_methods": ["Flight dynamics simulation", "Realistic orientation modeling"]
+            },
+            {
+              "technique_id": "T1070.006",
+              "technique_name": "Timestomp",
+              "description": "Manipulate timestamp fields to disrupt temporal analysis",
+              "implementation": "time_boot_ms field manipulation in attitude messages",
+              "success_criteria": "Temporal correlation analysis disrupted",
+              "impact_level": "Low",
+              "detection_signatures": ["Time inconsistencies", "Temporal anomalies"],
+              "evasion_methods": ["Synchronized timestamps", "Progressive time adjustment"]
+            }
+          ]
+        }
+      },
+      
+      "attack_flow": [
+        "reconnaissance.T1046",
+        "reconnaissance.T1040",
+        "reconnaissance.T1590.005",
+        "initial_access.T1133",
+        "execution.T1059.006",
+        "execution.T1106",
+        "execution.T1053.003",
+        "impact.T1565.002",
+        "impact.T1565.003",
+        "impact.T1498.001",
+        "collection.T1005",
+        "collection.T1113",
+        "collection.T1119",
+        "defense_evasion.T1036.005",
+        "defense_evasion.T1027",
+        "defense_evasion.T1070.006"
+      ],
+      
+      "attitude_parameters": {
+        "roll": {
+          "description": "Rotation around longitudinal axis",
+          "range": "±1.0 radians (±57.3 degrees)",
+          "spoofed_values": "random.uniform(-1.0, 1.0)",
+          "impact": "Lateral orientation deception"
+        },
+        "pitch": {
+          "description": "Rotation around lateral axis", 
+          "range": "±1.0 radians (±57.3 degrees)",
+          "spoofed_values": "random.uniform(-1.0, 1.0)",
+          "impact": "Nose up/down orientation deception"
+        },
+        "yaw": {
+          "description": "Rotation around vertical axis",
+          "range": "±π radians (±180 degrees)",
+          "spoofed_values": "random.uniform(-3.14, 3.14)",
+          "impact": "Heading direction deception"
+        },
+        "angular_velocities": {
+          "rollspeed": "±0.1 rad/s",
+          "pitchspeed": "±0.1 rad/s", 
+          "yawspeed": "±0.1 rad/s"
+        }
+      },
+      
+      "success_metrics": {
+        "primary_goals": [
+          "GCS displays incorrect attitude values",
+          "Operator receives false orientation information",
+          "Flight attitude display manipulation achieved"
+        ],
+        "secondary_goals": [
+          "Attack remains undetected by monitoring systems",
+          "Realistic attitude patterns maintained",
+          "No system alerts triggered"
+        ]
+      },
+      
+      "operator_impact": [
+        "Incorrect spatial orientation assessment",
+        "Potential flight control errors due to misleading information",
+        "Reduced situational awareness",
+        "Possible collision risk from orientation misjudgment",
+        "Mission planning errors based on false attitude data",
+        "Loss of confidence in telemetry systems"
+      ],
+      
+      "attack_variations": [
+        {
+          "variation_name": "Static Attitude Lock",
+          "description": "Fix attitude display to specific orientation regardless of actual drone movement",
+          "implementation": "Send constant attitude values instead of random ones",
+          "detection_difficulty": "Low",
+          "impact": "High operator confusion"
+        },
+        {
+          "variation_name": "Inverted Attitude Display",
+          "description": "Display exact opposite of actual drone orientation",
+          "implementation": "Invert roll and pitch values, offset yaw by π radians",
+          "detection_difficulty": "Medium", 
+          "impact": "Critical orientation confusion"
+        },
+        {
+          "variation_name": "Delayed Attitude Response",
+          "description": "Show attitude data with artificial time delay",
+          "implementation": "Buffer and delay attitude messages by fixed interval",
+          "detection_difficulty": "High",
+          "impact": "Control loop instability"
+        }
+      ],
+      
+      "mitigation_strategies": [
+        {
+          "mitigation_id": "M1041",
+          "mitigation_name": "Encrypt Sensitive Information",
+          "description": "Implement MAVLink 2.0 message signing for attitude data",
+          "effectiveness": "High"
+        },
+        {
+          "mitigation_id": "M1030",
+          "mitigation_name": "Network Segmentation", 
+          "description": "Isolate attitude telemetry networks from external access",
+          "effectiveness": "High"
+        },
+        {
+          "mitigation_id": "M1047",
+          "mitigation_name": "Network Monitoring",
+          "description": "Monitor for attitude message injection and anomalies",
+          "effectiveness": "Medium"
+        },
+        {
+          "mitigation_id": "M1038",
+          "mitigation_name": "Execution Prevention",
+          "description": "Prevent unauthorized script execution on network systems",
+          "effectiveness": "Medium"
+        }
+      ],
+      
+      "detection_methods": [
+        {
+          "method": "IMU Cross-Validation",
+          "description": "Compare attitude telemetry with onboard IMU sensor data",
+          "accuracy": "High",
+          "implementation": "Real-time sensor fusion and consistency checking"
+        },
+        {
+          "method": "Message Source Verification",
+          "description": "Verify authenticity of attitude message sources",
+          "accuracy": "High",
+          "implementation": "MAVLink 2.0 cryptographic signatures"
+        },
+        {
+          "method": "Physics-Based Validation",
+          "description": "Validate attitude changes against flight physics constraints", 
+          "accuracy": "Medium",
+          "implementation": "Real-time physics engine comparison"
+        },
+        {
+          "method": "Visual-Attitude Correlation",
+          "description": "Compare attitude data with camera-based orientation detection",
+          "accuracy": "Medium",
+          "implementation": "Computer vision attitude estimation"
+        }
+      ],
+      
+      "consequences": [
+        "Operator spatial disorientation and confusion",
+        "Incorrect flight control inputs based on false information",
+        "Potential collision due to orientation misjudgment", 
+        "Mission failure from navigation errors",
+        "Loss of trust in telemetry systems",
+        "Reduced operational safety margins",
+        "Possible emergency landing due to operator uncertainty"
+      ]
+    }
+  }

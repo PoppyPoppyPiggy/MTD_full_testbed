@@ -1,0 +1,419 @@
+{
+    "attack_tree": {
+      "name": "ROS Topic Flood Attack",
+      "attack_id": "DVD-ROS-001",
+      "description": "Flooding ROS topic with large amounts of data to overwhelm system resources and disrupt drone's RTSP stream",
+      "attack_type": "Denial of Service",
+      "target_systems": ["ROS Master", "ROS Topic Infrastructure", "Camera System", "RTSP Stream Server", "Companion Computer"],
+      "attack_goal": "Disrupt video streaming services through ROS topic flooding to cause denial of service",
+      "risk_level": "High",
+      "probability": "Medium",
+      "technical_difficulty": "Medium",
+      "detection_difficulty": "Low",
+      "business_impact": "High",
+      "overall_risk_score": 6.5,
+      
+      "prerequisites": {
+        "network_access": "Access to ROS Master and topic infrastructure",
+        "tools_required": ["Docker", "ROS Noetic", "Python 3", "numpy"],
+        "knowledge_required": ["ROS architecture", "Docker containers", "Python scripting", "Network protocols"],
+        "privileges_required": "Docker execution privileges, network access to ROS Master"
+      },
+      
+      "attack_phases": {
+        "reconnaissance": {
+          "tactic_id": "TA0043",
+          "tactic_name": "Reconnaissance",
+          "objective": "Discover ROS infrastructure and target topics",
+          "techniques": [
+            {
+              "technique_id": "T1046",
+              "technique_name": "Network Service Discovery",
+              "description": "Scan for ROS Master services and topic infrastructure",
+              "implementation": "nmap scan for port 11311 (ROS Master) and topic discovery",
+              "success_criteria": "ROS Master and topic services discovered",
+              "impact_level": "Low",
+              "detection_signatures": ["Port scan patterns", "ROS service enumeration"],
+              "evasion_methods": ["Stealth scanning", "Service-specific probes"],
+              "target_services": [
+                "ROS Master: 11311/tcp",
+                "ROS Topics: Various ports",
+                "Camera Topics: /webcam/image_raw"
+              ]
+            },
+            {
+              "technique_id": "T1040",
+              "technique_name": "Network Sniffing",
+              "description": "Monitor ROS topic traffic and message patterns",
+              "implementation": "Packet capture of ROS topic communications",
+              "success_criteria": "ROS topic structure and message flow identified",
+              "impact_level": "Low",
+              "detection_signatures": ["Network monitoring", "Traffic analysis"],
+              "evasion_methods": ["Passive monitoring", "Encrypted capture"]
+            },
+            {
+              "technique_id": "T1590.005",
+              "technique_name": "Gather Victim Network Info: IP Addresses",
+              "description": "Identify ROS Master and node IP addresses",
+              "implementation": "Network mapping of ROS infrastructure components",
+              "success_criteria": "ROS Master and critical nodes identified",
+              "impact_level": "Low",
+              "detection_signatures": ["Network reconnaissance", "ROS node discovery"],
+              "evasion_methods": ["Distributed scanning"],
+              "target_endpoints": [
+                "ROS Master: 10.13.0.5:11311",
+                "Camera Node: 10.13.0.3",
+                "Topic Infrastructure: 10.13.0.5"
+              ]
+            }
+          ]
+        },
+        
+        "resource_development": {
+          "tactic_id": "TA0042",
+          "tactic_name": "Resource Development",
+          "objective": "Prepare attack infrastructure and tools",
+          "techniques": [
+            {
+              "technique_id": "T1588.002",
+              "technique_name": "Obtain Capabilities: Tool",
+              "description": "Acquire and configure ROS attack tools",
+              "implementation": "docker pull ros:noetic-ros-base",
+              "success_criteria": "ROS environment and attack tools ready",
+              "impact_level": "Low",
+              "detection_signatures": ["Docker image downloads", "Tool installations"],
+              "evasion_methods": ["Pre-built images", "Offline tools"]
+            },
+            {
+              "technique_id": "T1587.001",
+              "technique_name": "Develop Capabilities: Malware",
+              "description": "Develop ROS topic flooding script",
+              "implementation": "Python script for high-frequency topic publishing",
+              "success_criteria": "Functional topic flooding malware created",
+              "impact_level": "Medium",
+              "detection_signatures": ["Script development", "Code compilation"],
+              "evasion_methods": ["Code obfuscation", "Runtime generation"]
+            }
+          ]
+        },
+        
+        "initial_access": {
+          "tactic_id": "TA0001",
+          "tactic_name": "Initial Access",
+          "objective": "Gain access to ROS network infrastructure",
+          "techniques": [
+            {
+              "technique_id": "T1190",
+              "technique_name": "Exploit Public-Facing Application",
+              "description": "Connect to exposed ROS Master service",
+              "implementation": "Direct connection to unprotected ROS Master on port 11311",
+              "success_criteria": "ROS Master connection established",
+              "impact_level": "Medium",
+              "detection_signatures": ["ROS Master connection logs", "New node registrations"],
+              "evasion_methods": ["Legitimate node behavior simulation"],
+              "vulnerability": "Unprotected ROS Master without authentication"
+            },
+            {
+              "technique_id": "T1133",
+              "technique_name": "External Remote Services",
+              "description": "Access ROS infrastructure through network services",
+              "implementation": "Network-based access to ROS topic infrastructure",
+              "success_criteria": "Remote access to ROS services established",
+              "impact_level": "Medium",
+              "detection_signatures": ["Remote service access", "Network connections"],
+              "evasion_methods": ["VPN tunneling", "Proxy connections"]
+            }
+          ]
+        },
+        
+        "execution": {
+          "tactic_id": "TA0002",
+          "tactic_name": "Execution",
+          "objective": "Execute ROS topic flooding attack",
+          "techniques": [
+            {
+              "technique_id": "T1059.006",
+              "technique_name": "Command & Scripting Interpreter: Python",
+              "description": "Execute Python-based ROS flooding script",
+              "implementation": "python3 ros-topic-flood.py within ROS container",
+              "success_criteria": "Flooding script execution with high message rate",
+              "impact_level": "High",
+              "detection_signatures": ["Python process execution", "High CPU usage"],
+              "evasion_methods": ["Process name masquerading", "Resource throttling"]
+            },
+            {
+              "technique_id": "T1610",
+              "technique_name": "Deploy Container",
+              "description": "Deploy ROS attack container in target network",
+              "implementation": "docker run with network access to ROS infrastructure",
+              "success_criteria": "Attack container deployed and operational",
+              "impact_level": "Medium",
+              "detection_signatures": ["Container deployment", "Docker process creation"],
+              "evasion_methods": ["Legitimate container appearance", "Resource hiding"],
+              "container_config": {
+                "image": "ros:noetic-ros-base",
+                "network": "simulator",
+                "ip": "10.13.0.10",
+                "environment_vars": [
+                  "ROS_MASTER_URI=http://10.13.0.5:11311",
+                  "ROS_IP=10.13.0.10"
+                ]
+              }
+            },
+            {
+              "technique_id": "T1106",
+              "technique_name": "Native API",
+              "description": "Use ROS API for topic publishing and message creation",
+              "implementation": "rospy.Publisher() for high-frequency message publishing",
+              "success_criteria": "ROS topic publishing API successfully utilized",
+              "impact_level": "High",
+              "detection_signatures": ["ROS API usage", "Topic registration"],
+              "evasion_methods": ["API call obfuscation", "Custom ROS implementations"]
+            }
+          ]
+        },
+        
+        "impact": {
+          "tactic_id": "TA0040",
+          "tactic_name": "Impact",
+          "objective": "Disrupt ROS services and camera functionality",
+          "techniques": [
+            {
+              "technique_id": "T1499.002",
+              "technique_name": "Network Denial of Service: Reflection Amplification",
+              "description": "Amplify attack impact through ROS topic message flooding",
+              "implementation": "High-frequency publishing to /webcam/image_raw at 1000 Hz",
+              "success_criteria": "ROS topic infrastructure overwhelmed",
+              "impact_level": "Critical",
+              "detection_signatures": ["Abnormal message rates", "Topic flooding patterns"],
+              "evasion_methods": ["Distributed flooding", "Rate limiting evasion"],
+              "flood_parameters": {
+                "target_topic": "/webcam/image_raw",
+                "message_type": "sensor_msgs/Image",
+                "frequency": "1000 Hz",
+                "payload_size": "640x480x3 bytes (921,600 bytes)",
+                "total_bandwidth": "~921 MB/s"
+              }
+            },
+            {
+              "technique_id": "T1498.001",
+              "technique_name": "Network Denial of Service: Direct Network Flood",
+              "description": "Direct flooding of ROS topic infrastructure",
+              "implementation": "Continuous high-volume message publishing",
+              "success_criteria": "Network bandwidth consumption and service disruption",
+              "impact_level": "Critical",
+              "detection_signatures": ["Network congestion", "High bandwidth usage"],
+              "evasion_methods": ["Traffic shaping", "Bandwidth throttling"]
+            },
+            {
+              "technique_id": "T1489",
+              "technique_name": "Service Stop",
+              "description": "Disrupt RTSP stream service through resource exhaustion",
+              "implementation": "Resource starvation of camera and streaming services",
+              "success_criteria": "RTSP stream disrupted or stopped",
+              "impact_level": "Critical",
+              "detection_signatures": ["Service failures", "Resource exhaustion"],
+              "evasion_methods": ["Selective service targeting"]
+            },
+            {
+              "technique_id": "T1496",
+              "technique_name": "Resource Hijacking",
+              "description": "Consume system resources to disrupt legitimate operations",
+              "implementation": "CPU and memory exhaustion through excessive message processing",
+              "success_criteria": "System resources exhausted, legitimate services impacted",
+              "impact_level": "High",
+              "detection_signatures": ["High resource usage", "Performance degradation"],
+              "evasion_methods": ["Gradual resource consumption", "Distributed load"]
+            }
+          ]
+        },
+        
+        "persistence": {
+          "tactic_id": "TA0003",
+          "tactic_name": "Persistence",
+          "objective": "Maintain continuous attack operation",
+          "techniques": [
+            {
+              "technique_id": "T1053.003",
+              "technique_name": "Scheduled Task/Job: Cron",
+              "description": "Schedule persistent ROS flooding operations",
+              "implementation": "Automated script execution with restart capabilities",
+              "success_criteria": "Attack persists across system restarts",
+              "impact_level": "Medium",
+              "detection_signatures": ["Scheduled tasks", "Persistent processes"],
+              "evasion_methods": ["Process hiding", "Legitimate task appearance"]
+            },
+            {
+              "technique_id": "T1547.001",
+              "technique_name": "Boot or Logon Autostart Execution: Registry Run Keys / Startup Folder",
+              "description": "Configure automatic attack restart",
+              "implementation": "Container restart policies and auto-execution",
+              "success_criteria": "Attack automatically resumes after interruption",
+              "impact_level": "Medium",
+              "detection_signatures": ["Startup configurations", "Auto-restart behaviors"],
+              "evasion_methods": ["Delayed execution", "Conditional startup"]
+            }
+          ]
+        }
+      },
+      
+      "attack_flow": [
+        "reconnaissance.T1046",
+        "reconnaissance.T1040",
+        "reconnaissance.T1590.005",
+        "resource_development.T1588.002",
+        "resource_development.T1587.001",
+        "initial_access.T1190",
+        "initial_access.T1133",
+        "execution.T1059.006",
+        "execution.T1610",
+        "execution.T1106",
+        "impact.T1499.002",
+        "impact.T1498.001",
+        "impact.T1489",
+        "impact.T1496",
+        "persistence.T1053.003",
+        "persistence.T1547.001"
+      ],
+      
+      "ros_technical_details": {
+        "ros_version": "ROS Noetic",
+        "target_topic": "/webcam/image_raw",
+        "message_type": "sensor_msgs/Image",
+        "ros_master_uri": "http://10.13.0.5:11311",
+        "publisher_config": {
+          "queue_size": 10,
+          "message_rate": "1000 Hz",
+          "image_dimensions": "640x480",
+          "encoding": "rgb8",
+          "payload_generation": "numpy.random.bytes()"
+        },
+        "resource_impact": {
+          "cpu_usage": "High (message generation and publishing)",
+          "memory_usage": "High (message buffering)",
+          "network_bandwidth": "~921 MB/s",
+          "disk_io": "Minimal"
+        }
+      },
+      
+      "success_metrics": {
+        "primary_goals": [
+          "ROS topic /webcam/image_raw successfully flooded",
+          "RTSP stream disrupted or stopped",
+          "System resources exhausted"
+        ],
+        "secondary_goals": [
+          "Sustained attack operation maintained",
+          "Multiple ROS services impacted",
+          "Camera functionality completely disrupted"
+        ]
+      },
+      
+      "attack_script_details": {
+        "script_name": "ros-topic-flood.py",
+        "key_functions": [
+          "rospy.init_node('image_flooder', anonymous=True)",
+          "rospy.Publisher('/webcam/image_raw', Image, queue_size=10)",
+          "rospy.Rate(1000)  # 1000 Hz flooding",
+          "np.random.bytes(img.step * img.height)"
+        ],
+        "message_structure": {
+          "height": 480,
+          "width": 640,
+          "encoding": "rgb8",
+          "is_bigendian": 0,
+          "step": "width * 3",
+          "data": "random bytes payload"
+        }
+      },
+      
+      "attack_variations": [
+        {
+          "variation_name": "Multi-Topic Flood",
+          "description": "Simultaneously flood multiple ROS topics",
+          "implementation": "Multiple publisher instances targeting different topics",
+          "detection_difficulty": "Low",
+          "impact": "Comprehensive ROS infrastructure disruption"
+        },
+        {
+          "variation_name": "Gradual Resource Exhaustion",
+          "description": "Slowly increase message rate to avoid immediate detection",
+          "implementation": "Progressive rate increase over time",
+          "detection_difficulty": "Medium",
+          "impact": "Delayed but persistent service degradation"
+        },
+        {
+          "variation_name": "Payload Size Escalation",
+          "description": "Increase message payload size to maximize resource consumption",
+          "implementation": "Variable image dimensions and data sizes",
+          "detection_difficulty": "Low",
+          "impact": "Maximum bandwidth and memory consumption"
+        }
+      ],
+      
+      "mitigation_strategies": [
+        {
+          "mitigation_id": "M1037",
+          "mitigation_name": "Filter Network Traffic",
+          "description": "Implement rate limiting and traffic filtering for ROS topics",
+          "effectiveness": "High"
+        },
+        {
+          "mitigation_id": "M1030",
+          "mitigation_name": "Network Segmentation",
+          "description": "Isolate ROS infrastructure from external networks",
+          "effectiveness": "High"
+        },
+        {
+          "mitigation_id": "M1028",
+          "mitigation_name": "Operating System Configuration",
+          "description": "Configure resource limits and process controls",
+          "effectiveness": "Medium"
+        },
+        {
+          "mitigation_id": "M1026",
+          "mitigation_name": "Privileged Account Management",
+          "description": "Implement authentication and authorization for ROS services",
+          "effectiveness": "High"
+        }
+      ],
+      
+      "detection_methods": [
+        {
+          "method": "ROS Topic Monitoring",
+          "description": "Monitor ROS topic message rates and detect abnormal publishing patterns",
+          "accuracy": "High",
+          "implementation": "ROS topic monitoring tools with rate analysis"
+        },
+        {
+          "method": "Resource Usage Monitoring",
+          "description": "Monitor CPU, memory, and network usage for anomalies",
+          "accuracy": "Medium",
+          "implementation": "System monitoring tools with threshold alerting"
+        },
+        {
+          "method": "Network Traffic Analysis",
+          "description": "Analyze network traffic patterns for flooding indicators",
+          "accuracy": "High",
+          "implementation": "Network monitoring with flow analysis"
+        },
+        {
+          "method": "ROS Master Log Analysis",
+          "description": "Analyze ROS Master logs for suspicious node registrations and activities",
+          "accuracy": "Medium",
+          "implementation": "Log aggregation and anomaly detection"
+        }
+      ],
+      
+      "consequences": [
+        "Complete disruption of drone camera feed and RTSP streaming",
+        "Loss of real-time video surveillance capabilities",
+        "Degraded or failed mission operations requiring visual confirmation",
+        "System resource exhaustion affecting other critical services",
+        "Potential drone control issues due to resource starvation",
+        "Operational downtime and mission abort scenarios",
+        "Safety risks from loss of visual feedback during flight operations",
+        "Economic impact from service disruption and recovery efforts"
+      ]
+    }
+  }

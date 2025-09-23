@@ -13,13 +13,17 @@ import sys
 import socket
 
 # --- 경로 설정 ---
+# 현재 파일의 실제 경로를 기준으로 상위 디렉토리(LPC_DIR)를 결정합니다.
 LPC_DIR = os.path.dirname(os.path.realpath(__file__))
 ATTACKS_DIR = os.path.join(LPC_DIR, 'modules', 'attacks_wiki')
 
-# --- PYTHONPATH 자동 설정 ---
+# --- PYTHONPATH 자동 설정 (수정된 부분) ---
+# 스크립트의 상위 디렉토리를 Python의 모듈 검색 경로에 추가하여,
+# 'bus'와 같은 형제 모듈을 찾을 수 있도록 보장합니다.
 if LPC_DIR not in sys.path:
     sys.path.insert(0, LPC_DIR)
 
+# 이제 bus 모듈을 정상적으로 임포트할 수 있습니다.
 from bus.logger import log_bus_event
 
 # --- 전역 변수 ---
@@ -27,20 +31,27 @@ attack_process: Optional[subprocess.Popen] = None
 attack_lock = threading.RLock()
 stop_event = threading.Event()
 try:
-    MY_IP_ADDRESS = socket.gethostbyname(socket.gethostname())
-except socket.gaierror:
-    MY_IP_ADDRESS = subprocess.check_output(['hostname', '-I']).decode('utf-8').strip()
+    # 호스트 IP 주소를 가져옵니다.
+    MY_IP_ADDRESS = subprocess.check_output(['hostname', '-I']).decode('utf-8').strip().split()[0]
+except Exception:
+    try:
+        MY_IP_ADDRESS = socket.gethostbyname(socket.gethostname())
+    except socket.gaierror:
+        MY_IP_ADDRESS = '127.0.0.1'
+
 
 # ==============================================================================
 # 섹션 1: 유틸리티 함수 (변경 없음)
 # ==============================================================================
 def default_state_file() -> str:
+    """MTD 상태 파일의 기본 경로를 반환합니다."""
     shared_path = "/shared/mtd_state.json"
     if os.path.exists(shared_path):
         return shared_path
     return os.path.join(LPC_DIR, "mtd", "shared_state", "mtd_state.json")
 
 def read_mtd_target(state_file: str) -> Tuple[Optional[str], Optional[int]]:
+    """MTD 상태 파일에서 현재 타겟 IP와 포트를 읽어옵니다."""
     try:
         with open(state_file, "r", encoding="utf-8") as f:
             state = json.load(f)
@@ -48,15 +59,17 @@ def read_mtd_target(state_file: str) -> Tuple[Optional[str], Optional[int]]:
         if not target_str or ":" not in target_str: return None, None
         ip, port_str = target_str.split(":", 1)
         return ip, int(port_str)
-    except (FileNotFoundError, json.JSONDecodeError, ValueError):
+    except (FileNotFoundError, json.JSONDecodeError, ValueError, IndexError):
         print(f"[경고] MTD 상태 파일 '{state_file}' 읽기 실패.", file=sys.stderr)
         return None, None
 
 def get_available_attacks() -> List[str]:
+    """사용 가능한 공격 스크립트 목록을 반환합니다."""
     if not os.path.isdir(ATTACKS_DIR): return []
     return sorted([f for f in os.listdir(ATTACKS_DIR) if f.endswith('.sh')])
 
 def choose_attack_interactively(attacks: List[str]) -> Optional[str]:
+    """사용자에게 공격 스크립트를 선택하도록 프롬프트를 표시합니다."""
     if not attacks:
         print("⛔ 실행 가능한 공격 스크립트가 없습니다.")
         return None
@@ -78,6 +91,7 @@ def choose_attack_interactively(attacks: List[str]) -> Optional[str]:
 # 섹션 2: 공격 프로세스 관리 (변경 없음)
 # ==============================================================================
 def terminate_attack_process(reason: str):
+    """실행 중인 공격 프로세스를 안전하게 종료합니다."""
     global attack_process
     with attack_lock:
         if attack_process and attack_process.poll() is None:
@@ -87,14 +101,17 @@ def terminate_attack_process(reason: str):
                 os.killpg(os.getpgid(attack_process.pid), signal.SIGTERM)
                 attack_process.wait(timeout=2)
             except (ProcessLookupError, subprocess.TimeoutExpired):
-                try: os.killpg(os.getpgid(attack_process.pid), signal.SIGKILL)
-                except ProcessLookupError: pass
+                try: 
+                    os.killpg(os.getpgid(attack_process.pid), signal.SIGKILL)
+                except ProcessLookupError: 
+                    pass # 프로세스가 이미 종료된 경우
             except Exception as e:
                 print(f"[오류] 프로세스 종료 중 오류 발생: {e}", file=sys.stderr)
             attack_process = None
     stop_event.set()
 
 def stream_reader(pipe, stream_name: str, attack_name: str):
+    """공격 스크립트의 출력을 실시간으로 읽어 이벤트 버스에 로깅합니다."""
     try:
         for line in iter(pipe.readline, ''):
             log_bus_event(f"attack_{stream_name}", {"attack": attack_name, "output": line.strip(), "source_ip": MY_IP_ADDRESS})
@@ -104,18 +121,20 @@ def stream_reader(pipe, stream_name: str, attack_name: str):
 # ==============================================================================
 # 섹션 3: 메인 실행 로직 (자동화 기능 추가)
 # ==============================================================================
-def run_single_attack(attack_to_run: str, state_file: str):
-    """단일 공격을 실행하고 종료될 때까지 대기하는 함수."""
+def run_single_attack(attack_to_run: str, state_file: str) -> Optional[subprocess.Popen]:
+    """단일 공격을 실행하고 프로세스 객체를 반환합니다."""
     global attack_process
     
     attack_script_path = os.path.join(ATTACKS_DIR, attack_to_run)
     if not os.path.exists(attack_script_path):
-        print(f"⛔ 스크립트를 찾을 수 없습니다: {attack_script_path}"); return
+        print(f"⛔ 스크립트를 찾을 수 없습니다: {attack_script_path}")
+        return None
 
     print(f"\n[준비] 현재 MTD 타겟을 확인합니다 (from {state_file})...")
     target_ip, target_port = read_mtd_target(state_file)
     if not target_ip or not target_port:
-        print("⛔ MTD 상태 파일에서 유효한 타겟을 읽어올 수 없습니다."); return
+        print("⛔ MTD 상태 파일에서 유효한 타겟을 읽어올 수 없습니다.")
+        return None
     
     print(f"  -> 현재 공격 타겟: {target_ip}:{target_port}")
     
@@ -125,7 +144,7 @@ def run_single_attack(attack_to_run: str, state_file: str):
 
     try:
         print("\n" + "="*23 + " 공격 시작 " + "="*24)
-        print(f"  - 공격자 IP    : {MY_IP_ADDRESS}")
+        print(f"  - 공격자 IP      : {MY_IP_ADDRESS}")
         print(f"  - 스크립트      : {attack_to_run}")
         print(f"  - 타    겟      : {target_ip}:{target_port}")
         print("="*58)
@@ -138,14 +157,11 @@ def run_single_attack(attack_to_run: str, state_file: str):
             text=True, encoding='utf-8', errors='replace',
             preexec_fn=os.setsid, env=process_env
         )
-        with attack_lock: attack_process = proc
+        with attack_lock: 
+            attack_process = proc
             
         threading.Thread(target=stream_reader, args=(proc.stdout, "stdout", attack_to_run), daemon=True).start()
         threading.Thread(target=stream_reader, args=(proc.stderr, "stderr", attack_to_run), daemon=True).start()
-
-        # 자동화 모드가 아닐 때만 proc.wait() 호출
-        if threading.current_thread() is threading.main_thread():
-             proc.wait()
 
     except Exception as e:
         print(f"❌ 공격 실행 중 오류 발생: {e}", file=sys.stderr)
@@ -156,6 +172,7 @@ def run_single_attack(attack_to_run: str, state_file: str):
 
 
 def main():
+    """스크립트의 메인 진입점. 인자를 파싱하고 공격을 실행합니다."""
     signal.signal(signal.SIGINT, lambda s, f: terminate_attack_process("user_interrupt"))
     signal.signal(signal.SIGTERM, lambda s, f: terminate_attack_process("system_terminate"))
 
@@ -174,7 +191,7 @@ def main():
     # --- 자동화 모드 실행 ---
     if args.run_all:
         print(f"🚀 [자동화 모드] {len(all_attacks)}개의 모든 공격을 각각 {args.duration}초 동안 실행합니다.")
-        print("    (중지하려면 Ctrl+C를 누르세요)")
+        print("   (중지하려면 Ctrl+C를 누르세요)")
         time.sleep(3)
 
         for i, attack_name in enumerate(all_attacks, 1):
@@ -193,7 +210,7 @@ def main():
                     # 시간이 다 되면 정상 종료
                     terminate_attack_process(f"duration_limit ({args.duration}s)")
                 
-                return_code = proc.poll()
+                return_code = proc.poll() if proc else -1
                 print("\n" + "="*23 + " 공격 종료 " + "="*24)
                 print(f"  - 종료 코드: {return_code}")
                 print("="*58)
@@ -208,15 +225,18 @@ def main():
     # --- 대화형 모드 (기존 방식) ---
     attack_to_run = args.attack or choose_attack_interactively(all_attacks)
     if not attack_to_run:
-        print("[알림] 공격 실행이 취소되었습니다."); return
+        print("[알림] 공격 실행이 취소되었습니다.")
+        return
 
     if not args.yes:
         target_ip, target_port = read_mtd_target(state_file)
         if not target_ip:
-             print("[알림] 공격 실행이 취소되었습니다."); return
+            print("[알림] 타겟 정보를 찾을 수 없어 공격 실행이 취소되었습니다.")
+            return
         confirm = input(f"\n'{attack_to_run}' 공격을 타겟({target_ip}:{target_port})에 대해 시작하시겠습니까? (y/n): ").lower()
         if confirm not in ['y', 'yes']:
-            print("[알림] 공격 실행이 취소되었습니다."); return
+            print("[알림] 공격 실행이 취소되었습니다.")
+            return
 
     try:
         proc = run_single_attack(attack_to_run, state_file)

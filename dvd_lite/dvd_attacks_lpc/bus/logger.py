@@ -1,48 +1,63 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-import os
+
 import json
+import os
 import time
 import datetime
-import fcntl # 파일 잠금을 위해 추가
+from typing import Dict, Any, Optional
 
-# --- 경로 설정 ---
-BUS_DIR = os.path.dirname(os.path.realpath(__file__))
-LOG_FILE_PATH = os.path.join(BUS_DIR, 'bus.log')
+# --- 전역 설정 ---
+# 환경 변수에서 로그 파일 경로를 가져오거나 기본값을 사용합니다.
+LOG_FILE_PATH = os.environ.get('LPC_BUS_LOG', '/home/kali/MTD_full_testbed/dvd_lite/dvd_attacks_lpc/bus/bus.log')
+LOG_FILE_DVD_PATH = os.environ.get('LPC_BUS_DVD_LOG', '/home/kali/MTD_full_testbed/dvd_lite/dvd_attacks_lpc/bus/bus_dvd.log')
 
-def log_bus_event(event_type: str, data: dict):
+# 로그 파일이 위치할 디렉토리가 없으면 생성합니다.
+os.makedirs(os.path.dirname(LOG_FILE_PATH), exist_ok=True)
+os.makedirs(os.path.dirname(LOG_FILE_DVD_PATH), exist_ok=True)
+
+
+def log_bus_event(event_type: str, data: Dict[str, Any], is_dvd_event: bool = False):
     """
-    지정된 이벤트를 bus.log 파일에 JSONL 형식으로 안전하게 기록합니다.
-    - 파일 잠금(flock)을 사용하여 여러 프로세스가 동시에 써도 로그가 깨지지 않도록 보장합니다.
-    - with 구문을 사용하여 파일 핸들을 안정적으로 관리합니다.
+    지정된 이벤트 타입과 데이터로 표준 로그 레코드를 생성하고 파일에 기록합니다.
+
+    Args:
+        event_type (str): 이벤트의 종류를 나타내는 문자열 (예: 'attack_started').
+        data (Dict[str, Any]): 이벤트와 관련된 데이터를 담은 딕셔너리.
+        is_dvd_event (bool): True이면 bus_dvd.log에, False이면 bus.log에 기록합니다.
     """
+    # 표준 로그 구조 생성
     record = {
         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "ts": time.time(),
         "type": event_type,
-        "data": data,
+        "data": data
     }
-
+    
+    # 이벤트 종류에 따라 적절한 로그 파일 경로 선택
+    log_path = LOG_FILE_DVD_PATH if is_dvd_event else LOG_FILE_PATH
+    
     try:
-        # 'a' 모드로 파일을 열어 내용을 추가합니다.
-        with open(LOG_FILE_PATH, "a", encoding="utf-8") as f:
-            # --- 파일 잠금 시작 ---
-            # 다른 프로세스가 이 파일에 쓰는 것을 잠시 막아 로그가 섞이는 것을 방지합니다.
-            fcntl.flock(f, fcntl.LOCK_EX)
-            try:
-                # JSON 문자열로 변환하여 파일에 쓰고, flush=True로 즉시 기록합니다.
-                f.write(json.dumps(record, ensure_ascii=False) + "\n")
-            finally:
-                # --- 파일 잠금 해제 ---
-                fcntl.flock(f, fcntl.LOCK_UN)
+        # JSONL 형식 (한 줄에 하나의 JSON)으로 파일에 추가합니다.
+        with open(log_path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False) + "\n")
     except IOError as e:
-        # 터미널에 오류를 출력하여 문제를 즉시 인지할 수 있도록 합니다.
-        print(f"[ERROR] bus.log 파일 쓰기 실패: {e}", file=sys.stderr)
-    except Exception as e:
-        print(f"[ERROR] 로그 기록 중 예기치 않은 오류 발생: {e}", file=sys.stderr)
+        # 파일 쓰기 오류 발생 시 표준 에러로 출력
+        print(f"CRITICAL: Could not write to bus log file '{log_path}'. Error: {e}", file=sys.stderr)
 
+# --- 스크립트로 직접 실행될 때를 위한 간단한 테스트 로직 ---
 if __name__ == '__main__':
-    # 로거 테스트를 위한 예제 코드
-    print(f"로거 테스트: '{LOG_FILE_PATH}' 파일에 테스트 로그를 기록합니다.")
-    log_bus_event("test_event", {"message": "Logger is working correctly!", "pid": os.getpid()})
-    print("테스트 완료.")
+    print("Logging a test event to the main bus...")
+    log_bus_event(
+        event_type='test_event',
+        data={'message': 'This is a test from logger.py', 'module': 'bus.logger'}
+    )
+    
+    print("Logging a test DVD event to the DVD bus...")
+    log_bus_event(
+        event_type='test_dvd_event',
+        data={'message': 'This is a DVD test from logger.py'},
+        is_dvd_event=True
+    )
+    
+    print(f"Test events logged to '{LOG_FILE_PATH}' and '{LOG_FILE_DVD_PATH}'.")
