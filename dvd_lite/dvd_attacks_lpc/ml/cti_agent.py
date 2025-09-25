@@ -7,6 +7,7 @@ import pandas as pd
 from collections import deque
 import threading
 
+# --- 경로 설정 ---
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
@@ -17,9 +18,11 @@ LOG_SOURCES = {
     "events": os.path.join(PROJECT_ROOT, 'bus', 'bus.log'),
     "telemetry": os.path.join(PROJECT_ROOT, 'bus', 'bus_dvd.log'),
 }
-TIME_WINDOW_SEC = 2.0
+TIME_WINDOW_SEC = 3.0  # 판단 시간 창을 약간 늘려 시계열 피처의 효과를 극대화
+PREDICTION_INTERVAL_SEC = 0.5
 
-def follow(file, queue):
+def follow(file, queue: deque):
+    """파일의 새로운 라인을 지속적으로 읽어 deque에 추가합니다."""
     file.seek(0, os.SEEK_END)
     while True:
         line = file.readline()
@@ -32,25 +35,39 @@ def follow(file, queue):
             pass
 
 def main():
-    print("[*] CTI 분류 AI 에이전트 (v2.0) 시작.")
+    print("[*] CTI 분류 AI 에이전트 (v3.0, Ensemble) 시작.")
+    
+    print(f"[*] AI 모델 로딩 대기 중: '{MODEL_PATH}'")
+    while not os.path.exists(MODEL_PATH):
+        time.sleep(2)
+        
     try:
         model = joblib.load(MODEL_PATH)
-        print(f"[*] AI 모델 로드 완료: '{MODEL_PATH}'")
-    except FileNotFoundError:
-        print(f"[!] 오류: AI 모델 파일 '{MODEL_PATH}' 없음. train_classifier.py를 먼저 실행하세요.")
+        print("[*] AI 모델 로드 완료.")
+    except Exception as e:
+        print(f"[!] 오류: AI 모델 파일 '{MODEL_PATH}' 로드 실패: {e}")
         return
 
-    log_queues = {name: deque() for name in LOG_SOURCES.keys()}
+    # 메모리 최적화를 위해 고정 크기 deque 사용
+    log_queues = {name: deque(maxlen=2000) for name in LOG_SOURCES.keys()}
 
     for name, path in LOG_SOURCES.items():
-        while not os.path.exists(path): time.sleep(1)
-        f = open(path, 'r', errors='ignore')
-        threading.Thread(target=follow, args=(f, log_queues[name]), daemon=True).start()
+        while not os.path.exists(path): 
+            print(f"[*] 로그 파일 대기 중: {path}")
+            time.sleep(1)
+        try:
+            f = open(path, 'r', errors='ignore')
+            threading.Thread(target=follow, args=(f, log_queues[name]), daemon=True).start()
+        except FileNotFoundError:
+            print(f"[!] 로그 파일 없음: {path}")
+            return
 
     print("[*] 모든 로그 소스 감시 시작...")
     
-    current_data = []
+    # 현재 데이터 창을 관리하기 위한 deque
+    time_window_data = deque()
     last_prediction_time = 0
+    
     while True:
         new_data_found = False
         for name, queue in log_queues.items():
@@ -58,42 +75,65 @@ def main():
                 log = queue.popleft()
                 log['log_source'] = name
                 log['log_type'] = log.get('type', 'unknown')
-                current_data.append(log)
+                time_window_data.append(log)
                 new_data_found = True
         
-        if not new_data_found and not current_data:
+        now = time.time()
+        
+        # 오래된 데이터 제거
+        while time_window_data and (now - time_window_data[0].get('ts', 0)) > TIME_WINDOW_SEC:
+            time_window_data.popleft()
+
+        if not time_window_data:
             time.sleep(0.2)
             continue
             
-        now = time.time()
-        current_data = [d for d in current_data if now - d.get('ts', 0) < TIME_WINDOW_SEC]
-        
-        # 0.5초마다 한번씩만 예측 수행
-        if current_data and (now - last_prediction_time > 0.5):
-            df_window = pd.json_normalize(current_data, sep='_')
+        if (now - last_prediction_time) > PREDICTION_INTERVAL_SEC:
+            last_prediction_time = now
             
-            # 학습 시 사용한 컬럼 정보가 모델에 저장되어 있음
-            training_cols = model.steps[0][1].feature_names_in_
+            df_window = pd.json_normalize(list(time_window_data), sep='_')
+            
+            try:
+                training_cols = model.steps[0].get_feature_names_out()
+            except AttributeError:
+                # 파이프라인의 ColumnTransformer 내부의 피처 이름을 가져오는 로직
+                transformers = model.steps[0][1].transformers_
+                training_cols = []
+                for name, _, features in transformers:
+                    if name == 'num':
+                        training_cols.extend(features)
+                    elif name == 'cat':
+                        # OneHotEncoder의 출력 피처 이름을 가져옴
+                        ohe_feature_names = model.steps[0][1].named_transformers_['cat']['onehot'].get_feature_names_out(features)
+                        training_cols.extend(ohe_feature_names)
+
+            # 학습에 사용된 피처가 실시간 데이터에 없으면 0으로 채움
             for col in training_cols:
                 if col not in df_window.columns:
-                    df_window[col] = pd.NA
+                    df_window[col] = 0
             
-            X_live = df_window[training_cols]
+            # 피처 순서 맞추기 및 NaN 처리
+            X_live = df_window[training_cols].fillna(0)
             
-            prediction = model.predict(X_live)[-1] # 마지막 데이터 포인트로 예측
-            confidence = max(model.predict_proba(X_live)[-1])
-            
-            if prediction == 'Attack':
-                classification_data = {
-                    "predicted_label": prediction,
-                    "confidence": f"{confidence:.2%}",
-                    "source_event": X_live['log_type'].iloc[-1]
-                }
-                log_bus_event("ai_cti_classification", classification_data)
+            if X_live.empty:
+                continue
 
-                print(f"  \033[91m[AI-CTI] 위협 탐지 (신뢰도: {confidence:.2%})\033[0m <= {X_live['log_type'].iloc[-1]}")
+            latest_point = X_live.iloc[[-1]]
+            prediction = model.predict(latest_point)[0]
+            confidence = max(model.predict_proba(latest_point)[0])
             
-            last_prediction_time = now
+            if prediction == 'Attack' and confidence > 0.75: # 신뢰도 임계값 설정
+                latest_log = time_window_data[-1]
+                context = {
+                    "confidence": f"{confidence:.2%}",
+                    "source_event_type": latest_log.get('log_type'),
+                    "drone_mode": latest_log.get('data_mode', 'N/A'),
+                    "triggering_log": latest_log,
+                }
+                
+                log_bus_event("ai_cti_classification", context)
+
+                print(f"  \033[91m[AI-CTI] 위협 탐지! (신뢰도: {context['confidence']}, 모드: {context['drone_mode']})\033[0m <= {context['source_event_type']}")
         
         time.sleep(0.1)
 

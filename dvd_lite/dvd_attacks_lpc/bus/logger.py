@@ -1,63 +1,52 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
-import json
 import os
+import json
 import time
 import datetime
-from typing import Dict, Any, Optional
+import fcntl
+import sys
 
-# --- 전역 설정 ---
-# 환경 변수에서 로그 파일 경로를 가져오거나 기본값을 사용합니다.
-LOG_FILE_PATH = os.environ.get('LPC_BUS_LOG', '/home/kali/MTD_full_testbed/dvd_lite/dvd_attacks_lpc/bus/bus.log')
-LOG_FILE_DVD_PATH = os.environ.get('LPC_BUS_DVD_LOG', '/home/kali/MTD_full_testbed/dvd_lite/dvd_attacks_lpc/bus/bus_dvd.log')
+# --- 기본 경로 설정 ---
+BUS_DIR = os.path.dirname(os.path.realpath(__file__))
+DEFAULT_LOG_FILE_PATH = os.path.join(BUS_DIR, 'bus.log')
 
-# 로그 파일이 위치할 디렉토리가 없으면 생성합니다.
-os.makedirs(os.path.dirname(LOG_FILE_PATH), exist_ok=True)
-os.makedirs(os.path.dirname(LOG_FILE_DVD_PATH), exist_ok=True)
-
-
-def log_bus_event(event_type: str, data: Dict[str, Any], is_dvd_event: bool = False):
+def log_bus_event(event_type: str, data: dict, log_file_path: str = None, source_override: str = None):
     """
-    지정된 이벤트 타입과 데이터로 표준 로그 레코드를 생성하고 파일에 기록합니다.
-
-    Args:
-        event_type (str): 이벤트의 종류를 나타내는 문자열 (예: 'attack_started').
-        data (Dict[str, Any]): 이벤트와 관련된 데이터를 담은 딕셔너리.
-        is_dvd_event (bool): True이면 bus_dvd.log에, False이면 bus.log에 기록합니다.
+    지정된 이벤트를 지정된 로그 파일에 JSONL 형식으로 안전하게 기록합니다.
+    - log_file_path가 None이면 기본 'bus.log'에 기록합니다.
+    - source_override를 통해 로그 기록 주체를 명시할 수 있습니다.
     """
-    # 표준 로그 구조 생성
     record = {
         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "ts": time.time(),
+        "source": source_override or "default_event",
         "type": event_type,
-        "data": data
+        "data": data,
     }
-    
-    # 이벤트 종류에 따라 적절한 로그 파일 경로 선택
-    log_path = LOG_FILE_DVD_PATH if is_dvd_event else LOG_FILE_PATH
-    
-    try:
-        # JSONL 형식 (한 줄에 하나의 JSON)으로 파일에 추가합니다.
-        with open(log_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
-    except IOError as e:
-        # 파일 쓰기 오류 발생 시 표준 에러로 출력
-        print(f"CRITICAL: Could not write to bus log file '{log_path}'. Error: {e}", file=sys.stderr)
 
-# --- 스크립트로 직접 실행될 때를 위한 간단한 테스트 로직 ---
+    # 사용할 로그 파일 경로 결정
+    path = log_file_path or DEFAULT_LOG_FILE_PATH
+
+    try:
+        with open(path, "a", encoding="utf-8") as f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            try:
+                f.write(json.dumps(record, ensure_ascii=False) + "\n")
+            finally:
+                fcntl.flock(f, fcntl.LOCK_UN)
+    except IOError as e:
+        print(f"[ERROR] 로그 파일 쓰기 실패 ({os.path.basename(path)}): {e}", file=sys.stderr)
+    except Exception as e:
+        print(f"[ERROR] 로그 기록 중 예기치 않은 오류 발생: {e}", file=sys.stderr)
+
 if __name__ == '__main__':
-    print("Logging a test event to the main bus...")
-    log_bus_event(
-        event_type='test_event',
-        data={'message': 'This is a test from logger.py', 'module': 'bus.logger'}
-    )
+    print(f"로거 테스트: '{DEFAULT_LOG_FILE_PATH}' 파일에 테스트 로그를 기록합니다.")
+    log_bus_event("test_event", {"message": "Default logger test.", "pid": os.getpid()})
     
-    print("Logging a test DVD event to the DVD bus...")
-    log_bus_event(
-        event_type='test_dvd_event',
-        data={'message': 'This is a DVD test from logger.py'},
-        is_dvd_event=True
-    )
+    # 다른 로그 파일에 쓰는 예제
+    custom_log_path = os.path.join(BUS_DIR, 'bus_custom.log')
+    print(f"로거 테스트: '{custom_log_path}' 파일에 커스텀 로그를 기록합니다.")
+    log_bus_event("custom_type", {"value": 123}, log_file_path=custom_log_path, source_override="custom_source")
     
-    print(f"Test events logged to '{LOG_FILE_PATH}' and '{LOG_FILE_DVD_PATH}'.")
+    print("테스트 완료.")

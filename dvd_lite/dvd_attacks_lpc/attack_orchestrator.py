@@ -13,25 +13,20 @@ import sys
 import socket
 
 # --- 경로 설정 ---
-# 현재 파일의 실제 경로를 기준으로 상위 디렉토리(LPC_DIR)를 결정합니다.
 LPC_DIR = os.path.dirname(os.path.realpath(__file__))
 ATTACKS_DIR = os.path.join(LPC_DIR, 'modules', 'attacks_wiki')
 
-# --- PYTHONPATH 자동 설정 (수정된 부분) ---
-# 스크립트의 상위 디렉토리를 Python의 모듈 검색 경로에 추가하여,
-# 'bus'와 같은 형제 모듈을 찾을 수 있도록 보장합니다.
+# --- PYTHONPATH 자동 설정 ---
 if LPC_DIR not in sys.path:
     sys.path.insert(0, LPC_DIR)
 
-# 이제 bus 모듈을 정상적으로 임포트할 수 있습니다.
 from bus.logger import log_bus_event
 
 # --- 전역 변수 ---
 attack_process: Optional[subprocess.Popen] = None
 attack_lock = threading.RLock()
-stop_event = threading.Event()
+stop_event = threading.Event() # 전체 실행 중단을 위한 이벤트
 try:
-    # 호스트 IP 주소를 가져옵니다.
     MY_IP_ADDRESS = subprocess.check_output(['hostname', '-I']).decode('utf-8').strip().split()[0]
 except Exception:
     try:
@@ -88,27 +83,45 @@ def choose_attack_interactively(attacks: List[str]) -> Optional[str]:
             print("숫자 또는 'q'를 입력해주세요.")
 
 # ==============================================================================
-# 섹션 2: 공격 프로세스 관리 (변경 없음)
+# 섹션 2: 공격 프로세스 관리 (⭐️ 핵심 수정 부분 ⭐️)
 # ==============================================================================
-def terminate_attack_process(reason: str):
-    """실행 중인 공격 프로세스를 안전하게 종료합니다."""
+def _kill_process_group(proc: subprocess.Popen):
+    """프로세스 그룹을 종료하는 내부 함수."""
+    if proc and proc.poll() is None:
+        try:
+            pgid = os.getpgid(proc.pid)
+            os.killpg(pgid, signal.SIGTERM)
+            proc.wait(timeout=2)
+        except (ProcessLookupError, subprocess.TimeoutExpired):
+            try:
+                pgid = os.getpgid(proc.pid)
+                os.killpg(pgid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass # 프로세스가 이미 사라짐
+        except Exception as e:
+            print(f"[오류] 프로세스 종료 중 오류 발생: {e}", file=sys.stderr)
+
+def cleanup_attack_process(reason: str):
+    """
+    실행 중인 공격 프로세스만 정리합니다. 
+    --run-all 모드에서 개별 공격을 시간 초과로 종료할 때 사용됩니다.
+    ⭐️ 이 함수는 stop_event를 설정하지 않습니다. ⭐️
+    """
     global attack_process
     with attack_lock:
-        if attack_process and attack_process.poll() is None:
-            print(f"\n[알림] 공격 프로세스를 종료합니다 (사유: {reason})...")
-            log_bus_event("attack_terminating", {"reason": reason, "pid": attack_process.pid, "source_ip": MY_IP_ADDRESS})
-            try:
-                os.killpg(os.getpgid(attack_process.pid), signal.SIGTERM)
-                attack_process.wait(timeout=2)
-            except (ProcessLookupError, subprocess.TimeoutExpired):
-                try: 
-                    os.killpg(os.getpgid(attack_process.pid), signal.SIGKILL)
-                except ProcessLookupError: 
-                    pass # 프로세스가 이미 종료된 경우
-            except Exception as e:
-                print(f"[오류] 프로세스 종료 중 오류 발생: {e}", file=sys.stderr)
+        if attack_process:
+            print(f"\n[알림] 현재 공격 프로세스를 정리합니다 (사유: {reason})...")
+            log_bus_event("attack_cleanup", {"reason": reason, "pid": attack_process.pid})
+            _kill_process_group(attack_process)
             attack_process = None
-    stop_event.set()
+
+def terminate_attack_process(reason: str):
+    """
+    실행 중인 공격 프로세스를 종료하고, 전역 중단 신호(stop_event)를 보냅니다.
+    Ctrl+C 또는 스크립트의 최종 정리 시에 사용됩니다.
+    """
+    cleanup_attack_process(reason) # 먼저 현재 프로세스 정리
+    stop_event.set() # ⭐️ 전체 스크립트 중단 신호 설정 ⭐️
 
 def stream_reader(pipe, stream_name: str, attack_name: str):
     """공격 스크립트의 출력을 실시간으로 읽어 이벤트 버스에 로깅합니다."""
@@ -119,11 +132,16 @@ def stream_reader(pipe, stream_name: str, attack_name: str):
         if pipe: pipe.close()
 
 # ==============================================================================
-# 섹션 3: 메인 실행 로직 (자동화 기능 추가)
+# 섹션 3: 메인 실행 로직 (⭐️ 핵심 수정 부분 ⭐️)
 # ==============================================================================
 def run_single_attack(attack_to_run: str, state_file: str) -> Optional[subprocess.Popen]:
     """단일 공격을 실행하고 프로세스 객체를 반환합니다."""
     global attack_process
+    
+    with attack_lock:
+        if attack_process and attack_process.poll() is None:
+            print("[경고] 이전 공격 프로세스가 아직 실행 중입니다. 정리합니다.")
+            cleanup_attack_process("new_attack_request")
     
     attack_script_path = os.path.join(ATTACKS_DIR, attack_to_run)
     if not os.path.exists(attack_script_path):
@@ -141,12 +159,14 @@ def run_single_attack(attack_to_run: str, state_file: str) -> Optional[subproces
     process_env = os.environ.copy()
     process_env['TARGET_IP'] = target_ip
     process_env['TARGET_PORT'] = str(target_port)
+    process_env['ATTACK_NAME'] = attack_to_run.replace('.sh', '')
 
     try:
         print("\n" + "="*23 + " 공격 시작 " + "="*24)
         print(f"  - 공격자 IP      : {MY_IP_ADDRESS}")
-        print(f"  - 스크립트      : {attack_to_run}")
-        print(f"  - 타    겟      : {target_ip}:{target_port}")
+        print(f"  - 스크립트       : {attack_to_run}")
+        print(f"  - 타     겟       : {target_ip}:{target_port}")
+        print(f"  - 데이터 라벨    : {process_env['ATTACK_NAME']}")
         print("="*58)
         
         log_bus_event("attack_started", {"attack": attack_to_run, "target": f"{target_ip}:{target_port}", "source_ip": MY_IP_ADDRESS})
@@ -155,7 +175,8 @@ def run_single_attack(attack_to_run: str, state_file: str) -> Optional[subproces
             ['/bin/bash', attack_script_path],
             stdout=subprocess.PIPE, stderr=subprocess.PIPE,
             text=True, encoding='utf-8', errors='replace',
-            preexec_fn=os.setsid, env=process_env
+            preexec_fn=os.setsid, 
+            env=process_env
         )
         with attack_lock: 
             attack_process = proc
@@ -166,13 +187,16 @@ def run_single_attack(attack_to_run: str, state_file: str) -> Optional[subproces
     except Exception as e:
         print(f"❌ 공격 실행 중 오류 발생: {e}", file=sys.stderr)
         log_bus_event("attack_exception", {"attack": attack_to_run, "error": str(e), "source_ip": MY_IP_ADDRESS})
+        with attack_lock:
+            attack_process = None
         return None
     
-    return attack_process
+    return proc
 
 
 def main():
     """스크립트의 메인 진입점. 인자를 파싱하고 공격을 실행합니다."""
+    # SIGINT (Ctrl+C)와 SIGTERM에 대해서는 전체 중단 함수를 호출
     signal.signal(signal.SIGINT, lambda s, f: terminate_attack_process("user_interrupt"))
     signal.signal(signal.SIGTERM, lambda s, f: terminate_attack_process("system_terminate"))
 
@@ -180,7 +204,6 @@ def main():
     parser.add_argument('-a', '--attack', help="실행할 공격 스크립트(.sh 파일)")
     parser.add_argument('-y', '--yes', action='store_true', help="확인 프롬프트에 자동으로 'yes'로 응답합니다.")
     
-    # --- 자동화 옵션 추가 ---
     parser.add_argument('--run-all', action='store_true', help="사용 가능한 모든 공격을 순차적으로 실행합니다.")
     parser.add_argument('--duration', type=int, default=60, help="--run-all 모드에서 각 공격을 실행할 시간(초)")
     
@@ -195,6 +218,7 @@ def main():
         time.sleep(3)
 
         for i, attack_name in enumerate(all_attacks, 1):
+            # 루프 시작 전, 전체 중단 신호가 있는지 확인
             if stop_event.is_set():
                 print("\n[알림] 자동화 세션이 중단되었습니다.")
                 break
@@ -207,19 +231,30 @@ def main():
                     # 지정된 시간만큼 대기
                     proc.wait(timeout=args.duration)
                 except subprocess.TimeoutExpired:
-                    # 시간이 다 되면 정상 종료
-                    terminate_attack_process(f"duration_limit ({args.duration}s)")
+                    # ⭐️ 수정: 시간이 다 되면 stop_event를 설정하지 않는 정리 함수 호출 ⭐️
+                    cleanup_attack_process(f"duration_limit ({args.duration}s)")
                 
-                return_code = proc.poll() if proc else -1
+                return_code = proc.poll()
+                # 프로세스가 아직 살아있다면 한 번 더 정리 (wait 후에도 남아있는 경우)
+                if return_code is None:
+                    cleanup_attack_process("post_wait_cleanup")
+                    return_code = proc.poll() if proc.poll() is not None else -1
+
                 print("\n" + "="*23 + " 공격 종료 " + "="*24)
                 print(f"  - 종료 코드: {return_code}")
                 print("="*58)
                 log_bus_event("attack_finished", {"attack": attack_name, "return_code": return_code, "source_ip": MY_IP_ADDRESS})
+            else:
+                 print(f"'{attack_name}' 공격 실행에 실패하여 다음으로 넘어갑니다.")
 
-            print("\n다음 공격 전 5초 대기...")
-            time.sleep(5)
+
+            # 다음 공격 전 대기 (중단 신호가 오면 즉시 멈춤)
+            if not stop_event.is_set():
+                print("\n다음 공격 전 5초 대기...")
+                time.sleep(5)
         
-        print("\n✅ [자동화 모드] 모든 공격 실행을 완료했습니다.")
+        if not stop_event.is_set():
+            print("\n✅ [자동화 모드] 모든 공격 실행을 완료했습니다.")
         return
 
     # --- 대화형 모드 (기존 방식) ---
@@ -241,13 +276,15 @@ def main():
     try:
         proc = run_single_attack(attack_to_run, state_file)
         if proc:
-            return_code = proc.wait()
+            # 대화형 모드에서는 프로세스가 끝날 때까지 무한정 기다림
+            return_code = proc.wait() 
             print("\n" + "="*23 + " 공격 종료 " + "="*24)
             print(f"  - 종료 코드: {return_code}")
             print("="*58)
             log_bus_event("attack_finished", {"attack": attack_to_run, "return_code": return_code, "source_ip": MY_IP_ADDRESS})
     finally:
-        terminate_attack_process("finalize")
+        # 대화형 모드가 끝나면 전체 스크립트를 종료
+        terminate_attack_process("interactive_mode_finished")
 
 
 if __name__ == "__main__":
