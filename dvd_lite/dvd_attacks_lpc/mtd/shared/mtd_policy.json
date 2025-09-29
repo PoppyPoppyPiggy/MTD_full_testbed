@@ -1,0 +1,4 @@
+{
+  "strategy": "ip_shuffle",
+  "shuffle_interval_s": 3.0
+}

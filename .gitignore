@@ -125,7 +125,7 @@ secrets.yaml
 dvd_p2p_*
 follow_flood/
 level-*/
-mtd/
+
 no_mtd/
 
 # Archive Files
