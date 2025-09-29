@@ -1,140 +1,96 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-tools/compute_mtd_metrics.py
-DVD 로그(bus.log, bus_dvd.log)를 읽어 고도화된 MTD 지표를 산출하고
-Security-Agility-Cost-Deception 4축 기반 종합 스코어를 계산한다.
+import json
+import math
+import yaml
+import os
+import sys
+from collections import Counter
 
-사용:
-  python3 tools/compute_mtd_metrics.py --bus ./bus/bus.log --dvd ./bus/bus_dvd.log --out ./metrics_report.json
-"""
-import os, sys, json, argparse, math, statistics
-from collections import defaultdict, deque
-from datetime import datetime
+# --- 경로 설정 ---
+LPC_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+BUS_LOG_PATH = os.path.join(LPC_ROOT, "bus", "bus.log")
+POLICY_FILE_PATH = os.path.join(LPC_ROOT, "mtd", "shared_state", "mtd_policy.yaml")
 
-def read_jsonl(path):
-    events = []
-    if not os.path.exists(path): return events
-    with open(path, 'r', errors='ignore') as f:
+def calculate_metrics(log_file, policy_file):
+    with open(policy_file, 'r') as f:
+        policy = yaml.safe_load(f)
+
+    events =
+    with open(log_file, 'r') as f:
         for line in f:
             try:
-                ev = json.loads(line)
-                if 'ts' not in ev: continue
-                events.append(ev)
+                events.append(json.loads(line))
             except json.JSONDecodeError:
-                pass
-    events.sort(key=lambda x: x['ts'])
-    return events
+                continue
 
-def shannon_entropy(seq):
-    if not seq: return 0.0
-    from math import log2
-    counts = defaultdict(int)
-    for s in seq: counts[s] += 1
-    n = len(seq)
-    H = 0.0
-    for c in counts.values():
-        p = c / n
-        H -= p * log2(p)
-    return H
-
-def normalize(v, lo, hi, invert=False):
-    if hi <= lo: return 0.0
-    x = (v - lo) / (hi - lo)
-    x = max(0.0, min(1.0, x))
-    return 1.0 - x if invert else x
-
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument('--bus', default='./bus/bus.log')
-    ap.add_argument('--dvd', default='./bus/bus_dvd.log')
-    ap.add_argument('--out', default='./metrics_report.json')
-    args = ap.parse_args()
-
-    bus = read_jsonl(args.bus)
-    dvd = read_jsonl(args.dvd)
-
-    # --- (1) 핵심 이벤트 타임라인 추출 ---
-    seeker_start_ts = None
-    first_comp_ts = None
-    attack_starts = []
-    swaps = []
-    reasons = []
-    ip_seq, port_seq = [], []
-    decoy_hits, total_probes = 0, 0
-
-    alt_series = [(e.get('ts'), e.get('data', {}).get('alt_m')) for e in dvd if e.get('data', {}).get('alt_m') is not None]
-
-    for e in bus:
-        et, data, ts = e.get('type'), e.get('data', {}), e['ts']
-        if et in ('prober_started', 'seeker_started') and seeker_start_ts is None: seeker_start_ts = ts
-        if et in ('prober_target_confirmed', 'lpc_recon_success') and first_comp_ts is None: first_comp_ts = ts
-        if et == 'attack_started': attack_starts.append(ts)
-        if et == 'mtd_target_swap':
-            frm, to, reason = data.get('from', ''), data.get('to', ''), data.get('reason', 'unknown')
-            reasons.append(reason)
-            if isinstance(to, str) and ':' in to:
-                ip_seq.append(to.split(':')[0])
-                port_seq.append(int(to.split(':')[1]))
-            swaps.append(ts)
-        if et in ('probe_to_decoy', 'attack_to_decoy'): decoy_hits += 1
-        if et in ('prober_activity', 'scan_probe'): total_probes += 1
-
-    # --- (2) 4-Axis 지표 계산 ---
+    # 1. 보안성 (Defense Success Rate, R_succ)
+    attack_events = [e for e in events if e.get("type") == "attack_detected"]
+    total_attacks = len(attack_events)
+    successful_attacks = sum(1 for e in attack_events if e.get("data", {}).get("is_success"))
+    compromises = sum(1 for e in attack_events if e.get("data", {}).get("is_success") and e.get("data", {}).get("is_real_asset"))
     
-    # (A) Security
-    TFC = (first_comp_ts - seeker_start_ts) if (seeker_start_ts and first_comp_ts) else 0.0
-    def effect_after(t0, window=10.0):
-        relevant = [(t, a) for (t, a) in alt_series if t0 <= t <= t0 + window and a is not None]
-        if not relevant: return False
-        v = [a for (_, a) in relevant]
-        return (max(v) - min(v)) >= 5.0
-    A, B = len(attack_starts), sum(1 for t in attack_starts if effect_after(t))
-    ASR = (B / A) if A > 0 else 0.0
-    AWF = sum(1 for e in bus if e['ts'] < (first_comp_ts or float('inf')) and e.get('type') in ('prober_activity', 'scan_probe'))
+    r_succ = 1 - (compromises / total_attacks) if total_attacks > 0 else 1.0
 
-    # (B) Agility/Entropy
-    def count_swaps(t0, win=60.0, before=True):
-        lo, hi = (t0 - win, t0) if before else (t0, t0 + win)
-        return sum(1 for t in swaps if lo <= t < hi)
-    asf_list = [(count_swaps(t, before=False) / count_swaps(t, before=True)) for t in attack_starts if count_swaps(t, before=True) > 0]
-    ASF = statistics.mean(asf_list) if asf_list else 0.0
-    H_total = shannon_entropy(ip_seq) + shannon_entropy(port_seq) + shannon_entropy(reasons)
+    # 2. 기민성 (Agility - Shuffling S, Diversity D)
+    swap_events = [e for e in events if e.get("type") == "mtd_target_swap"]
+    if swap_events:
+        start_time = swap_events['timestamp']
+        end_time = swap_events[-1]['timestamp']
+        duration_sec = end_time - start_time
+        f_shuffle = len(swap_events) / duration_sec if duration_sec > 0 else 0
+    else:
+        f_shuffle = 0
 
-    # (C) Cost (Placeholder - 실제 측정값으로 대체 필요)
-    QoS_overhead_ms, Loss_overhead, Mig_cost, Energy_overhead = 0.0, 0.0, len(swaps) * 1.0, 0.0
+    ip_space_size = len(policy.get('decoy_pool',))
+    port_space_size = len(policy.get('port_pool',))
+    p_space = ip_space_size * port_space_size
+    s_shuffle = f_shuffle * math.log2(p_space) if p_space > 1 else 0
 
-    # (D) Deception
-    DER = (decoy_hits / total_probes) if total_probes > 0 else 0.0
-    Time_in_deception = 0.0 # TODO: 로그 이벤트 기반으로 실제 체류 시간 계산
+    # 다양성(D)은 사용된 방어 전략(태세)의 분포로 계산
+    posture_events = [e['data']['to'] for e in events if e.get("type") == "mtd_posture_change"]
+    posture_counts = Counter(posture_events)
+    total_decisions = len(posture_events)
+    diversity = 0
+    if total_decisions > 0:
+        for count in posture_counts.values():
+            p_i = count / total_decisions
+            diversity -= p_i * math.log2(p_i)
 
-    # --- (3) 정규화 및 가중합 ---
-    sim_duration = (bus[-1]['ts'] - bus[0]['ts']) if bus else 1.0
-    TFC_n = normalize(TFC, 0.0, sim_duration)
-    AWF_n = normalize(AWF, 0, max(1, total_probes))
-    Security = 0.5 * TFC_n + 0.3 * (1.0 - ASR) + 0.2 * AWF_n
-    
-    ASF_n = normalize(ASF, 0.0, 5.0) # 5배 이상 변화 시 만점
-    H_n = normalize(H_total, 0.0, 8.0) # 엔트로피 8 이상 시 만점
-    Agility = 0.5 * ASF_n + 0.5 * H_n
+    # 3. 비용 (Defense Cost, C_def) - 시뮬레이션에서는 가정치 사용
+    # 실제로는 성능 측정 필요. 예: 셔플링 시 5% 성능 저하 가정
+    c_def = 0.05 * f_shuffle # 셔플링 빈도에 비례한다고 가정
 
-    Mig_n = normalize(Mig_cost, 0.0, 200.0, invert=True) # 200회 이상 셔플 시 0점
-    Cost = Mig_n # 현재는 마이그레이션 비용만 반영
+    # 4. 기만성 (Deception Efficiency, eta_dec)
+    attacks_on_real = sum(1 for e in attack_events if e.get("data", {}).get("is_real_asset"))
+    attacks_on_decoy = total_attacks - attacks_on_real
+    eta_dec = attacks_on_decoy / total_attacks if total_attacks > 0 else 0
 
-    Deception = normalize(DER, 0.0, 1.0)
-    
-    weights = {'wS': 0.4, 'wA': 0.2, 'wC': 0.2, 'wD': 0.2}
-    Overall = weights['wS']*Security + weights['wA']*Agility + weights['wC']*Cost + weights['wD']*Deception
+    # 최종 DES 점수 계산
+    weights = policy.get('des_scoring', {}).get('weights', {})
+    des_score = (weights.get('security', 0.4) * r_succ +
+                 weights.get('agility', 0.2) * (s_shuffle / 10 + diversity) / 2 + # 정규화
+                 weights.get('cost', 0.2) * (1 - c_def) +
+                 weights.get('deception', 0.2) * eta_dec)
 
-    report = {
-        "scores": {"Overall": Overall, "Security": Security, "Agility": Agility, "Cost": Cost, "Deception": Deception},
-        "raw_metrics": {"TFC": TFC, "ASR": ASR, "AWF": AWF, "ASF": ASF, "H_total": H_total, "Mig_cost": Mig_cost, "DER": DER}
+    return {
+        "Security (R_succ)": r_succ,
+        "Agility (S_shuffle)": s_shuffle,
+        "Agility (Diversity D)": diversity,
+        "Cost (C_def)": c_def,
+        "Deception (eta_dec)": eta_dec,
+        "Total_Attacks": total_attacks,
+        "Successful_Attacks_on_Real": compromises,
+        "Overall_DES_Score": des_score
     }
 
-    with open(args.out, 'w') as f:
-        json.dump(report, f, indent=2)
-    print(f"[OK] MTD 평가 보고서 생성: {os.path.abspath(args.out)}")
-    print(json.dumps(report["scores"], indent=2))
-
 if __name__ == "__main__":
-    main()
+    if not os.path.exists(BUS_LOG_PATH):
+        print(f"로그 파일({BUS_LOG_PATH})을 찾을 수 없습니다.")
+        sys.exit(1)
+    
+    metrics = calculate_metrics(BUS_LOG_PATH, POLICY_FILE_PATH)
+    print("\n--- MTD 성능 평가 결과 ---")
+    for key, value in metrics.items():
+        print(f"{key:<30}: {value:.4f}")
+    print("--------------------------")

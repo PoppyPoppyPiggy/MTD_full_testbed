@@ -14,24 +14,16 @@ import socket
 import re
 
 # --- 경로 설정 ---
-# ⭐️ 수정: 실행 위치에 따라 유연하게 경로를 설정하도록 변경
 LPC_DIR = os.path.dirname(os.path.realpath(__file__))
-ATTACKS_DIR = os.path.join(LPC_DIR, '..', 'dvd_attacks_lpc', 'modules', 'attacks_wiki')
-if not os.path.exists(ATTACKS_DIR):
-    # 로컬 테스트 환경을 위한 대체 경로
-    ATTACKS_DIR = os.path.join(LPC_DIR, 'modules', 'attacks_wiki')
+ATTACKS_DIR = os.path.join(LPC_DIR, 'modules', 'attacks_wiki')
 ATTACK_META_DIR = os.path.join(ATTACKS_DIR, 'json')
 
-# --- PYTHONPATH 자동 설정 ---
+# --- PYTHONPATH 자동 설정 (가장 중요) ---
+# 스크립트의 현재 위치를 sys.path에 추가하여 'bus' 모듈을 찾을 수 있도록 함
 if LPC_DIR not in sys.path:
     sys.path.insert(0, LPC_DIR)
-# bus 모듈을 찾기 위한 경로 추가
-BUS_MODULE_PATH = os.path.abspath(os.path.join(LPC_DIR, '..', 'bus'))
-if BUS_MODULE_PATH not in sys.path:
-    sys.path.insert(0, BUS_MODULE_PATH)
 
-
-from logger import log_bus_event
+from bus.logger import log_bus_event
 
 # --- 전역 변수 ---
 attack_process: Optional[subprocess.Popen] = None
@@ -58,7 +50,6 @@ def read_mtd_target(state_file: str) -> Tuple[Optional[str], Optional[int]]:
         ip, port_str = target_str.split(":", 1)
         return ip, int(port_str)
     except Exception:
-        # print(f"[정보] MTD 상태 파일 '{state_file}'을 찾을 수 없습니다. 기본값으로 계속합니다.", file=sys.stderr)
         return None, None
 
 def get_available_attacks() -> List[str]:
@@ -106,8 +97,7 @@ def cleanup_attack_process(reason: str):
     global attack_process
     with attack_lock:
         if attack_process:
-            print(f"\n[알림] 현재 공격 프로세스를 정리합니다 (사유: {reason})...")
-            log_bus_event("attack_cleanup", {"reason": reason, "pid": attack_process.pid})
+            log_bus_event("attack_cleanup", {"reason": reason, "pid": attack_process.pid}, source_override="attack_orchestrator")
             _kill_process_group(attack_process)
             attack_process = None
 
@@ -118,7 +108,7 @@ def terminate_attack_process(reason: str):
 def stream_reader(pipe, stream_name: str, attack_name: str):
     try:
         for line in iter(pipe.readline, ''):
-            log_bus_event(f"attack_{stream_name}", {"attack": attack_name, "output": line.strip()})
+            log_bus_event(f"attack_{stream_name}", {"attack": attack_name, "output": line.strip()}, source_override="attack_script")
     finally:
         if pipe: pipe.close()
 
@@ -137,13 +127,10 @@ def run_single_attack(attack_to_run: str, state_file: str) -> Optional[subproces
         print(f"⛔ 스크립트를 찾을 수 없습니다: {attack_script_path}")
         return None
 
-    # ### <<< CHANGED ###
-    # MTD 상태 파일이 없어도 기본값으로 진행하도록 수정
     target_ip, target_port = read_mtd_target(state_file)
     if not target_ip or not target_port:
         print(f"  [정보] MTD 타겟을 찾을 수 없어 기본 타겟(127.0.0.1:14550)을 사용합니다.")
         target_ip, target_port = "127.0.0.1", 14550
-    # ### <<< END CHANGED ###
     
     print(f"  -> 현재 공격 타겟: {target_ip}:{target_port}")
     
@@ -168,7 +155,7 @@ def run_single_attack(attack_to_run: str, state_file: str) -> Optional[subproces
             "source_ip": MY_IP_ADDRESS,
             "attack_category": attack_meta['attack_category'],
             "mitre_tactics": attack_meta['mitre_tactics']
-        })
+        }, source_override="attack_orchestrator")
         
         proc = subprocess.Popen(
             ['/bin/bash', attack_script_path],
@@ -183,20 +170,17 @@ def run_single_attack(attack_to_run: str, state_file: str) -> Optional[subproces
 
     except Exception as e:
         print(f"❌ 공격 실행 중 오류 발생: {e}", file=sys.stderr)
-        log_bus_event("attack_exception", {"attack": attack_to_run, "error": str(e)})
+        log_bus_event("attack_exception", {"attack": attack_to_run, "error": str(e)}, source_override="attack_orchestrator")
         with attack_lock: attack_process = None
         return None
     
     return proc
 
 def main():
-    # ... (main 함수의 나머지 부분은 기존과 동일하게 유지) ...
-    # 이 부분은 변경할 필요가 없습니다.
     signal.signal(signal.SIGINT, lambda s, f: terminate_attack_process("user_interrupt"))
     signal.signal(signal.SIGTERM, lambda s, f: terminate_attack_process("system_terminate"))
 
-    parser = argparse.ArgumentParser(description="DVD 공격 오케스트레이터 v2.1 (Resilient)")
-    # ... (argparse 설정은 기존과 동일) ...
+    parser = argparse.ArgumentParser(description="DVD 공격 오케스트레이터 v2.2 (Path-Fixed & Resilient)")
     parser.add_argument('-a', '--attack', help="실행할 공격 스크립트(.sh 파일)")
     parser.add_argument('-y', '--yes', action='store_true', help="확인 프롬프트에 자동으로 'yes'로 응답합니다.")
     parser.add_argument('--run-all', action='store_true', help="사용 가능한 모든 공격을 순차적으로 실행합니다.")
@@ -206,11 +190,44 @@ def main():
     state_file = default_state_file()
     all_attacks = get_available_attacks()
 
-    # 이하 로직은 제공된 버전과 동일하게 작동하므로 생략합니다.
-    # --run-all 로직과 대화형 모드 로직은 그대로 두시면 됩니다.
+    if not all_attacks:
+        print(f"⛔ 오류: '{ATTACKS_DIR}' 경로에 공격 스크립트(.sh)가 없습니다.")
+        sys.exit(1)
+
     if args.run_all:
-        print(f"🚀 [자동화 모드] {len(all_attacks)}개의 모든 공격을 각각 {args.duration}초 동안 실행합니다.")
-        # ...
-    # ...
+        for i, attack_name in enumerate(all_attacks, 1):
+            if stop_event.is_set(): break
+            
+            print(f"\n--- [{i}/{len(all_attacks)}] '{attack_name}' 공격 시작 ---")
+            proc = run_single_attack(attack_name, state_file)
+            if proc:
+                try:
+                    proc.wait(timeout=args.duration)
+                except subprocess.TimeoutExpired:
+                    cleanup_attack_process(f"duration_limit ({args.duration}s)")
+                
+                return_code = proc.poll() if proc.poll() is not None else -1
+                log_bus_event("attack_finished", {"attack": attack_name, "return_code": return_code}, source_override="attack_orchestrator")
+            else:
+                print(f"'{attack_name}' 공격 실행에 실패하여 다음으로 넘어갑니다.")
+
+            if not stop_event.is_set() and i < len(all_attacks):
+                time.sleep(5)
+        return
+
+    attack_to_run = args.attack or "gps-spoofing.sh" # 기본값 예시
+    if not args.yes:
+        # 대화형 모드 로직
+        pass
+
+    try:
+        proc = run_single_attack(attack_to_run, state_file)
+        if proc:
+            proc.wait()
+            log_bus_event("attack_finished", {"attack": attack_to_run}, source_override="attack_orchestrator")
+    finally:
+        terminate_attack_process("interactive_mode_finished")
+
+
 if __name__ == "__main__":
     main()
