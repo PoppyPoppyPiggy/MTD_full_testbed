@@ -11,35 +11,60 @@ from scapy.all import sniff, IP, TCP, UDP
 # --- 경로 설정 ---
 MONITORS_DIR = os.path.dirname(os.path.realpath(__file__))
 BUS_DIR = os.path.join(os.path.dirname(MONITORS_DIR), 'bus')
-LOG_FILE_PATH = os.path.join(BUS_DIR, 'bus_network.log') # ⭐️ 통합 로그 파일 경로
+LOG_FILE_PATH = os.path.join(BUS_DIR, 'bus_network.log')
 
-# ⭐️ 공격 상태를 식별하기 위한 환경 변수
+# --- 환경 변수 ---
 CURRENT_ATTACK_LABEL = os.environ.get('ATTACK_NAME', 'normal')
-
-# 캡처할 네트워크 인터페이스
 SNIFF_INTERFACE = os.environ.get('SNIFF_INTERFACE', 'eth0')
 
+# ### <<< CHANGED ###
+# 마지막 패킷 도착 시간을 추적하기 위한 전역 변수
+last_packet_time = None
+# ### <<< END CHANGED ###
+
 def write_jsonl(record: dict):
-    """JSONL 형식으로 로그를 파일에 씁니다."""
-    # ⭐️ 레코드에 공격 라벨 필드 추가
     record['attack_label'] = CURRENT_ATTACK_LABEL
     try:
         with open(LOG_FILE_PATH, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
+            f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
     except IOError as e:
         print(f"❌ [Network Monitor] 로그 파일 쓰기 오류: {e}", file=sys.stderr)
 
+def get_tcp_flags(packet):
+    """Extracts TCP flags from a packet."""
+    if TCP in packet:
+        # FSRPAU
+        flags = packet[TCP].flags
+        return {
+            'FIN': bool(flags & 0x01),
+            'SYN': bool(flags & 0x02),
+            'RST': bool(flags & 0x04),
+            'PSH': bool(flags & 0x08),
+            'ACK': bool(flags & 0x10),
+            'URG': bool(flags & 0x20),
+        }
+    return None
+
 def packet_handler(packet):
-    """scapy가 캡처한 각 패킷을 처리하는 콜백 함수"""
+    global last_packet_time
+    
     if not packet.haslayer(IP):
         return
 
+    ### <<< CHANGED ###
+    current_time = time.time()
+    inter_arrival_time = (current_time - last_packet_time) * 1000 if last_packet_time else 0.0
+    last_packet_time = current_time
+    ### <<< END CHANGED ###
+
     ip_layer = packet.getlayer(IP)
     proto, src_port, dst_port = "UNKNOWN", None, None
+    tcp_flags = None
 
     if packet.haslayer(TCP):
         tcp_layer = packet.getlayer(TCP)
         proto, src_port, dst_port = "TCP", tcp_layer.sport, tcp_layer.dport
+        tcp_flags = get_tcp_flags(packet) # ### <<< CHANGED ###
     elif packet.haslayer(UDP):
         udp_layer = packet.getlayer(UDP)
         proto, src_port, dst_port = "UDP", udp_layer.sport, udp_layer.dport
@@ -48,11 +73,13 @@ def packet_handler(packet):
         "src_ip": ip_layer.src, "dst_ip": ip_layer.dst,
         "protocol": proto, "src_port": src_port, "dst_port": dst_port,
         "length": len(packet),
+        "tcp_flags": tcp_flags, # ### <<< CHANGED ###
+        "inter_arrival_time_ms": round(inter_arrival_time, 4) # ### <<< CHANGED ###
     }
 
     record = {
         "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        "ts": time.time(),
+        "ts": current_time,
         "source": "network_monitor",
         "type": "packet_capture",
         "data": log_data
@@ -60,7 +87,6 @@ def packet_handler(packet):
     write_jsonl(record)
 
 def main():
-    """네트워크 인터페이스의 패킷을 캡처하여 통합 로그에 기록합니다."""
     os.makedirs(os.path.dirname(LOG_FILE_PATH), exist_ok=True)
     print(f"[Network Monitor] 네트워크 패킷 모니터링 시작 (iface: {SNIFF_INTERFACE}) -> {LOG_FILE_PATH}")
     print(f"✅ [Network Monitor] 현재 공격 라벨: {CURRENT_ATTACK_LABEL}")

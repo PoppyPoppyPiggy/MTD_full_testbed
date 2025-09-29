@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MITRE ATT&CK - Attack Tree Visualizer</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Drone Attack Tree Visualizer</h1>
+            <p>Select an attack profile to visualize its MITRE ATT&CK mapping.</p>
+            <div class="selector">
+                <select id="attack-selector">
+                    <option value="">-- 공격 유형을 선택하세요 --</option>
+                </select>
+            </div>
+        </header>
+
+        <main id="main-content" class="hidden">
+            <div id="attack-details-container">
+                </div>
+        </main>
+    </div>
+
+    <script src="{{ url_for('static', filename='script.js') }}"></script>
+</body>
+</html>

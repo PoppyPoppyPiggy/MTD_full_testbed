@@ -1,45 +1,67 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+import os
 import pandas as pd
-from sklearn.utils import resample
+from sklearn.model_selection import train_test_split
+import argparse
+import sys
 
-class ExperimentDataset:
-    """연구용 데이터셋을 체계적으로 생성하고 관리합니다."""
+# --- 경로 설정 ---
+PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+OUTPUT_DIR = os.path.join(PROJECT_ROOT, 'ml', 'output')
 
-    def __init__(self, full_dataset_path: str):
-        self.df = pd.read_csv(full_dataset_path)
-        print(f"[*] 원본 데이터셋 로드 완료: {len(self.df)}개 레코드")
+def main():
+    parser = argparse.ArgumentParser(description="CTI 데이터셋 관리자 v4.0")
+    parser.add_argument('--input', default=os.path.join(OUTPUT_DIR, 'cti_features_dataset.csv'), help="입력 데이터셋 CSV 파일 경로")
+    parser.add_argument('--test-size', type=float, default=0.2, help="테스트 세트의 비율 (0.0 ~ 1.0)")
+    parser.add_argument('--random-state', type=int, default=42, help="결과 재현을 위한 랜덤 시드")
+    args = parser.parse_args()
 
-    def create_balanced_dataset(self, attack_name: str, flight_mode: str, normal_ratio=1.0):
-        """특정 공격과 비행 시나리오에 맞는 균형잡힌 데이터셋을 생성합니다."""
-        
-        # (구현 필요) 이 부분은 로그에서 공격 유형과 비행 모드를 정확히 식별하는 로직이 필요.
-        # 지금은 'label_attack'과 'data_mode'로 단순화하여 예시를 작성.
-        
-        attack_data = self.df[(self.df['label_attack'] == 'Attack')] # & (df['attack_type'] == attack_name)
-        normal_data = self.df[(self.df['label_attack'] == 'Normal') & (self.df['data_mode'] == flight_mode)]
-
-        if attack_data.empty or normal_data.empty:
-            print(f"[!] 경고: '{attack_name}' 공격 또는 '{flight_mode}' 모드에 대한 데이터가 부족합니다.")
-            return pd.DataFrame()
-
-        # Normal 데이터를 Attack 데이터 수에 맞춰 언더샘플링
-        n_samples = int(len(attack_data) * normal_ratio)
-        normal_sampled = resample(normal_data, 
-                                  replace=False, 
-                                  n_samples=n_samples, 
-                                  random_state=42)
-
-        balanced_df = pd.concat([attack_data, normal_sampled])
-        print(f"[*] '{attack_name}'/'{flight_mode}' 시나리오용 균형 데이터셋 생성 완료.")
-        print(f"    (Normal: {len(normal_sampled)}, Attack: {len(attack_data)})")
-        
-        return balanced_df.sample(frac=1, random_state=42).reset_index(drop=True)
-
-if __name__ == '__main__':
-    manager = ExperimentDataset('output/labeled_cti_dataset.csv')
+    print("🚀 [Dataset Manager v4.0] 데이터셋 분할을 시작합니다.")
     
-    # 예시: GPS 스푸핑 공격 & LOITER 모드에서의 데이터셋 생성
-    exp_df = manager.create_balanced_dataset('gps-spoofing.sh', 'LOITER')
+    if not os.path.exists(args.input):
+        print(f"❌ 오류: 입력 파일 '{args.input}'을 찾을 수 없습니다.")
+        sys.exit(1)
+        
+    # 1. 데이터셋 로드
+    df = pd.read_csv(args.input)
+    print(f"[*] 원본 데이터셋 로드 완료: {df.shape[0]} 샘플, {df.shape[1]} 특징")
+
+    X = df.drop('label', axis=1)
+    y = df['label']
     
-    if not exp_df.empty:
-        print("\n생성된 실험 데이터셋 정보:")
-        print(exp_df['label_attack'].value_counts())
+    # 레이블 클래스가 2개 미만이면 계층적 분할 불가
+    if y.nunique() < 2:
+        print("❌ 오류: 레이블에 클래스가 하나뿐입니다. 계층적 분할을 수행할 수 없습니다.")
+        print("    데이터에 'normal' 외에 최소 하나 이상의 공격 레이블이 포함되어야 합니다.")
+        sys.exit(1)
+
+    # 2. 훈련/테스트 데이터 분할 (계층적 샘플링)
+    print(f"[*] 데이터를 훈련 세트({1-args.test_size:.0%})와 테스트 세트({args.test_size:.0%})로 분할합니다.")
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, 
+        test_size=args.test_size, 
+        random_state=args.random_state,
+        stratify=y  # ⭐️ 중요: 레이블 분포를 유지하며 분할
+    )
+
+    # 3. 분할된 데이터 저장
+    os.makedirs(OUTPUT_DIR, exist_ok=True)
+    train_path = os.path.join(OUTPUT_DIR, 'train_dataset.csv')
+    test_path = os.path.join(OUTPUT_DIR, 'test_dataset.csv')
+    
+    pd.concat([X_train, y_train], axis=1).to_csv(train_path, index=False)
+    pd.concat([X_test, y_test], axis=1).to_csv(test_path, index=False)
+
+    print("\n" + "="*60)
+    print("✅ 데이터셋 분할 및 저장을 완료했습니다!")
+    print(f"  - 훈련 데이터: {train_path} ({len(X_train)} 샘플)")
+    print(f"  - 테스트 데이터: {test_path} ({len(X_test)} 샘플)")
+    print("\n[훈련 세트 레이블 분포]")
+    print(y_train.value_counts(normalize=True))
+    print("\n[테스트 세트 레이블 분포]")
+    print(y_test.value_counts(normalize=True))
+    print("="*60)
+
+if __name__ == "__main__":
+    main()

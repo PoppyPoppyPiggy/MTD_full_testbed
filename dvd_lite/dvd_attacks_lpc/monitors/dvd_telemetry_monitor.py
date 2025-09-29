@@ -27,10 +27,8 @@ LOGGING_INTERVAL_SEC = 0.2  # 5Hz logging
 # MAVLink Message Handlers
 # ==============================================================================
 def handle_heartbeat(msg, drone_state: Dict[str, Any]) -> Dict[str, Any]:
-    """Updates the drone's core status, including armed state and flight mode."""
     status = getattr(msg, 'system_status', 0)
     mode_name = mavutil.mode_string_v10(msg)
-    # Persistently update the flight mode in the shared state object
     drone_state['mode'] = mode_name
     return {
         'armed': (msg.base_mode & mavutil.mavlink.MAV_MODE_FLAG_SAFETY_ARMED) != 0,
@@ -69,6 +67,26 @@ def handle_vfr_hud(msg, drone_state: Dict[str, Any]) -> Dict[str, Any]:
         'heading_deg': getattr(msg, 'heading', 0),
         'throttle_pct': getattr(msg, 'throttle', 0),
     }
+    
+### <<< CHANGED ###
+# IMU 및 기압계 데이터 핸들러 추가
+def handle_raw_imu(msg, drone_state: Dict[str, Any]) -> Dict[str, Any]:
+    """Handles RAW_IMU message for accelerometer and gyroscope data."""
+    return {
+        'xacc': getattr(msg, 'xacc', 0) / 1000.0, # mG to G
+        'yacc': getattr(msg, 'yacc', 0) / 1000.0,
+        'zacc': getattr(msg, 'zacc', 0) / 1000.0,
+        'xgyro': getattr(msg, 'xgyro', 0) / 1000.0, # mrad/s to rad/s
+        'ygyro': getattr(msg, 'ygyro', 0) / 1000.0,
+        'zgyro': getattr(msg, 'zgyro', 0) / 1000.0,
+    }
+
+def handle_scaled_pressure(msg, drone_state: Dict[str, Any]) -> Dict[str, Any]:
+    """Handles SCALED_PRESSURE message for barometer data."""
+    return {
+        'abs_pressure_hpa': getattr(msg, 'press_abs', 0),
+    }
+### <<< END CHANGED ###
 
 def handle_sys_status(msg, drone_state: Dict[str, Any]) -> Dict[str, Any]:
     return {
@@ -85,13 +103,16 @@ MESSAGE_HANDLERS: Dict[str, Callable[[Any, Dict[str, Any]], Dict[str, Any]]] = {
     'ATTITUDE': handle_attitude,
     'VFR_HUD': handle_vfr_hud,
     'SYS_STATUS': handle_sys_status,
+    ### <<< CHANGED ###
+    'RAW_IMU': handle_raw_imu,
+    'SCALED_PRESSURE': handle_scaled_pressure,
+    ### <<< END CHANGED ###
 }
 
 # ==============================================================================
 # Main Logic
 # ==============================================================================
 def try_connect(uri: str) -> Optional[mavutil.mavlink_connection]:
-    """Attempts to establish a MAVLink connection to the specified URI."""
     try:
         print(f"[*] Attempting MAVLink connection to: {uri}...")
         master = mavutil.mavlink_connection(uri, robust_parsing=True, source_system=255)
@@ -103,7 +124,6 @@ def try_connect(uri: str) -> Optional[mavutil.mavlink_connection]:
         return None
 
 def write_jsonl(record: dict):
-    """Writes a dictionary record to the log file in JSONL format."""
     try:
         with open(LOG_FILE_PATH, "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
@@ -111,19 +131,17 @@ def write_jsonl(record: dict):
         print(f"[!] Error writing to log file: {e}", file=sys.stderr)
 
 def main():
-    """Main function to collect MAVLink telemetry and log it to bus_dvd.log."""
     os.makedirs(os.path.dirname(LOG_FILE_PATH), exist_ok=True)
     master = try_connect(MAVLINK_CONNECTION_STRING)
     if not master:
         print("[!] Connection failed. Retrying in 5 seconds...")
         time.sleep(5)
-        main()  # Recursive call to retry connection
+        main()
         return
 
     print(f"[*] Starting drone telemetry logging to -> {LOG_FILE_PATH} (Interval: {LOGGING_INTERVAL_SEC}s)")
 
     latest_data: Dict[str, Any] = {}
-    # Shared state to hold the most recent flight mode
     drone_state: Dict[str, Any] = {'mode': 'UNKNOWN'}
     last_log_time = time.monotonic()
     last_hb_seen = time.monotonic()
@@ -138,7 +156,6 @@ def main():
                     last_hb_seen = time.monotonic()
 
                 if msg_type in MESSAGE_HANDLERS:
-                    # Pass the shared state to handlers
                     update = MESSAGE_HANDLERS[msg_type](msg, drone_state)
                     latest_data.update(update)
 
@@ -163,7 +180,7 @@ def main():
                         "type": "drone_state_detailed",
                         "data": {
                             **latest_data,
-                            "mode": drone_state.get('mode', 'UNKNOWN')  # Ensure mode is always logged
+                            "mode": drone_state.get('mode', 'UNKNOWN')
                         }
                     }
                     write_jsonl(log_entry)
@@ -172,7 +189,7 @@ def main():
             if (current_time - last_hb_seen) > HEARTBEAT_TIMEOUT_SEC:
                 print(f"[!] MAVLink heartbeat timeout (> {HEARTBEAT_TIMEOUT_SEC}s). Reconnecting...")
                 master.close()
-                main()  # Reconnect by recalling main
+                main()
                 return
 
             time.sleep(0.01)
