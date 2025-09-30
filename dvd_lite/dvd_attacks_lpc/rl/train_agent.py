@@ -1,203 +1,227 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+# 파일 이름: train.py (rl 폴더의 모든 스크립트를 이것 하나로 교체)
+# 최종 업데이트: v6.0 - 시계열 패턴 분석 Seeker vs 적응형 위협 대응 MTD
 import os
 import sys
 import yaml
-import time
-import random
 import numpy as np
-from collections import deque, Counter
-
-# RL 라이브러리 (Stable Baselines3) 및 Gym 환경
-try:
-    import gymnasium as gym
-    from gymnasium import spaces
-    from stable_baselines3 import PPO
-    from stable_baselines3.common.env_checker import check_env
-except ImportError:
-    print("RL 관련 패키지가 필요합니다: pip install stable-baselines3[extra] gymnasium torch")
-    sys.exit(1)
+import torch
+from collections import deque
+import gymnasium as gym
+from gymnasium import spaces
+from stable_baselines3 import PPO
+from stable_baselines3.common.vec_env import DummyVecEnv
 
 # --- 경로 설정 ---
-MTD_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-POLICY_FILE_PATH = os.path.join(MTD_DIR, "mtd", "shared_state", "mtd_policy.yaml")
-MODEL_SAVE_PATH = os.path.join(MTD_DIR, "rl", "models")
+RL_DIR = os.path.dirname(os.path.realpath(__file__))
+LPC_DIR = os.path.abspath(os.path.join(RL_DIR, '..'))
+POLICY_FILE_PATH = os.path.join(LPC_DIR, "mtd", "shared_state", "mtd_policy.yaml")
+MODEL_SAVE_PATH = os.path.join(LPC_DIR, "rl", "models")
+os.makedirs(MODEL_SAVE_PATH, exist_ok=True)
 
-class SimulatedSeeker:
-    """ MTD 환경 내에서 행동하는 가상 Seeker 에이전트 """
-    def __init__(self):
-        self.knowledge_base = deque(maxlen=20) # 최근 20개의 셔플링 패턴 기억
-        self.learning_rate = 0.7
-
-    def observe_and_learn(self, target_ip):
-        self.knowledge_base.append(target_ip)
-
-    def predict_and_attack(self):
-        if not self.knowledge_base or random.random() > self.learning_rate:
-            # 학습이 부족하거나 확률적으로 정찰 실패 시, 무작위 공격
-            return f"10.13.0.{random.randint(100, 102)}", False # 주로 디코이 공격
+class MtdAdversarialEnv_v6(gym.Env):
+    """ 지능형 사이버 공방 시뮬레이션 환경 (v6.0) """
+    def __init__(self, policy, training_agent='mtd', **kwargs):
+        super().__init__()
+        self.rules = policy['adversarial_rules']
+        self.rewards_cfg = policy['rl']['reward_weights']
+        self.training_agent = training_agent
+        self.agents = kwargs
         
-        # 가장 빈번하게 나타난 IP를 다음 타겟으로 예측 (간단한 모델)
-        most_common_ip = Counter(self.knowledge_base).most_common(1)
-        return most_common_ip, True # 예측 기반 공격
+        self.ip_pool = self.rules['attack_surface']['ips']
+        self.port_pool = self.rules['attack_surface']['ports']
+        self.history_len = self.rules['seeker_observation_history_length']
 
-class MtdEnv(gym.Env):
-    """ MTD 방어 전략 학습을 위한 강화학습 환경 """
-    metadata = {'render_modes': ['human']}
+        # === 행동 공간 ===
+        self.mtd_action_space = spaces.Discrete(3) # 0:STAY, 1:SHUFFLE, 2:BLACKLIST
+        self.seeker_action_space = spaces.Discrete(len(self.ip_pool) * 2) # SCAN/ATTACK
 
-    def __init__(self, policy):
-        super(MtdEnv, self).__init__()
-        self.policy = policy
-        self.weights = policy.get('des_scoring', {}).get('weights', {})
-        
-        # 1. 행동 공간 정의 (3가지 방어 태세)
-        self.postures = list(policy.get('defense_postures', {}).keys())
-        self.action_space = spaces.Discrete(len(self.postures))
+        # === 관찰 공간 ===
+        # MTD: [APM(1), 블랙리스트_상태(N_ips), 현재_IP(1), 현재_PORT(1)]
+        self.mtd_obs_space = spaces.Box(low=0, high=1, shape=(1 + len(self.ip_pool) + 2,), dtype=np.float32)
+        # Seeker: [과거_IPs(H), 과거_Ports(H)]
+        self.seeker_obs_space = spaces.Box(low=0, high=1, shape=(self.history_len * 2,), dtype=np.float32)
 
-        # 2. 관찰 공간 정의:
-        self.observation_space = spaces.Box(
-            low=np.array(), 
-            high=np.array(), 
-            dtype=np.float32
-        )
-        
-        self.seeker = SimulatedSeeker()
-        self.real_target_ip = policy.get('real_target_ip')
-        self.episode_length = 300 # 1 에피소드 당 스텝 수 (시간)
-        self.reset()
+        if self.training_agent == 'mtd':
+            self.action_space, self.observation_space = self.mtd_action_space, self.mtd_obs_space
+        else:
+            self.action_space, self.observation_space = self.seeker_action_space, self.seeker_obs_space
+            
+        self.max_steps = 200
+
+    def set_agents(self, mtd_agent=None, seeker_agent=None):
+        if mtd_agent: self.agents['mtd_agent'] = mtd_agent
+        if seeker_agent: self.agents['seeker_agent'] = seeker_agent
 
     def reset(self, seed=None, options=None):
         super().reset(seed=seed)
         self.current_step = 0
-        self.current_posture_idx = 0 # 초기: LOW_PROFILE
-        self.shuffle_interval = self.policy['defense_postures']['shuffle_interval_s']
+        self.active_ip_idx = self.np_random.integers(0, len(self.ip_pool))
+        self.active_port_idx = self.np_random.integers(0, len(self.port_pool))
         
-        self.attack_history = deque(maxlen=60) # 최근 1분간의 공격 기록
-        self.decoy_hit_history = deque(maxlen=60)
+        self.attack_history = deque(maxlen=self.rules['adaptive_mtd_trigger']['apm_window_seconds'])
+        self.blacklist = {i: 0 for i in range(len(self.ip_pool))} # 0: clean, >0: steps remaining
         
-        self.seeker.knowledge_base.clear()
-        
-        print("\n--- 새로운 에피소드 시작 ---")
-        return self._get_obs(), {}
+        self.surface_history = deque(maxlen=self.history_len)
+        for _ in range(self.history_len):
+            self.surface_history.append((-1, -1)) # History padding
+
+        obs = self._get_mtd_obs() if self.training_agent == 'mtd' else self._get_seeker_obs()
+        return obs, {}
+
+    def _get_apm(self):
+        return len(self.attack_history)
+
+    def _get_mtd_obs(self):
+        apm_norm = min(self._get_apm() / self.rules['adaptive_mtd_trigger']['apm_blacklist_threshold'], 1.0)
+        blacklist_state = np.array([min(v / self.rules['blacklist_duration_steps'], 1.0) for v in self.blacklist.values()])
+        ip_norm = self.active_ip_idx / (len(self.ip_pool) -1)
+        port_norm = self.active_port_idx / (len(self.port_pool) -1)
+        return np.concatenate([[apm_norm], blacklist_state, [ip_norm, port_norm]]).astype(np.float32)
+
+    def _get_seeker_obs(self):
+        history = np.array(list(self.surface_history), dtype=np.float32).flatten()
+        # Normalize history indices
+        history[::2] /= (len(self.ip_pool) - 1) # Normalize IPs
+        history[1::2] /= (len(self.port_pool) - 1) # Normalize Ports
+        return history
 
     def step(self, action):
+        action = int(action)
+        if self.training_agent == 'mtd':
+            mtd_action = action
+            seeker_action, _ = self.agents['seeker_agent'].predict(self._get_seeker_obs(), deterministic=True)
+        else:
+            seeker_action = action
+            mtd_action, _ = self.agents['mtd_agent'].predict(self._get_mtd_obs(), deterministic=True)
+
+        mtd_reward, seeker_reward = 0, 0
+        self.attack_history.append(1) # Record activity for APM
+        for ip_idx in self.blacklist: self.blacklist[ip_idx] = max(0, self.blacklist[ip_idx] - 1)
+        
+        # 1. MTD 행동 적용
+        if mtd_action == 1: # SHUFFLE
+            mtd_reward += self.rewards_cfg['mtd_cost_for_shuffle']
+            self.active_ip_idx = self.np_random.integers(0, len(self.ip_pool))
+            self.active_port_idx = self.np_random.integers(0, len(self.port_pool))
+        elif mtd_action == 2: # BLACKLIST
+            mtd_reward += self.rewards_cfg['mtd_cost_for_blacklist']
+            # For simulation, we assume Seeker has a fixed source IP index 0.
+            # In a real scenario, this would come from packet inspection.
+            source_ip_idx_to_block = 0 
+            self.blacklist[source_ip_idx_to_block] = self.rules['blacklist_duration_steps']
+            mtd_reward += self.rewards_cfg['mtd_on_successful_blacklist']
+
+        # 2. Seeker 행동 적용
+        seeker_reward += self.rewards_cfg['seeker_action_cost']
+        is_attack = seeker_action >= len(self.ip_pool)
+        target_ip_idx = seeker_action % len(self.ip_pool)
+        
+        # 가정: Seeker의 소스 IP는 index 0
+        if self.blacklist[0] > 0:
+            seeker_reward += self.rewards_cfg['seeker_penalty_on_blacklisted']
+        elif is_attack:
+            if target_ip_idx == self.active_ip_idx:
+                seeker_reward += self.rewards_cfg['seeker_on_real_hit']
+                mtd_reward += self.rewards_cfg['mtd_penalty_on_real_hit']
+            else: # Hit a decoy/empty space
+                seeker_reward += self.rewards_cfg['seeker_on_decoy_hit']
+                mtd_reward += self.rewards_cfg['mtd_on_decoy_hit']
+        
+        self.surface_history.append((self.active_ip_idx, self.active_port_idx))
         self.current_step += 1
+        terminated = self.current_step >= self.max_steps
         
-        # 1. 행동(방어 태세) 적용
-        self.current_posture_idx = action
-        posture_name = self.postures[action]
-        self.shuffle_interval = self.policy['defense_postures'][posture_name]['shuffle_interval_s']
-        
-        # 2. Seeker의 행동 시뮬레이션
-        is_attack, is_real_hit, is_decoy_hit = self._simulate_seeker_attack()
-        
-        if is_attack:
-            self.attack_history.append(is_real_hit)
-            self.decoy_hit_history.append(is_decoy_hit)
+        obs = self._get_mtd_obs() if self.training_agent == 'mtd' else self._get_seeker_obs()
+        reward = mtd_reward if self.training_agent == 'mtd' else seeker_reward
+        return obs, reward, terminated, False, {}
 
-        # 3. 보상 계산
-        reward = self._calculate_reward(is_real_hit, is_decoy_hit, posture_name)
+class BattleReporter:
+    def __init__(self, policy, mtd_agent, seeker_agent):
+        self.env = MtdAdversarialEnv_v6(policy, 'mtd', mtd_agent=mtd_agent, seeker_agent=seeker_agent)
+        self.policy = policy
+    
+    def run(self, episodes=1):
+        print("\n" + "="*70)
+        print(" " * 20 + "최종 에이전트 작전 보고서" + " " * 20)
+        print("="*70)
         
-        # 4. 종료 조건
-        terminated = self.current_step >= self.episode_length
+        stats = {'seeker_hits': 0, 'total_attacks': 0, 'mtd_blacklists': 0, 'seeker_blacklisted': 0}
         
-        return self._get_obs(), reward, terminated, False, {}
+        for ep in range(episodes):
+            obs, _ = self.env.reset()
+            done = False
+            print(f"\n--- [ 모의전 #{ep+1} 시작 ] ---")
+            while not done:
+                # 1. 에이전트 의사결정 기록
+                mtd_obs = self.env._get_mtd_obs()
+                mtd_action, _ = self.env.agents['mtd_agent'].predict(mtd_obs, deterministic=True)
+                seeker_obs = self.env._get_seeker_obs()
+                seeker_action, _ = self.env.agents['seeker_agent'].predict(seeker_obs, deterministic=True)
 
-    def _get_obs(self):
-        apm = len(self.attack_history)
-        attack_success_rate = sum(self.attack_history) / apm if apm > 0 else 0
-        decoy_hit_rate = sum(self.decoy_hit_history) / apm if apm > 0 else 0
-        
-        return np.array([apm, attack_success_rate, self.shuffle_interval, decoy_hit_rate], dtype=np.float32)
+                # 2. 의사결정 근거 출력
+                log = f"Step {self.env.current_step+1:03d} | "
+                apm = self.env._get_apm()
+                mtd_action_str = {0:"STAY", 1:"SHUFFLE", 2:"BLACKLIST"}[int(mtd_action)]
+                log += f"MTD (APM:{apm}): Sees APM, Decides [{mtd_action_str}] | "
 
-    def _simulate_seeker_attack(self):
-        # 공격 발생 확률 (APM이 높을수록 공격이 잦음)
-        if random.random() > 0.5:
-            return False, False, False
+                is_attack = int(seeker_action) >= len(self.env.ip_pool)
+                target_idx = int(seeker_action) % len(self.env.ip_pool)
+                seeker_action_str = "ATTACK" if is_attack else "SCAN"
+                log += f"Seeker: Sees History, Decides [{seeker_action_str} on IP {target_idx}]"
+                print(log)
 
-        # 현재 활성화된 IP (셔플링 주기에 따라 확률적으로 실제 자산 노출)
-        # 셔플 주기가 짧을수록 Seeker의 예측이 어려워짐 (혼란 가중)
-        real_asset_exposed_prob = self.shuffle_interval / 120.0 
-        current_active_ip = self.real_target_ip if random.random() < real_asset_exposed_prob else "10.13.0.100"
-        
-        self.seeker.observe_and_learn(current_active_ip)
-        predicted_ip, is_predictive_attack = self.seeker.predict_and_attack()
+                # 3. 환경 스텝 및 결과 기록
+                _, _, done, _, _ = self.env.step(mtd_action)
+                
+                # 통계 업데이트
+                if mtd_action == 2: stats['mtd_blacklists'] += 1
+                if self.env.blacklist[0] > 0: stats['seeker_blacklisted'] +=1
+                if is_attack and self.env.blacklist[0] == 0:
+                    stats['total_attacks'] += 1
+                    if target_idx == self.env.active_ip_idx:
+                        stats['seeker_hits'] += 1
 
-        is_real_hit = (predicted_ip == self.real_target_ip and current_active_ip == self.real_target_ip)
-        is_decoy_hit = not is_real_hit
-        
-        return True, is_real_hit, is_decoy_hit
-
-    def _calculate_reward(self, is_real_hit, is_decoy_hit, posture):
-        # 4-Axis DES 모델 기반 보상 함수
-        
-        # 1. 보안성 (Security)
-        security_reward = -10.0 if is_real_hit else 1.0 # 실제 자산 피격 시 큰 패널티
-
-        # 2. 기만성 (Deception)
-        deception_reward = 2.0 if is_decoy_hit else 0.0
-
-        # 3. 비용 (Cost)
-        cost_penalty = 0
-        if posture == 'ACTIVE_DECEPTION':
-            cost_penalty = -0.2
-        elif posture == 'ISOLATION':
-            cost_penalty = -0.5
-        
-        # 4. 기민성 (Agility) - 짧은 주기는 그 자체로 비용이므로 Cost에 반영됨
-        
-        total_reward = (self.weights['security'] * security_reward +
-                        self.weights['deception'] * deception_reward +
-                        self.weights['cost'] * cost_penalty)
-        
-        return total_reward
-
-    def render(self, mode='human'):
-        obs = self._get_obs()
-        posture = self.postures[self.current_posture_idx]
-        print(f"Step: {self.current_step} | Posture: {posture:<18} | APM: {obs:.0f} | SuccessRate: {obs:.2f} | Interval: {obs:.0f}s")
-
+        # 4. 최종 결과 요약
+        hit_rate = (stats['seeker_hits'] / stats['total_attacks'] * 100) if stats['total_attacks'] > 0 else 0
+        print("\n" + "="*70)
+        print(" " * 25 + "종합 결과 요약" + " " * 25)
+        print("="*70)
+        print(f"  - Seeker 타격 성공률: {hit_rate:.2f}% ({stats['seeker_hits']} / {stats['total_attacks']})")
+        print(f"  - MTD 블랙리스트 발동 횟수: {stats['mtd_blacklists']} 회")
+        print(f"  - Seeker 블랙리스트 페널티 횟수: {stats['seeker_blacklisted']} 스텝")
+        print("="*70)
 
 def main():
-    # 정책 파일 로드
-    try:
-        with open(POLICY_FILE_PATH, 'r') as f:
-            policy = yaml.safe_load(f)
-    except FileNotFoundError:
-        print(f"[오류] 정책 파일({POLICY_FILE_PATH})을 찾을 수 없습니다.")
-        sys.exit(1)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    print(f"훈련 장치: {device.upper()}")
+    with open(POLICY_FILE_PATH, 'r') as f: policy = yaml.safe_load(f)
 
-    # 환경 생성 및 검증
-    env = MtdEnv(policy)
-    check_env(env)
-
-    # 모델 저장 경로 확인 및 생성
-    os.makedirs(MODEL_SAVE_PATH, exist_ok=True)
-    model_file = os.path.join(MODEL_SAVE_PATH, policy.get("rl_model_name", "mtd_agent.zip"))
-
-    # PPO 모델 생성 및 훈련
-    model = PPO("MlpPolicy", env, verbose=1, tensorboard_log="./mtd_tensorboard/")
+    mtd_env = DummyVecEnv([lambda: MtdAdversarialEnv_v6(policy, 'mtd')])
+    seeker_env = DummyVecEnv([lambda: MtdAdversarialEnv_v6(policy, 'seeker')])
     
-    print("\n--- 강화학습 에이전트 훈련 시작 ---")
-    # total_timesteps: 총 훈련 스텝 수. 높을수록 학습이 더 잘 되지만 오래 걸림.
-    model.learn(total_timesteps=20000, progress_bar=True)
-    print("--- 훈련 완료 ---")
+    mtd_agent = PPO("MlpPolicy", mtd_env, policy_kwargs=dict(net_arch=[256, 256]), device=device)
+    seeker_agent = PPO("MlpPolicy", seeker_env, policy_kwargs=dict(net_arch=[256, 256]), device=device)
 
-    # 훈련된 모델 저장
-    model.save(model_file)
-    print(f"\n[성공] 훈련된 모델이 다음 경로에 저장되었습니다: {model_file}")
-
-    # 훈련된 에이전트 테스트
-    print("\n--- 훈련된 에이전트 성능 테스트 ---")
-    obs, _ = env.reset()
-    for i in range(100):
-        action, _states = model.predict(obs, deterministic=True)
-        obs, reward, terminated, _, info = env.step(action)
-        env.render()
-        if terminated:
-            obs, _ = env.reset()
-
-    env.close()
+    config = policy['rl']['training']
+    for i in range(config['total_iterations']):
+        print(f"\n--- [ 자체 대련 라운드 {i + 1}/{config['total_iterations']} ] ---")
+        mtd_env.env_method('set_agents', seeker_agent=seeker_agent)
+        print(">> (1/2) MTD 에이전트 학습 중...")
+        mtd_agent.learn(total_timesteps=config['timesteps_per_iteration'], progress_bar=True, reset_num_timesteps=(i==0))
+        
+        seeker_env.env_method('set_agents', mtd_agent=mtd_agent)
+        print(">> (2/2) Seeker 에이전트 학습 중...")
+        seeker_agent.learn(total_timesteps=config['timesteps_per_iteration'], progress_bar=True, reset_num_timesteps=(i==0))
+        
+    print("\n--- 모든 훈련 완료 ---")
+    mtd_agent.save(os.path.join(MODEL_SAVE_PATH, policy['rl']['model_name']['mtd']))
+    seeker_agent.save(os.path.join(MODEL_SAVE_PATH, policy['rl']['model_name']['seeker']))
+    
+    reporter = BattleReporter(policy, mtd_agent, seeker_agent)
+    reporter.run()
 
 if __name__ == "__main__":
     main()
+

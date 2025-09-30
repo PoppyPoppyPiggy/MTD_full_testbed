@@ -1,73 +1,48 @@
+# MTD 통합 정책 v24.0 - 지능형 공방 시뮬레이션 규칙
+# 이 파일을 mtd/shared_state/mtd_policy.yaml 경로에 저장하세요.
 # ----------------------------------------------------------------------
-# MTD 통합 정책 v17.0 - 동적/지능형 방어 및 평가 모델
-# ----------------------------------------------------------------------
-# 기본 동작 전략
-default_strategy: adaptive_defense
 
-# --- MTD 핵심 자원 설정 ---
-ip_to_container_map:
-  "10.13.0.3": "companion-computer-lite"
-real_target_ip: "10.13.0.3"
-decoy_pool:
-  - "10.13.0.3"      # 실제 드론의 IP (반드시 포함)
-  - "10.13.0.100"    # 가상 드론 1
-  - "10.13.0.101"    # 가상 드론 2
-  - "10.13.0.102"    # 가상 드론 3
-port_pool: 
+# [핵심] 지능형 공방 환경 설정
+adversarial_rules:
+  # 공격 표면: 시뮬레이션에 사용될 (IP, Port) 조합의 풀
+  attack_surface:
+    ips: ["10.13.0.3", "10.13.0.100", "10.13.0.101", "10.13.0.102"]
+    ports: [14550, 14551, 14552, 14553, 14554]
+  
+  # Seeker가 관찰할 과거 MTD 행동의 길이 (시계열 데이터)
+  seeker_observation_history_length: 5
 
-# --- 허니 드론 네트워크 (Honey Drone Network) 설정 ---
-honey_drone_network:
-  # 시작 시 생성할 가상 드론(허니팟)의 수. decoy_pool 크기보다 작아야 함.
-  initial_virtual_drones: 2
-  # 동적으로 확장 가능한 가상 드론의 최대 수
-  max_virtual_drones: 5
+  # 적응형 MTD 트리거 설정
+  adaptive_mtd_trigger:
+    apm_window_seconds: 60 # APM(분당 공격 수)을 계산할 시간 창
+    apm_blacklist_threshold: 10 # 이 APM을 초과하면 블랙리스트 행동을 고려
 
-# --- 강화학습(RL) 에이전트 설정 ---
-# rl/models/ 디렉토리에 위치한 훈련된 모델 파일명
-rl_model_name: "mtd_agent.zip"
-# AI 에이전트의 의사결정 주기 (초)
-rl_decision_interval_s: 5
+  # 블랙리스트 정책
+  blacklist_duration_steps: 30 # 한 번 블랙리스트되면 지속되는 스텝 수
 
-# --- [고도화 1] 동적 방어 태세 (RL 에이전트용) ---
-# RL 에이전트는 아래 3가지 태세 중 하나를 선택하여 시스템을 운영
-defense_postures:
-  LOW_PROFILE: # 평시 태세: 비용 최소화
-    shuffle_interval_s: 120
-  ACTIVE_DECEPTION: # 기만 태세: CTI 수집 극대화
-    shuffle_interval_s: 30
-  ISOLATION: # 격리 태세: 피해 원천 차단
-    shuffle_interval_s: 10
+# --- [핵심] 강화학습(RL) 에이전트 설정 ---
+rl:
+  model_name:
+    mtd: "mtd_agent_final.zip"
+    seeker: "seeker_agent_final.zip"
+  
+  training:
+    total_iterations: 30
+    timesteps_per_iteration: 50000
 
-# --- [고도화 2] 지능형 전략 파라미터 (규칙 기반 Fallback 및 RL 보조용) ---
-strategies:
-  # 공격 빈도에 따른 적응형 방어 (규칙 기반 Fallback 시 사용)
-  attack_adaptive:
-    # 공격 빈도(APM) 계산을 위한 관찰 시간 (초)
-    attack_window_s: 60
-    # APM에 따른 셔플링 주기 조절 규칙 (높은 빈도부터 적용)
-    cycle_map:
-      - { frequency_apm: 10, shuffle_interval_s: 5 }  # 분당 10회 이상 공격 시 5초마다 셔플
-      - { frequency_apm: 5,  shuffle_interval_s: 10 } # 분당 5회 이상 공격 시 10초마다 셔플
-      - { frequency_apm: 2,  shuffle_interval_s: 20 } # 분당 2회 이상 공격 시 20초마다 셔플
-    # 기본 셔플링 주기 (초)
-    base_interval_s: 30
+  # [보상 가중치]
+  reward_weights:
+    # 방어자 (MTD) 보상
+    mtd_on_successful_blacklist: 100.0 # 공격자를 성공적으로 차단했을 때
+    mtd_on_decoy_hit: 20.0             # 공격자가 디코이를 공격했을 때
+    mtd_cost_for_shuffle: -10.0        # 셔플링 행동 비용
+    mtd_cost_for_blacklist: -5.0       # 블랙리스트 행동 비용
+    mtd_penalty_on_real_hit: -200.0    # 실제 타겟이 피격당했을 때
 
-# --- [고도화 3] 4-Axis 종합 스코어링 모델 설정 ---
-# tools/compute_mtd_metrics.py 에서 사용
-des_scoring:
-  # 4개 축의 최종 가중치 (wS+wA+wC+wD = 1.0)
-  weights:
-    security: 0.4    # 보안성 (R_succ)
-    agility: 0.2     # 기민성/불확실성 (S, D)
-    cost: 0.2        # 비용 효율성 (C_def)
-    deception: 0.2   # 기만성 (eta_dec)
+    # 공격자 (Seeker) 보상
+    seeker_on_real_hit: 200.0          # 실제 타겟 공격 성공
+    seeker_on_decoy_hit: -50.0         # 디코이 공격 시 페널티
+    seeker_on_scan_reveal: 5.0         # 정찰로 새로운 정보 획득 시
+    seeker_action_cost: -1.0           # 모든 행동에 대한 기본 비용
+    seeker_penalty_on_blacklisted: -300.0 # 자신이 블랙리스트에 올랐을 때 (치명적)
 
-# --- 기타 레거시 설정 ---
-enable_attacker_blacklist: true
-prober_response:
-  blacklist_threshold: 5
-  blacklist_duration_s: 600
-lpc_rules:
-  attack_success_threshold: 3
-  attack_script_path: "/dvd/dvd_attacks_lpc/attack_orchestrator.py"
-  attack_script_args: "--profile MTD_challenge --strategy sequence"
