@@ -1,48 +1,40 @@
-# MTD 통합 정책 v24.0 - 지능형 공방 시뮬레이션 규칙
-# 이 파일을 mtd/shared_state/mtd_policy.yaml 경로에 저장하세요.
-# ----------------------------------------------------------------------
+# MTD 통합 정책 v22.0 - 게임 이론 및 내재적 호기심 기반 MARL 모델
+game_theory_env:
+  attack_surface_ips:
+    - "10.13.0.3"
+    - "10.13.0.100"
+    - "10.13.0.101"
+    - "10.13.0.102"
+    - "10.13.0.103"
+    - "10.13.0.104"
+  max_decoys: 2
+  scan_success_probability: 0.8
 
-# [핵심] 지능형 공방 환경 설정
-adversarial_rules:
-  # 공격 표면: 시뮬레이션에 사용될 (IP, Port) 조합의 풀
-  attack_surface:
-    ips: ["10.13.0.3", "10.13.0.100", "10.13.0.101", "10.13.0.102"]
-    ports: [14550, 14551, 14552, 14553, 14554]
-  
-  # Seeker가 관찰할 과거 MTD 행동의 길이 (시계열 데이터)
-  seeker_observation_history_length: 5
-
-  # 적응형 MTD 트리거 설정
-  adaptive_mtd_trigger:
-    apm_window_seconds: 60 # APM(분당 공격 수)을 계산할 시간 창
-    apm_blacklist_threshold: 10 # 이 APM을 초과하면 블랙리스트 행동을 고려
-
-  # 블랙리스트 정책
-  blacklist_duration_steps: 30 # 한 번 블랙리스트되면 지속되는 스텝 수
-
-# --- [핵심] 강화학습(RL) 에이전트 설정 ---
 rl:
-  model_name:
-    mtd: "mtd_agent_final.zip"
-    seeker: "seeker_agent_final.zip"
-  
+  mtd_model_name: "mtd_agent_v5_icm.zip"
+  seeker_model_name: "seeker_agent_v5_icm.zip"
+
   training:
-    total_iterations: 30
-    timesteps_per_iteration: 50000
+    total_timesteps: 1000000
+    update_timestep: 4096
+    ppo_epochs: 10
+    learning_rate: 0.0003
 
-  # [보상 가중치]
   reward_weights:
-    # 방어자 (MTD) 보상
-    mtd_on_successful_blacklist: 100.0 # 공격자를 성공적으로 차단했을 때
-    mtd_on_decoy_hit: 20.0             # 공격자가 디코이를 공격했을 때
-    mtd_cost_for_shuffle: -10.0        # 셔플링 행동 비용
-    mtd_cost_for_blacklist: -5.0       # 블랙리스트 행동 비용
-    mtd_penalty_on_real_hit: -200.0    # 실제 타겟이 피격당했을 때
+    mtd_breach_penalty: -200.0
+    mtd_deception_reward: 75.0
+    mtd_uncertainty_reward: 10.0
+    mtd_defense_success_reward: 5.0
+    mtd_action_cost: -2.0
 
-    # 공격자 (Seeker) 보상
-    seeker_on_real_hit: 200.0          # 실제 타겟 공격 성공
-    seeker_on_decoy_hit: -50.0         # 디코이 공격 시 페널티
-    seeker_on_scan_reveal: 5.0         # 정찰로 새로운 정보 획득 시
-    seeker_action_cost: -1.0           # 모든 행동에 대한 기본 비용
-    seeker_penalty_on_blacklisted: -300.0 # 자신이 블랙리스트에 올랐을 때 (치명적)
+    seeker_hit_reward: 150.0
+    seeker_decoy_penalty: -100.0
+    seeker_miss_penalty: -10.0
+    seeker_action_cost: -1.0
+    seeker_scan_reveal_reward: 10.0
+    seeker_blocked_penalty: -20.0
 
+  icm:
+    enable: true
+    intrinsic_reward_weight: 0.01
+    icm_learning_rate: 0.0003
