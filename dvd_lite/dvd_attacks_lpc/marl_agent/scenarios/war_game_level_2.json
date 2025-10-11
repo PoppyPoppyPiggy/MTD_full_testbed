@@ -1,0 +1,11 @@
+{
+  "level": 2,
+  "description": "High-Conflict Zone: Large network space (/22). MTD has cost advantages.",
+  "network_cidr": "172.16.0.0/22",
+  "port_space": [21, 22, 25, 53, 80, 110, 143, 443, 445, 3306, 3389, 5900, 8080],
+  "num_real_assets": 6,
+  "num_decoy_assets": 12,
+  "seeker_scan_chunk_size_cidr": 27,
+  "mtd_shuffle_cost": -8.0,
+  "mtd_decoy_cost": -5.0
+}

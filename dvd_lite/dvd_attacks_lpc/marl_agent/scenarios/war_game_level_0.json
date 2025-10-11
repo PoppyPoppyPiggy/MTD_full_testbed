@@ -1,0 +1,11 @@
+{
+  "level": 0,
+  "description": "Boot Camp: Small network (/24), limited ports. Basic hide-and-seek.",
+  "network_cidr": "192.168.1.0/24",
+  "port_space": [80, 443, 8080],
+  "num_real_assets": 2,
+  "num_decoy_assets": 1,
+  "seeker_scan_chunk_size_cidr": 28,
+  "mtd_shuffle_cost": -15.0,
+  "mtd_decoy_cost": -10.0
+}

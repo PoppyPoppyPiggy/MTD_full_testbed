@@ -1,4 +1,4 @@
-# MTD 통합 정책 v22.0 - 게임 이론 및 내재적 호기심 기반 MARL 모델
+# MTD 통합 정책 v22.1 - GPU 튜닝 반영
 game_theory_env:
   attack_surface_ips:
     - "10.13.0.3"
@@ -15,9 +15,9 @@ rl:
   seeker_model_name: "seeker_agent_v5_icm.zip"
 
   training:
-    total_timesteps: 1000000
-    update_timestep: 4096
-    ppo_epochs: 10
+    total_timesteps: 1_000_000
+    update_timestep: 8192
+    ppo_epochs: 6
     learning_rate: 0.0003
 
   reward_weights:
