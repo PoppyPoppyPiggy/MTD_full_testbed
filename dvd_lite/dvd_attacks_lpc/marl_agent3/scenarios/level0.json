@@ -1,0 +1,6 @@
+{
+  "IP_SUBNET": "192.168.0.0/24",
+  "IP_RANGE": [10, 41],
+  "COMMON_PORTS": [22, 80, 443, 3306, 8080],
+  "INITIAL_ASSETS": 1
+}
