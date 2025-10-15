@@ -10,21 +10,44 @@ import pandas as pd
 import numpy as np
 from collections import deque
 import threading
+from typing import Dict, Any, Optional
 
 # --- 경로 설정 ---
 PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
-from bus.logger import log_bus_event
+
+# bus 디렉토리에 로그 기록을 위한 간단한 함수가 있다고 가정
+BUS_LOG_PATH = os.path.join(PROJECT_ROOT, 'bus', 'bus.log')
+
+# datetime 모듈 임포트 추가 (로그 기록 시 사용)
+import datetime 
+
+def log_bus_event(type: str, data: Dict[str, Any], source_override: str = "ai_cti_agent"):
+    """간단한 버스 이벤트 로깅 함수 (ML alert용)"""
+    record = {
+        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "ts": time.time(),
+        "source": source_override,
+        "type": type,
+        "data": data,
+    }
+    try:
+        with open(BUS_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+    except IOError:
+        print("Warning: Failed to write to bus.log")
+        
 
 # --- 상수 정의 ---
 MODEL_PATH = os.path.join(PROJECT_ROOT, 'ml', 'output', 'cti_classifier_model.joblib')
 FEATURES_PATH = os.path.join(PROJECT_ROOT, 'ml', 'output', 'training_features.json') # 학습에 사용된 피처 목록
+# ⭐️ 로그 파일 경로를 모니터 파일에 맞춰 정확하게 수정
 LOG_SOURCES = {
     "system_events": os.path.join(PROJECT_ROOT, 'bus', 'bus.log'),
-    "telemetry": os.path.join(PROJECT_ROOT, 'bus', 'bus_dvd.log'),
+    "telemetry": os.path.join(PROJECT_ROOT, 'bus', 'bus_telemetry.log'),
     "network": os.path.join(PROJECT_ROOT, 'bus', 'bus_network.log'),
-    "unified": os.path.join(PROJECT_ROOT, 'bus', 'bus_unified.log'),
+    "qos": os.path.join(PROJECT_ROOT, 'bus', 'bus_qos.log'),
 }
 TIME_WINDOW_SEC = 5.0  # 특징 추출을 위한 시간 창
 PREDICTION_INTERVAL_SEC = 1.0 # 1초마다 예측 수행
@@ -47,12 +70,10 @@ def create_features_from_window(df_window: pd.DataFrame) -> Optional[pd.DataFram
 
     # 2. 주요 수치 데이터에 대한 통계량 계산
     numeric_cols = {
-        'data.alt_m': 'alt',
-        'data.relative_alt_m': 'rel_alt',
-        'data.groundspeed_ms': 'gs',
-        'data.vx': 'vx', 'data.vy': 'vy', 'data.vz': 'vz',
+        'data.alt_m': 'alt', 'data.relative_alt_m': 'rel_alt',
+        'data.groundspeed_ms': 'gs', 'data.vx': 'vx', 'data.vy': 'vy', 'data.vz': 'vz',
         'data.xacc': 'xacc', 'data.yacc': 'yacc', 'data.zacc': 'zacc',
-        'data.pitch_deg': 'pitch', 'data.roll_deg': 'roll',
+        'data.pitch_deg': 'pitch', 'data.roll_deg': 'roll', 
         'data.avg_rtt_ms': 'rtt',
         'data.jitter_ms': 'jitter',
         'data.packet_loss_pct': 'loss',
@@ -64,6 +85,7 @@ def create_features_from_window(df_window: pd.DataFrame) -> Optional[pd.DataFram
     
     for col, prefix in numeric_cols.items():
         if col in df_window.columns:
+            # 숫자로 변환하고 NaN 제거
             series = pd.to_numeric(df_window[col], errors='coerce').dropna()
             if not series.empty:
                 features[f'{prefix}_mean'] = series.mean()
@@ -71,15 +93,15 @@ def create_features_from_window(df_window: pd.DataFrame) -> Optional[pd.DataFram
                 features[f'{prefix}_max'] = series.max()
                 features[f'{prefix}_min'] = series.min()
 
-    # 3. 카테고리 데이터 처리 (예: 드론 모드)
+    # 3. 카테고리 데이터 처리 (드론 모드 비율)
     if 'data.mode' in df_window.columns:
+        # ⭐️ 모드가 시간 창 내에서 차지하는 비율을 계산 (data_builder와 동일)
         mode_counts = df_window['data.mode'].value_counts(normalize=True)
         for mode, ratio in mode_counts.items():
             features[f'mode_ratio_{mode}'] = ratio
             
     if not features: return None
     
-    # NaN 값을 0으로 채움 (특히 std가 1개 샘플에서 계산될 때)
     return pd.DataFrame([features]).fillna(0)
 
 
@@ -121,7 +143,8 @@ def main():
     for name, path in LOG_SOURCES.items():
         os.makedirs(os.path.dirname(path), exist_ok=True)
         try:
-            f = open(path, 'a+') # 읽기/쓰기 모드로 파일 생성
+            # 파일이 없으면 생성, 있으면 끝까지 이동하여 새로운 라인만 읽음
+            f = open(path, 'a+') 
             f.seek(0, os.SEEK_END)
             threading.Thread(target=follow, args=(f, log_queues[name]), daemon=True).start()
         except Exception as e:
@@ -139,7 +162,6 @@ def main():
         for queue in log_queues.values():
             while queue:
                 log = queue.popleft()
-                # 최신 타임스탬프가 없으면 현재 시간으로 기록
                 if 'ts' not in log: log['ts'] = now
                 time_window_data.append(log)
         
@@ -163,10 +185,14 @@ def main():
             if live_features_df is None:
                 continue
 
-            # 학습에 사용된 피처와 순서를 정확히 일치시킴
-            X_live = pd.DataFrame(columns=training_features)
-            X_live = pd.concat([X_live, live_features_df], ignore_index=True).fillna(0)
-            X_live = X_live[training_features] # 순서 고정
+            # ⭐️ 안정화된 피처 준비 (FutureWarning 해결)
+            # 학습에 사용된 피처 목록으로 빈 DataFrame을 생성하고, live_features_df의 값으로 업데이트
+            X_live = pd.DataFrame(0.0, index=[0], columns=training_features)
+            
+            # live_features_df의 값을 X_live에 복사
+            for col in live_features_df.columns:
+                if col in X_live.columns:
+                    X_live.loc[0, col] = live_features_df.loc[0, col]
 
             # 6. 예측 및 결과 분석
             prediction = model.predict(X_live)[0]
@@ -178,8 +204,13 @@ def main():
                 
                 # 판단의 근거가 된 상위 특징 찾기
                 try:
-                    importances = model.named_steps['classifier'].feature_importances_
-                    feature_importance = sorted(zip(training_features, importances * X_live.iloc[0]), key=lambda x: x[1], reverse=True)
+                    # model이 Pipeline이 아닌 RandomForestClassifier 객체라고 가정 (train_classifier.py에 따름)
+                    importances = model.feature_importances_ 
+                    
+                    # 현재 윈도우의 특징 값 * 중요도를 기반으로 증거 추출
+                    feature_importance = sorted(zip(training_features, importances * X_live.iloc[0].values), 
+                                                key=lambda x: x[1], reverse=True)
+                    # 값이 0보다 큰 상위 3개 특징만 증거로 사용
                     top_evidence = {f: round(v, 4) for f, v in feature_importance[:3] if v > 0}
                 except Exception:
                     top_evidence = {"error": "Failed to calculate feature importance."}
@@ -195,7 +226,7 @@ def main():
                 
                 log_bus_event("ai_cti_alert", context)
                 print(f"  🚨 \033[91m[AI-CTI] 위협 탐지! -> '{prediction.upper()}' (신뢰도: {context['confidence']})\033[0m")
-                print(f"     - 근거: {json.dumps(top_evidence)}")
+                print(f"      - 근거: {json.dumps(top_evidence, indent=2)}")
 
         time.sleep(0.1)
 

@@ -11,8 +11,8 @@ import subprocess
 # --- 경로 설정 ---
 MONITORS_DIR = os.path.dirname(os.path.realpath(__file__))
 BUS_DIR = os.path.join(os.path.dirname(MONITORS_DIR), 'bus')
-SOURCE_BUS_LOG = os.path.join(BUS_DIR, 'bus.log') # الأصلي bus.log
-LOG_FILE_PATH = os.path.join(BUS_DIR, 'bus_network.log') # ⭐️ 통합 로그 파일 경로
+SOURCE_BUS_LOG = os.path.join(BUS_DIR, 'bus.log') # Attack Orchestrator의 원본 로그 파일
+LOG_FILE_PATH = os.path.join(BUS_DIR, 'bus_system_events.log') 
 
 # ⭐️ 공격 상태를 식별하기 위한 환경 변수
 CURRENT_ATTACK_LABEL = os.environ.get('ATTACK_NAME', 'normal')
@@ -26,13 +26,25 @@ INTERESTING_EVENTS = {
 
 def follow_log(filepath: str):
     """'tail -F'처럼 파일을 따라가며 새로운 라인을 반환하는 제너레이터"""
+    
+    # ⭐️ 수정: 파일이 존재하지 않으면 빈 파일을 생성하여 tail이 즉시 실패하는 것을 방지
     if not os.path.exists(filepath):
-        print(f"[System Event Monitor] 경고: 로그 파일이 없습니다: {filepath}. 생성을 기다립니다...")
-        while not os.path.exists(filepath):
-            time.sleep(1)
+        os.makedirs(os.path.dirname(filepath), exist_ok=True)
+        # 빈 파일 생성
+        try:
+            with open(filepath, 'a'):
+                os.utime(filepath, None)
+            print(f"[System Event Monitor] 정보: 로그 파일 '{os.path.basename(filepath)}'을 새로 생성했습니다.")
+        except Exception as e:
+            print(f"❌ [System Event Monitor] 오류: 파일 생성 실패: {e}", file=sys.stderr)
+            return
+
     try:
+        # tail -F -n 0 명령은 파일이 생성된 후의 새로운 내용만 실시간으로 출력합니다.
         proc = subprocess.Popen(['tail', '-F', '-n', '0', filepath], stdout=subprocess.PIPE, text=True)
         print(f"[System Event Monitor] '{os.path.basename(filepath)}' 실시간 모니터링 시작...")
+        
+        # subprocess 파이프에서 줄을 읽습니다.
         for line in iter(proc.stdout.readline, ''):
             yield line.strip()
     except Exception as e:
@@ -40,7 +52,6 @@ def follow_log(filepath: str):
 
 def write_jsonl(record: dict):
     """JSONL 형식으로 로그를 파일에 씁니다."""
-    # ⭐️ 레코드에 공격 라벨 필드 추가
     record['attack_label'] = CURRENT_ATTACK_LABEL
     try:
         with open(LOG_FILE_PATH, "a", encoding="utf-8") as f:

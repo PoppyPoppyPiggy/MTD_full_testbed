@@ -7,14 +7,15 @@ import json
 import datetime
 import subprocess
 import re
-import numpy as np # ### <<< CHANGED ###
+import numpy as np 
 
-# --- 경로 설정 ---
+# --- Path Configuration ---
 MONITORS_DIR = os.path.dirname(os.path.realpath(__file__))
 BUS_DIR = os.path.join(os.path.dirname(MONITORS_DIR), 'bus')
-LOG_FILE_PATH = os.path.join(BUS_DIR, 'bus_unified.log')
+# ⭐️ Changed log path to bus_qos.log to avoid conflicts
+LOG_FILE_PATH = os.path.join(BUS_DIR, 'bus_qos.log')
 
-# --- 환경 변수 ---
+# --- Environment Variables ---
 CURRENT_ATTACK_LABEL = os.environ.get('ATTACK_NAME', 'normal')
 TARGET_IP = os.environ.get('TARGET_IP', "10.13.0.3")
 SOURCE_IP = os.environ.get('MY_IP_ADDRESS', "10.13.0.4")
@@ -26,11 +27,11 @@ def write_jsonl(record: dict):
         with open(LOG_FILE_PATH, "a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
     except IOError as e:
-        print(f"❌ [QoS Monitor] 로그 파일 쓰기 오류: {e}", file=sys.stderr)
+        print(f"❌ [QoS Monitor] Error writing to log file: {e}", file=sys.stderr)
 
-### <<< CHANGED ###
 def get_ping_stats(target_ip: str) -> (float, float, float):
-    """지정된 IP로 ping을 보내 RTT, 패킷 손실률, 지터를 반환합니다."""
+    """Sends ping to the specified IP and returns RTT, packet loss, and jitter."""
+    # Use 10 packets, 0.2s interval, 2s timeout
     try:
         result = subprocess.run(
             ["ping", "-c", "10", "-i", "0.2", "-W", "2", target_ip],
@@ -38,10 +39,12 @@ def get_ping_stats(target_ip: str) -> (float, float, float):
         )
         output = result.stdout
         
-        # RTT와 패킷 손실률 추출
+        # Extract RTT and packet loss
         rtt_match = re.search(r"rtt min/avg/max/mdev = [\d.]+/([\d.]+)/[\d.]+/([\d.]+)", output)
+        
+        # mdev (mean deviation) is used as a proxy for jitter
         avg_rtt = float(rtt_match.group(1)) if rtt_match else -1.0
-        mdev_rtt = float(rtt_match.group(2)) if rtt_match else -1.0 # mdev is a good proxy for jitter
+        mdev_rtt = float(rtt_match.group(2)) if rtt_match else -1.0 
 
         loss_match = re.search(r"(\d+)% packet loss", output)
         packet_loss = float(loss_match.group(1)) if loss_match else 100.0
@@ -49,17 +52,17 @@ def get_ping_stats(target_ip: str) -> (float, float, float):
         return avg_rtt, packet_loss, mdev_rtt
 
     except (subprocess.TimeoutExpired, Exception):
+        # Return default failure values
         return -1.0, 100.0, -1.0
-### <<< END CHANGED ###
 
 def main():
     os.makedirs(os.path.dirname(LOG_FILE_PATH), exist_ok=True)
-    print(f"[QoS Monitor] 네트워크 품질 측정을 시작합니다 -> {LOG_FILE_PATH}")
-    print(f"✅ [QoS Monitor] 현재 공격 라벨: {CURRENT_ATTACK_LABEL}")
+    print(f"[QoS Monitor] Starting network quality measurement -> {LOG_FILE_PATH}")
+    print(f"✅ [QoS Monitor] Current attack label: {CURRENT_ATTACK_LABEL}")
     
     while True:
         try:
-            avg_rtt, packet_loss, jitter = get_ping_stats(TARGET_IP) # ### <<< CHANGED ###
+            avg_rtt, packet_loss, jitter = get_ping_stats(TARGET_IP) 
             
             record = {
                 "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
@@ -71,7 +74,7 @@ def main():
                     "source_ip": SOURCE_IP,
                     "avg_rtt_ms": avg_rtt,
                     "packet_loss_pct": packet_loss,
-                    "jitter_ms": jitter # ### <<< CHANGED ###
+                    "jitter_ms": jitter 
                 }
             }
             write_jsonl(record)
@@ -80,10 +83,10 @@ def main():
             time.sleep(PING_INTERVAL_SEC)
             
         except KeyboardInterrupt:
-            print("\n[QoS Monitor] 사용자 요청으로 모니터링을 중지합니다.")
+            print("\n[QoS Monitor] Monitoring stopped by user.")
             break
         except Exception as e:
-            print(f"❌ [QoS Monitor] 처리 중 예외 발생: {e}", file=sys.stderr)
+            print(f"❌ [QoS Monitor] An exception occurred during processing: {e}", file=sys.stderr)
             time.sleep(2)
 
 if __name__ == "__main__":
