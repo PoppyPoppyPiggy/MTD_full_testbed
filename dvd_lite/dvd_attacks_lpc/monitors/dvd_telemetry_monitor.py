@@ -1,3 +1,4 @@
+# File: dvd_lite/dvd_attacks_lpc/monitors/dvd_telemetry_monitor.py
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 import os
@@ -14,14 +15,18 @@ MONITORS_DIR = os.path.dirname(os.path.realpath(__file__))
 LPC_DIR = os.path.dirname(MONITORS_DIR)
 BUS_DIR = os.path.join(LPC_DIR, 'bus')
 # ⭐️ Changed log path to bus_telemetry.log to avoid conflicts
-LOG_FILE_PATH = os.path.join(BUS_DIR, 'bus_telemetry.log') 
+LOG_FILE_PATH = os.path.join(BUS_DIR, 'bus_telemetry.log')
 CURRENT_ATTACK_LABEL = os.environ.get('ATTACK_NAME', 'normal')
 
 if LPC_DIR not in sys.path:
     sys.path.insert(0, LPC_DIR)
 
 # --- MAVLink Connection Settings ---
-MAVLINK_CONNECTION_STRING = os.environ.get('MAVLINK_CONNECTION_STRING', "udpin:0.0.0.0:14550")
+# ⭐️ MAVLink 연결 문자열을 Companion Computer (10.13.0.3)의 MAVLink 포트로 설정
+# Companion Computer가 MAVLink 메시지를 받고 재전송할 가능성이 높으므로 이 IP를 타겟으로 지정합니다.
+# Companion Computer의 IP: 10.13.0.3, MAVLink UDP 포트: 14550 (기본값)
+# MAVLINK_CONNECTION_STRING = os.environ.get('MAVLINK_CONNECTION_STRING', "udpin:0.0.0.0:14550")
+MAVLINK_CONNECTION_STRING = os.environ.get('MAVLINK_CONNECTION_STRING', "udp:10.13.0.3:14550") # ⭐ Companion Computer IP로 변경
 HEARTBEAT_TIMEOUT_SEC = float(os.environ.get('HEARTBEAT_TIMEOUT_SEC', 15))
 LOGGING_INTERVAL_SEC = 0.2  # 5Hz logging
 
@@ -112,6 +117,7 @@ MESSAGE_HANDLERS: Dict[str, Callable[[Any, Dict[str, Any]], Dict[str, Any]]] = {
 def try_connect(uri: str) -> Optional[mavutil.mavlink_connection]:
     try:
         print(f"[*] Attempting MAVLink connection to: {uri}...")
+        # Source system ID 255 for monitor
         master = mavutil.mavlink_connection(uri, robust_parsing=True, source_system=255) 
         master.wait_heartbeat(timeout=8)
         print(f"[*] MAVLink connection successful: {uri} (SysID: {master.target_system}, CompID: {master.target_component})")

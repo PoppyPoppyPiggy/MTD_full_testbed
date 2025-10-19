@@ -1,6 +1,6 @@
+# File: dvd_lite/dvd_attacks_lpc/attack_orchestrator.py
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-
 import argparse
 import os
 import subprocess
@@ -42,9 +42,10 @@ attack_lock = threading.RLock()
 stop_event = threading.Event()
 try:
     # 공격자 IP 주소 획득
+    # ⭐️ 컨테이너 IP 주소를 얻는 호스트 명령이 실패할 경우, docker-compose에 지정된 고정 IP를 사용
     MY_IP_ADDRESS = subprocess.check_output(['hostname', '-I']).decode('utf-8').strip().split()[0]
 except Exception:
-    MY_IP_ADDRESS = '127.0.0.1'
+    MY_IP_ADDRESS = '10.13.0.200' # ⭐️ Attacker 컨테이너의 고정 IP로 대체
 
 # ==============================================================================
 # 유틸리티 함수
@@ -160,9 +161,10 @@ def run_single_attack(attack_to_run: str, state_file: str) -> Optional[subproces
     target_file_used = state_file
     
     # MTD 타겟 정보를 찾지 못했을 때 디버깅 정보 제공
+    # ⭐️ 기본 타겟 IP를 Companion Computer IP (10.13.0.3)로 변경하고 MAVLink 포트 14550을 사용합니다.
     if not target_ip or not target_port:
-        target_ip, target_port = "127.0.0.1", 14550
-        print(f"  [정보] MTD 타겟을 찾을 수 없어 기본 타겟({target_ip}:{target_port})을 사용합니다.")
+        target_ip, target_port = "10.13.0.3", 14550 
+        print(f"  [정보] MTD 타겟을 찾을 수 없어 기본 타겟({target_ip}:{target_port})을 사용합니다. (Companion Computer)")
         print(f"  [디버그] 확인된 MTD 상태 파일: {target_file_used}") # 사용자가 확인해야 할 파일 경로 출력
 
     print(f"  -> 현재 공격 타겟: {target_ip}:{target_port}")
@@ -186,7 +188,7 @@ def run_single_attack(attack_to_run: str, state_file: str) -> Optional[subproces
         print("\n" + "="*23 + " 공격 시작 " + "="*24)
         print(f"  - 공격자 IP      : {MY_IP_ADDRESS}")
         print(f"  - 스크립트       : {attack_to_run}")
-        print(f"  - 타        겟   : {target_ip}:{target_port}")
+        print(f"  - 타 겟          : {target_ip}:{target_port}")
         print(f"  - 공격 카테고리    : {attack_meta['attack_category']}")
         print("="*58)
         

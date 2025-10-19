@@ -1,3 +1,4 @@
+# File: dvd_lite/dvd_attacks_lpc/monitors/qos_monitor.py
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 import os
@@ -17,8 +18,10 @@ LOG_FILE_PATH = os.path.join(BUS_DIR, 'bus_qos.log')
 
 # --- Environment Variables ---
 CURRENT_ATTACK_LABEL = os.environ.get('ATTACK_NAME', 'normal')
-TARGET_IP = os.environ.get('TARGET_IP', "10.13.0.3")
-SOURCE_IP = os.environ.get('MY_IP_ADDRESS', "10.13.0.4")
+
+# ⭐️ SDN 환경의 고정 IP로 변경
+TARGET_IP = os.environ.get('TARGET_IP', "10.13.0.5") # simulator-lite IP
+SOURCE_IP = os.environ.get('MY_IP_ADDRESS', "10.13.0.200") # attacker IP
 PING_INTERVAL_SEC = 5
 
 def write_jsonl(record: dict):
@@ -33,8 +36,9 @@ def get_ping_stats(target_ip: str) -> (float, float, float):
     """Sends ping to the specified IP and returns RTT, packet loss, and jitter."""
     # Use 10 packets, 0.2s interval, 2s timeout
     try:
+        # ⭐️ source IP를 지정하여 어떤 노드에서 ping을 시작했는지 명확히 함
         result = subprocess.run(
-            ["ping", "-c", "10", "-i", "0.2", "-W", "2", target_ip],
+            ["ping", "-c", "10", "-i", "0.2", "-W", "2", "-I", SOURCE_IP, target_ip], 
             capture_output=True, text=True, timeout=5
         )
         output = result.stdout
@@ -51,7 +55,8 @@ def get_ping_stats(target_ip: str) -> (float, float, float):
 
         return avg_rtt, packet_loss, mdev_rtt
 
-    except (subprocess.TimeoutExpired, Exception):
+    except (subprocess.TimeoutExpired, Exception) as e:
+        # print(f"Ping error for {target_ip}: {e}", file=sys.stderr)
         # Return default failure values
         return -1.0, 100.0, -1.0
 
@@ -59,6 +64,7 @@ def main():
     os.makedirs(os.path.dirname(LOG_FILE_PATH), exist_ok=True)
     print(f"[QoS Monitor] Starting network quality measurement -> {LOG_FILE_PATH}")
     print(f"✅ [QoS Monitor] Current attack label: {CURRENT_ATTACK_LABEL}")
+    print(f"✅ [QoS Monitor] Pinging Target: {TARGET_IP} from Source: {SOURCE_IP}") # ⭐️ 변경된 IP 출력
     
     while True:
         try:
