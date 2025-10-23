@@ -1,0 +1,15 @@
+# MTD 성능 점수 계산 가중치 설정
+# 각 지표의 중요도에 따라 값을 조절합니다.
+
+# 방어 성공률 ( 높을수록 좋음 )
+r_succ_weight: 5.0
+
+# 평균 방어 비용 ( 낮을수록 좋음 - 음수 가중치 사용 )
+c_def_weight: -1.0
+
+# MTD 다양성 ( 높을수록 좋음 )
+d_bits_weight: 0.5
+
+# 향후 추가될 수 있는 지표 가중치 (예시)
+# wasted_scan_rate_weight: 0.2
+# r_known_penalty_weight: -0.5

@@ -1,76 +1,103 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# 백엔드 자동 감지(nft 가능하면 nft 우선)
+# --- Backend auto detect ---
 if command -v nft >/dev/null 2>&1; then BACKEND="${BACKEND:-nft}"; else BACKEND="${BACKEND:-iptables}"; fi
 
-PROTO="${PROTO:-udp}"           # udp|tcp
-PUB_PORT="${PUB_PORT:-14550}"   # nodeport 모드 공개포트
-BR_IF="${BR_IF:-}"              # flatlan 모드 인터페이스
-ACTIVE_IPPORT_FILE="${ACTIVE_IPPORT_FILE:-/tmp/mtd_active_ipport}"  # iptables fallback
-CHAIN_NAT="MTD_DNAT"
-SET_OLD="mtd_old"   # (선택) 이전 목적지 추적용 ipset (conntrack drop와 함께 사용)
+# --- Params ---
+PROTO="${PROTO:-udp}"                 # udp|tcp
+PUB_PORT="${PUB_PORT:-14550}"         # 공개 포트 (nodeport)
+MODE="${MODE:-nodeport}"              # nodeport | flatlan
+BR_IF="${BR_IF:-}"                    # flatlan 모드일 때 브리지 IF
+CONNTRACK_KICK="${CONNTRACK_KICK:-1}" # 스위치 시 conntrack 삭제(1/0)
 
-need_root() {
-  if [[ $EUID -ne 0 ]]; then echo "Run as root"; exit 1; fi
-}
+CHAIN_NFT="prerouting"                # nftables nat hook chain
+TABLE_FAM="ip"
+TABLE_NFT="mtd"
+CHAIN_IPT="MTD_DNAT"
 
-# ---------- nftables 구현: set swap로 원자적 스위칭 ----------
+need_root(){ if [[ $EUID -ne 0 ]]; then echo "Run as root"; exit 1; fi; }
+
+# ---------- nftables: simple rule replace (no maps) ----------
 nft_init() {
   need_root
-  nft list table ip mtd >/dev/null 2>&1 || nft add table ip mtd
-  # nodeport: port만 기준으로 dnat map (inet_service -> ipv4_addr . inet_service)
-  nft list set ip mtd dstmap >/dev/null 2>&1 || nft add set ip mtd dstmap { type inet_service : ipv4_addr . inet_service; }
-  nft list chain ip mtd prerouting >/dev/null 2>&1 || nft add chain ip mtd prerouting { type nat hook prerouting priority -100; }
+  # table/chain 준비
+  nft list table ${TABLE_FAM} ${TABLE_NFT} >/dev/null 2>&1 || nft add table ${TABLE_FAM} ${TABLE_NFT}
+  nft list chain ${TABLE_FAM} ${TABLE_NFT} ${CHAIN_NFT} >/dev/null 2>&1 || \
+    nft add chain ${TABLE_FAM} ${TABLE_NFT} ${CHAIN_NFT} "{ type nat hook prerouting priority -100; }"
+}
 
-  if [[ "${MODE:-nodeport}" == "nodeport" ]]; then
-    # 공개포트로 들어오는 패킷을 dstmap으로 DNAT
-    nft list ruleset | grep -q "ip mtd prerouting" | grep -q "dport ${PUB_PORT}" || \
-      nft add rule ip mtd prerouting ${PROTO} dport ${PUB_PORT} dnat to numgen inc mod 1 map @dstmap
+# 현재 dport 규칙의 handle를 찾는다
+nft_find_handle() {
+  nft --numeric --handle list chain ${TABLE_FAM} ${TABLE_NFT} ${CHAIN_NFT} 2>/dev/null \
+    | awk -v p="${PUB_PORT}" -v proto="${PROTO}" '
+        /handle/ && $0 ~ proto" dport "p && $0 ~ /dnat/ { for(i=1;i<=NF;i++){ if($i=="handle"){print $(i+1)} } }' \
+    | tail -n1
+}
+
+# 룰 문자열 생성 (ip:port 시도, 안 되면 ip-only로 대체)
+nft_build_rule() {
+  local ip="$1"; local pr="$2"
+  if [[ "${MODE}" == "nodeport" ]]; then
+    echo "${PROTO} dport ${PUB_PORT} dnat to ${ip}:${pr}"
   else
-    # flatlan: 브리지로 들어오고, dport=PUB_PORT이면 dstmap
-    [[ -z "$BR_IF" ]] && { echo "BR_IF required for flatlan mode"; exit 2; }
-    nft list ruleset | grep -q "iif \"$BR_IF\"" || \
-      nft add rule ip mtd prerouting iif \"$BR_IF\" ${PROTO} dport ${PUB_PORT} dnat to numgen inc mod 1 map @dstmap
+    echo "iif \"${BR_IF}\" ${PROTO} dport ${PUB_PORT} dnat to ${ip}:${pr}"
+  fi
+}
+nft_build_rule_iponly() {
+  local ip="$1"
+  if [[ "${MODE}" == "nodeport" ]]; then
+    echo "${PROTO} dport ${PUB_PORT} dnat to ${ip}"
+  else
+    echo "iif \"${BR_IF}\" ${PROTO} dport ${PUB_PORT} dnat to ${ip}"
   fi
 }
 
 nft_swap() {
   need_root
-  # 인자: "10.13.0.2:14550" 형태 하나만 활성화(원자 스왑)
   local ipport="$1"
   local ip="${ipport%:*}"; local pr="${ipport#*:}"
-  # 임시 세트 생성 후 swap
-  nft add set ip mtd newmap { type inet_service : ipv4_addr . inet_service; } 2>/dev/null || true
-  nft flush set ip mtd newmap
-  nft add element ip mtd newmap { ${PUB_PORT} : ${ip} . ${pr} }
-  nft swap set ip mtd dstmap newmap
-  nft delete set ip mtd newmap 2>/dev/null || true
+
+  # 체인 보장
+  nft_init
+
+  # 먼저 ip:port 규칙 시도(검증 모드 -c)
+  local rule rule_iponly handle
+  rule="$(nft_build_rule "${ip}" "${pr}")"
+  if nft -c add rule ${TABLE_FAM} ${TABLE_NFT} ${CHAIN_NFT} ${rule} >/dev/null 2>&1; then
+    :
+  else
+    # ip:port를 지원하지 않는 경우 ip-only로 폴백
+    rule="$(nft_build_rule_iponly "${ip}")"
+  fi
+
+  handle="$(nft_find_handle)"
+  if [[ -n "${handle}" ]]; then
+    nft replace rule ${TABLE_FAM} ${TABLE_NFT} ${CHAIN_NFT} handle "${handle}" ${rule}
+  else
+    nft add rule ${TABLE_FAM} ${TABLE_NFT} ${CHAIN_NFT} ${rule}
+  fi
 }
 
-# ---------- iptables fallback: DNAT 룰 자체를 교체 ----------
+# ---------- iptables fallback ----------
 ipt_init() {
   need_root
-  iptables -t nat -N "${CHAIN_NAT}" 2>/dev/null || true
-  # PREROUTING → MTD_DNAT 연결
-  if ! iptables -t nat -C PREROUTING -p ${PROTO} --dport ${PUB_PORT} -j "${CHAIN_NAT}" 2>/dev/null; then
-    iptables -t nat -A PREROUTING -p ${PROTO} --dport ${PUB_PORT} -j "${CHAIN_NAT}"
+  iptables -t nat -N "${CHAIN_IPT}" 2>/dev/null || true
+  if ! iptables -t nat -C PREROUTING -p ${PROTO} --dport ${PUB_PORT} -j "${CHAIN_IPT}" 2>/dev/null; then
+    iptables -t nat -A PREROUTING -p ${PROTO} --dport ${PUB_PORT} -j "${CHAIN_IPT}"
   fi
-  # 체인 비움(최상단 1개 DNAT로 운영)
-  iptables -t nat -F "${CHAIN_NAT}"
-  : > "${ACTIVE_IPPORT_FILE}"
+  iptables -t nat -F "${CHAIN_IPT}"
 }
 
 ipt_switch() {
   need_root
   local ipport="$1"
   local ip="${ipport%:*}"; local pr="${ipport#*:}"
-  iptables -t nat -F "${CHAIN_NAT}"
-  iptables -t nat -A "${CHAIN_NAT}" -p ${PROTO} --dport ${PUB_PORT} -j DNAT --to-destination ${ip}:${pr}
-  echo "${ipport}" > "${ACTIVE_IPPORT_FILE}"
+  iptables -t nat -F "${CHAIN_IPT}"
+  iptables -t nat -A "${CHAIN_IPT}" -p ${PROTO} --dport ${PUB_PORT} -j DNAT --to-destination "${ip}:${pr}"
 }
 
-# ---------- conntrack 부분 삭제 ----------
+# ---------- conntrack ----------
 kick_conntrack_dst() {
   need_root
   local ip="$1"; local pr="$2"
@@ -88,15 +115,11 @@ case "${1:-}" in
     if [[ "${BACKEND}" == "nft" ]]; then nft_init; else ipt_init; fi
     ;;
   swap)
-    # $2 = "ip:port", [$3="old_ip:old_port" (optional, conntrack kick)]
-    [[ -z "${2:-}" ]] && { echo "usage: $0 swap <ip:port> [old_ip:old_port]"; exit 2; }
+    [[ -n "${2:-}" ]] || { echo "usage: $0 swap <ip:port> [old_ip:old_port]"; exit 2; }
     if [[ "${BACKEND}" == "nft" ]]; then nft_swap "$2"; else ipt_switch "$2"; fi
-    if [[ -n "${3:-}" && "${CONNTRACK_KICK:-1}" == "1" ]]; then
-      kick_conntrack_dst "${3%:*}" "${3#*:}"
-    fi
+    if [[ -n "${3:-}" && "${CONNTRACK_KICK}" == "1" ]]; then kick_conntrack_dst "${3%:*}" "${3#*:}"; fi
     ;;
   kick)
-    # $2=ip $3=port
     [[ -n "${2:-}" && -n "${3:-}" ]] || { echo "usage: $0 kick <ip> <port>"; exit 2; }
     kick_conntrack_dst "$2" "$3"
     ;;

@@ -23,12 +23,12 @@ try:
     class ActorCritic(nn.Module):
         def __init__(self, state_dim: int, action_dim: int):
             super(ActorCritic, self).__init__()
-            self.shared_layer = nn.Sequential(nn.Linear(state_dim, 128), nn.Tanh(), nn.Linear(128, 128), nn.Tanh())
+            self.shared = nn.Sequential(nn.Linear(state_dim, 128), nn.Tanh(), nn.Linear(128, 128), nn.Tanh())
             self.actor = nn.Linear(128, action_dim)
             self.critic = nn.Linear(128, 1) # Critic은 여기서 사용 안 함
 
         def forward(self, state):
-            x = self.shared_layer(state)
+            x = self.shared(state)
             # Critic은 필요 없으므로 액터 로짓만 반환하도록 수정 가능하나, 호환성 위해 유지
             return Categorical(logits=self.actor(x)), self.critic(x).squeeze(-1)
 
