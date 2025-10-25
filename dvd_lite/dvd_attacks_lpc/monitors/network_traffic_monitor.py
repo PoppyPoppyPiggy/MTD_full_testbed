@@ -1,167 +1,300 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-import os
-import sys
+import pyshark
 import time
 import json
-import datetime
-# ⭐️ scapy.all 대신 필요한 모듈만 임포트 (잠재적 충돌 방지)
-from scapy.all import sniff, IP, TCP, UDP, ARP, Ether
+import os
+import logging
+from datetime import datetime
+import threading
+import queue
+import traceback # 상세 오류 로깅용
 
-# --- Path Configuration ---
-MONITORS_DIR = os.path.dirname(os.path.realpath(__file__))
-BUS_DIR = os.path.join(os.path.dirname(MONITORS_DIR), 'bus')
-LOG_FILE_PATH = os.path.join(BUS_DIR, 'bus_network.log') # 네트워크 전용 로그
+# 로깅 설정
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-# --- Environment Variables ---
-CURRENT_ATTACK_LABEL = os.environ.get('ATTACK_NAME', 'normal')
-SNIFF_INTERFACE = os.environ.get('SNIFF_INTERFACE', None) # 기본값 None으로 변경
+# 환경 변수 또는 기본값 설정
+BUS_LOG_PATH = os.environ.get('BUS_LOG_PATH', './bus.log')
+CAPTURE_INTERFACE = os.environ.get('NETWORK_CAPTURE_INTERFACE', 'any') # 기본값 'any'로 변경 (모든 인터페이스)
+CAPTURE_FILTER = os.environ.get('NETWORK_CAPTURE_FILTER', '') # BPF 필터 (예: 'udp port 14550 or tcp port 80')
+MAX_PACKETS_PER_LOG = int(os.environ.get('NETWORK_MAX_PACKETS_PER_LOG', 50)) # 로그 한번에 기록할 최대 패킷 수 (조정)
+MAX_QUEUE_SIZE = int(os.environ.get('NETWORK_MAX_QUEUE_SIZE', 2000)) # 패킷 처리 큐 최대 크기 (증가)
+LOGGING_INTERVAL = float(os.environ.get('NETWORK_LOGGING_INTERVAL', 1.0)) # 로그 기록 최대 주기 (초)
 
-last_packet_time = None
+# 패킷 처리를 위한 스레드 안전 큐
+packet_queue = queue.Queue(maxsize=MAX_QUEUE_SIZE)
+# 스레드 종료 플래그
+terminate_flag = threading.Event()
 
-def write_jsonl(record: dict):
-    record['attack_label'] = CURRENT_ATTACK_LABEL
+def log_to_bus(packets_data):
+    """
+    수집된 패킷 데이터를 bus 로그 파일에 기록합니다.
+    """
+    if not packets_data:
+        return
+
+    log_entry = {
+        # datetime.utcnow() -> datetime.now(timezone.utc)
+        "timestamp": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
+        "source": "network_traffic_monitor",
+        "type": "network_packets",
+        "interface": CAPTURE_INTERFACE,
+        "filter": CAPTURE_FILTER,
+        "packet_count": len(packets_data),
+        "data": packets_data # 패킷 정보 리스트
+    }
     try:
-        with open(LOG_FILE_PATH, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+        with open(BUS_LOG_PATH, 'a') as f:
+            f.write(json.dumps(log_entry) + '\n')
+        logger.debug(f"{len(packets_data)}개의 패킷 정보를 로그에 기록했습니다.")
     except IOError as e:
-        print(f"❌ [Network Monitor] Error writing to log file: {e}", file=sys.stderr)
+        logger.error(f"Bus 로그 파일 '{BUS_LOG_PATH}'에 쓰기 실패: {e}")
+    except Exception as e:
+        logger.error(f"로그 기록 중 예상치 못한 오류 발생: {e}")
 
-def get_tcp_flags(packet):
-    """Extracts TCP flags from a packet."""
-    if TCP in packet:
-        flags = packet[TCP].flags
-        # scapy 2.4.5 기준 플래그 문자열 사용 (더 직관적)
-        flag_str = str(flags) # 예: "SA", "FPA", "S", "A"
-        return flag_str
-        # 이전 방식 (비트마스크)
-        # return {
-        #     'FIN': bool(flags & 0x01), 'SYN': bool(flags & 0x02),
-        #     'RST': bool(flags & 0x04), 'PSH': bool(flags & 0x08),
-        #     'ACK': bool(flags & 0x10), 'URG': bool(flags & 0x20),
-        # }
-    return None
+def process_packet(pkt):
+    """
+    캡처된 패킷에서 상세 정보를 추출하여 딕셔너리로 반환합니다.
+    """
+    try:
+        # pkt.captured_length가 None일 경우 pkt.length 또는 0 사용
+        captured_length_val = getattr(pkt, 'captured_length', None)
+        captured_length = int(captured_length_val) if captured_length_val is not None else int(getattr(pkt, 'length', 0))
 
-def packet_handler(packet):
-    global last_packet_time
+        packet_info = {
+            'timestamp': float(pkt.sniff_timestamp),
+            'number': int(pkt.number),
+            'length': int(pkt.length),
+            'captured_length': captured_length, # 수정된 값 사용
+            'highest_layer': pkt.highest_layer,
+            'interface_captured': getattr(pkt, 'interface_captured', None),
+            'protocols': pkt.protocol.split(':') if hasattr(pkt, 'protocol') else [], # pyshark 0.5.3+
+            'layers': [layer.layer_name for layer in pkt.layers]
+        }
 
-    current_time = time.time()
-    inter_arrival_time = (current_time - (last_packet_time or current_time)) * 1000
-    last_packet_time = current_time
+        # Ethernet 레이어
+        if hasattr(pkt, 'eth'):
+            packet_info['eth_src'] = pkt.eth.src
+            packet_info['eth_dst'] = pkt.eth.dst
+            packet_info['eth_type'] = pkt.eth.type
 
-    log_data = {
-        "length": len(packet),
-        "inter_arrival_time_ms": round(inter_arrival_time, 4),
-        "src_mac": None, # MAC 주소 필드 추가
-        "dst_mac": None,
-    }
+        # IP 레이어 (IPv4/IPv6)
+        ip_layer = getattr(pkt, 'ip', getattr(pkt, 'ipv6', None))
+        if ip_layer:
+            packet_info['ip_version'] = ip_layer.version
+            packet_info['ip_src'] = ip_layer.src
+            packet_info['ip_dst'] = ip_layer.dst
+            packet_info['ip_len'] = int(ip_layer.len)
+            packet_info['ip_ttl'] = int(ip_layer.ttl) if hasattr(ip_layer, 'ttl') else None # IPv4 TTL
+            packet_info['ip_hop_limit'] = int(ip_layer.hlim) if hasattr(ip_layer, 'hlim') else None # IPv6 Hop Limit
+            packet_info['ip_proto'] = int(ip_layer.proto) if hasattr(ip_layer, 'proto') else int(ip_layer.nxt) # Protocol / Next Header
+            packet_info['ip_flags'] = str(ip_layer.flags) if hasattr(ip_layer, 'flags') else None # IPv4 Flags
+            packet_info['ip_frag_offset'] = int(ip_layer.frag_offset) if hasattr(ip_layer, 'frag_offset') else None # IPv4 Fragment Offset
 
-    # L2 정보 (MAC 주소) 추출
-    if packet.haslayer(Ether):
-         eth_layer = packet.getlayer(Ether)
-         log_data["src_mac"] = eth_layer.src
-         log_data["dst_mac"] = eth_layer.dst
+        # TCP 레이어
+        if hasattr(pkt, 'tcp'):
+            packet_info['tcp_srcport'] = int(pkt.tcp.srcport)
+            packet_info['tcp_dstport'] = int(pkt.tcp.dstport)
+            packet_info['tcp_seq'] = int(pkt.tcp.seq)
+            packet_info['tcp_ack'] = int(pkt.tcp.ack)
+            packet_info['tcp_flags'] = str(pkt.tcp.flags) # Flags (e.g., "0x00000012" (SYN, ACK))
+            packet_info['tcp_window_size'] = int(pkt.tcp.window_size)
+            packet_info['tcp_payload_len'] = len(pkt.tcp.payload.binary_value) if hasattr(pkt.tcp, 'payload') else 0
 
-    # ARP 패킷 처리
-    if packet.haslayer(ARP):
-        arp_layer = packet.getlayer(ARP)
-        log_data.update({
-            "src_ip": arp_layer.psrc, "dst_ip": arp_layer.pdst,
-            # ARP에서는 hwsrc/hwdst가 MAC 주소이므로 L2 정보와 중복될 수 있음 (필요시 제거)
-            #"src_mac": arp_layer.hwsrc, "dst_mac": arp_layer.hwdst,
-            "protocol": "ARP",
-            "arp_op": arp_layer.op # 1 for request, 2 for reply
-        })
+        # UDP 레이어
+        elif hasattr(pkt, 'udp'):
+            packet_info['udp_srcport'] = int(pkt.udp.srcport)
+            packet_info['udp_dstport'] = int(pkt.udp.dstport)
+            packet_info['udp_length'] = int(pkt.udp.length)
+            packet_info['udp_payload_len'] = len(pkt.udp.payload.binary_value) if hasattr(pkt.udp, 'payload') else 0
+            # UDP payload 일부 로깅 (주의: 성능 및 로그 크기 영향)
+            # if 'udp_payload_len' in packet_info and packet_info['udp_payload_len'] > 0:
+            #     payload_bytes = pkt.udp.payload.binary_value
+            #     packet_info['udp_payload_hex'] = payload_bytes[:min(32, len(payload_bytes))].hex() # 앞 32바이트 hex
 
-    # IP 패킷 처리
-    elif packet.haslayer(IP):
-        ip_layer = packet.getlayer(IP)
-        proto, src_port, dst_port = "IP", None, None # 기본 프로토콜 IP로 설정
-        tcp_flags = None
+        # ICMP 레이어
+        elif hasattr(pkt, 'icmp'):
+            packet_info['icmp_type'] = int(pkt.icmp.type)
+            packet_info['icmp_code'] = int(pkt.icmp.code)
+            packet_info['icmp_seq'] = int(pkt.icmp.seq) if hasattr(pkt.icmp, 'seq') else None
 
-        if packet.haslayer(TCP):
-            tcp_layer = packet.getlayer(TCP)
-            proto, src_port, dst_port = "TCP", tcp_layer.sport, tcp_layer.dport
-            tcp_flags = get_tcp_flags(packet)
-        elif packet.haslayer(UDP):
-            udp_layer = packet.getlayer(UDP)
-            proto, src_port, dst_port = "UDP", udp_layer.sport, udp_layer.dport
-        # 다른 프로토콜(ICMP 등) 추가 가능
-        elif ip_layer.proto == 1: # ICMP
-             proto = "ICMP"
-             # ICMP 타입/코드 추가 가능
-             # icmp_layer = packet.getlayer(ICMP)
-             # log_data["icmp_type"] = icmp_layer.type
-             # log_data["icmp_code"] = icmp_layer.code
+        # DNS 레이어 (일반적으로 UDP 위에 있음)
+        if hasattr(pkt, 'dns'):
+            packet_info['dns_id'] = pkt.dns.id
+            packet_info['dns_flags'] = str(pkt.dns.flags)
+            packet_info['dns_qry_name'] = pkt.dns.qry_name if hasattr(pkt.dns, 'qry_name') else None
+            packet_info['dns_qry_type'] = pkt.dns.qry_type if hasattr(pkt.dns, 'qry_type') else None
+            packet_info['dns_resp_name'] = pkt.dns.resp_name if hasattr(pkt.dns, 'resp_name') else None
+            packet_info['dns_resp_addr'] = pkt.dns.resp_addr if hasattr(pkt.dns, 'resp_addr') else None
 
-        log_data.update({
-            "src_ip": ip_layer.src, "dst_ip": ip_layer.dst,
-            "protocol": proto, "src_port": src_port, "dst_port": dst_port,
-            "tcp_flags": tcp_flags,
-            "ip_ttl": ip_layer.ttl, # TTL 정보 추가
-            "ip_len": ip_layer.len, # IP 헤더 포함 길이
-        })
-    else:
-        # L2 프레임이지만 ARP/IP가 아닌 경우 (예: LLDP, STP 등) - 필요 시 로깅
-        # print(f"Non IP/ARP packet: {packet.summary()}")
-        return # 일단 무시
+        # MAVLink (UDP 페이로드로 표시될 가능성 높음)
+        # TODO: MAVLink 페이로드 디코딩 필요 시 추가 구현 (별도 라이브러리 사용 고려)
+        # if packet_info.get('udp_dstport') == 14550 or packet_info.get('udp_srcport') == 14550:
+             # try:
+             #     payload = pkt.udp.payload.binary_value
+             #     # mavlink_message = decode_mavlink_payload(payload) # 별도 함수 구현 필요
+             #     # packet_info['mavlink'] = mavlink_message
+             # except Exception as mav_err:
+             #     packet_info['mavlink_error'] = str(mav_err)
 
-    record = {
-        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        "ts": current_time,
-        "source": "network_monitor",
-        "type": "packet_capture",
-        "data": log_data
-    }
-    write_jsonl(record)
+        return packet_info
+
+    except AttributeError as e:
+        logger.debug(f"패킷 정보 추출 중 속성 오류: {e} - 패킷 번호: {getattr(pkt, 'number', 'N/A')}")
+        # 기본적인 정보만이라도 반환 시도
+        return {
+            'timestamp': float(getattr(pkt, 'sniff_timestamp', 0.0)),
+            'length': int(getattr(pkt, 'length', 0)),
+            'error': f"AttributeError: {e}",
+            'layers': [layer.layer_name for layer in getattr(pkt, 'layers', [])]
+        }
+    except Exception as e:
+        logger.error(f"패킷 처리 중 예상치 못한 오류 발생: {e} - 패킷 번호: {getattr(pkt, 'number', 'N/A')}")
+        logger.error(traceback.format_exc()) # 상세 오류 스택 로깅
+        return None
+
+def packet_capture_thread():
+    """네트워크 인터페이스에서 패킷을 캡처하여 큐에 넣는 스레드 함수."""
+    logger.info(f"인터페이스 '{CAPTURE_INTERFACE}'에서 패킷 캡처 시작 (필터: '{CAPTURE_FILTER if CAPTURE_FILTER else '없음'}').")
+    capture = None
+    try:
+        # use_json=True, include_raw=False : tshark 처리 부담 감소 시도
+        capture = pyshark.LiveCapture(
+            interface=CAPTURE_INTERFACE,
+            bpf_filter=CAPTURE_FILTER,
+            use_json=True,
+            include_raw=False
+        )
+        # sniff_continuously는 제너레이터
+        for packet in capture.sniff_continuously():
+            if terminate_flag.is_set():
+                logger.info("종료 신호 수신, 패킷 캡처 중단.")
+                break
+
+            processed_packet = process_packet(packet)
+            if processed_packet:
+                try:
+                    packet_queue.put(processed_packet, block=False) # Non-blocking
+                except queue.Full:
+                    logger.warning(f"패킷 처리 큐가 가득 찼습니다 (크기: {MAX_QUEUE_SIZE}). 일부 패킷이 유실될 수 있습니다.")
+                    # 큐가 꽉 찼을 때 처리: 오래된 것 버리기 (큐에서 하나 빼고 넣기)
+                    try:
+                        packet_queue.get_nowait()
+                        packet_queue.put(processed_packet, block=False)
+                    except queue.Empty:
+                        pass # 빼려는데 비어있으면 그냥 넣기
+                    except queue.Full:
+                        pass # 또 꽉찼으면 어쩔 수 없이 버림
+
+    except FileNotFoundError:
+         logger.error(f"캡처 도구(tshark)를 찾을 수 없습니다. tshark가 설치되어 있고 PATH에 있는지 확인하세요.")
+    except PermissionError:
+         logger.error(f"인터페이스 '{CAPTURE_INTERFACE}' 캡처 권한이 없습니다. root 권한 또는 적절한 권한으로 실행하세요.")
+    except Exception as e:
+        logger.error(f"패킷 캡처 중 심각한 오류 발생: {e}", exc_info=True)
+    finally:
+        if capture:
+            capture.close()
+        # 스레드 종료 시 None을 넣어 처리 스레드에게 종료 신호 전달
+        # 큐가 꽉 차도 넣을 수 있도록 block=True 사용 고려 또는 예외 처리 강화
+        try:
+             packet_queue.put(None, block=True, timeout=1.0) # 로깅 스레드가 받을 때까지 잠시 대기
+        except queue.Full:
+             logger.error("종료 신호(None)를 패킷 큐에 넣지 못했습니다.")
+        logger.info("패킷 캡처 스레드 종료.")
+
+
+def packet_logging_thread():
+    """큐에서 패킷 정보를 가져와 주기적으로 로그 파일에 기록하는 스레드 함수."""
+    logger.info("패킷 로깅 스레드 시작.")
+    packets_buffer = []
+    last_log_time = time.time()
+    while True:
+        try:
+            # 큐에서 패킷 가져오기 (타임아웃 설정하여 주기적 로깅 및 종료 확인)
+            packet_info = packet_queue.get(block=True, timeout=LOGGING_INTERVAL / 2) # 로깅 간격의 절반 정도 대기
+
+            if packet_info is None: # 캡처 스레드로부터 종료 신호 수신
+                logger.info("캡처 스레드로부터 종료 신호 수신.")
+                break # 루프 종료 -> finally 블록 실행
+
+            packets_buffer.append(packet_info)
+            packet_queue.task_done() # 큐 작업 완료 알림
+
+            # 버퍼가 가득 차면 즉시 로깅
+            if len(packets_buffer) >= MAX_PACKETS_PER_LOG:
+                log_to_bus(packets_buffer)
+                packets_buffer = [] # 버퍼 비우기
+                last_log_time = time.time()
+
+        except queue.Empty:
+            # 타임아웃 발생 시 (큐가 비어있음)
+            current_time = time.time()
+            # 버퍼에 내용이 있고, 마지막 로그 기록 후 일정 시간 지났으면 로깅
+            if packets_buffer and (current_time - last_log_time >= LOGGING_INTERVAL):
+                logger.debug(f"타임아웃 및 로깅 간격 경과로 버퍼 로깅 수행 ({len(packets_buffer)}개).")
+                log_to_bus(packets_buffer)
+                packets_buffer = [] # 버퍼 비우기
+                last_log_time = current_time
+            # 종료 플래그 확인
+            if terminate_flag.is_set():
+                logger.info("종료 신호 확인, 로깅 스레드 종료 준비.")
+                break
+            continue # 계속 큐 확인
+
+        except Exception as e:
+            logger.error(f"패킷 로깅 중 오류 발생: {e}", exc_info=True)
+            # 오류 발생 시에도 계속 시도
+
+        # 루프 종료 후 남아있는 버퍼 내용 로깅
+        finally:
+            if packets_buffer:
+                logger.info(f"종료 전 마지막 버퍼 로깅 ({len(packets_buffer)}개).")
+                log_to_bus(packets_buffer)
+            logger.info("패킷 로깅 스레드 종료.")
+
 
 def main():
-    os.makedirs(os.path.dirname(LOG_FILE_PATH), exist_ok=True)
+    """네트워크 트래픽 모니터링을 위한 스레드를 시작하고 관리합니다."""
+    logger.info("네트워크 트래픽 모니터 시작.")
 
-    # 인터페이스 자동 감지 또는 명시적 지정
-    global SNIFF_INTERFACE
-    if SNIFF_INTERFACE is None:
-        # Docker 환경 등에서 기본 인터페이스 찾기 시도 (예: eth0)
-        # 좀 더 견고한 방법 필요 시 get_if_list() 등 사용
-        possible_interfaces = ['eth0', 'ensp0s3', 'enp1s0'] # 일반적인 인터페이스 이름
-        found = False
-        from scapy.arch import get_if_list
-        available_interfaces = get_if_list()
-        for iface in possible_interfaces:
-            if iface in available_interfaces:
-                SNIFF_INTERFACE = iface
-                found = True
-                break
-        if not found and available_interfaces:
-             SNIFF_INTERFACE = available_interfaces[0] # 첫 번째 인터페이스 사용
-             print(f"[Network Monitor] 경고: 기본 인터페이스를 찾을 수 없어 '{SNIFF_INTERFACE}'를 사용합니다.")
-        elif not found:
-             print("❌ [Network Monitor] 오류: 사용 가능한 네트워크 인터페이스를 찾을 수 없습니다. SNIFF_INTERFACE 환경 변수를 설정해주세요.")
-             sys.exit(1)
+    # 캡처 스레드 시작
+    capture_thread = threading.Thread(target=packet_capture_thread, name="PacketCaptureThread", daemon=True)
+    capture_thread.start()
 
-    print(f"[Network Monitor] 네트워크 패킷 모니터링 시작 (iface: {SNIFF_INTERFACE}) -> {LOG_FILE_PATH}")
-    print(f"✅ [Network Monitor] 현재 공격 라벨: {CURRENT_ATTACK_LABEL}")
+    # 로깅 스레드 시작
+    logging_thread = threading.Thread(target=packet_logging_thread, name="PacketLoggingThread", daemon=True)
+    logging_thread.start()
 
     try:
-        # filter="ip or arp" 로 IP와 ARP 패킷만 캡처
-        sniff(iface=SNIFF_INTERFACE, filter="ip or arp", prn=packet_handler, store=0)
-    except PermissionError:
-        print(f"❌ [Network Monitor] 권한 오류: 패킷 스니핑을 위해 root 권한이 필요합니다.", file=sys.stderr)
-        sys.exit(1)
-    except OSError as e:
-        # 인터페이스 찾기 실패 또는 다른 OS 수준 오류
-        if "No such device" in str(e) or "not found" in str(e):
-             print(f"❌ [Network Monitor] OS 오류: 인터페이스 '{SNIFF_INTERFACE}'를 찾을 수 없습니다.", file=sys.stderr)
-             print("   사용 가능한 인터페이스 목록:", get_if_list())
-             print("   SNIFF_INTERFACE 환경 변수를 올바른 값으로 설정해주세요.")
-        else:
-             print(f"❌ [Network Monitor] OS 오류 발생: {e}", file=sys.stderr)
-        sys.exit(1)
-    except KeyboardInterrupt:
-        print("\n[Network Monitor] 사용자 요청으로 모니터링 중지.")
-    except Exception as e:
-         print(f"❌ [Network Monitor] 예기치 않은 오류 발생: {e}", file=sys.stderr)
+        # 메인 스레드는 스레드들이 종료될 때까지 대기
+        while capture_thread.is_alive() and logging_thread.is_alive():
+            # 메인 스레드에서 주기적으로 상태 확인 또는 다른 작업 수행 가능
+            time.sleep(1)
+            # 예: 큐 크기 로깅
+            # logger.debug(f"Current packet queue size: {packet_queue.qsize()}")
 
+    except KeyboardInterrupt:
+        logger.info("사용자에 의해 모니터링 중단 신호 수신...")
+    finally:
+        # 스레드들에 종료 신호 전달
+        terminate_flag.set()
+        logger.info("캡처 및 로깅 스레드에 종료 신호 전송됨.")
+
+        # 스레드 종료 대기
+        capture_thread.join(timeout=5)
+        if capture_thread.is_alive():
+             logger.warning("캡처 스레드가 시간 내에 종료되지 않았습니다.")
+        logging_thread.join(timeout=5)
+        if logging_thread.is_alive():
+             logger.warning("로깅 스레드가 시간 내에 종료되지 않았습니다.")
+
+        logger.info("네트워크 트래픽 모니터 종료.")
 
 if __name__ == "__main__":
+    # 스크립트 실행 권한 확인 (Linux/macOS)
+    if os.name == 'posix' and os.geteuid() != 0:
+        logger.warning("네트워크 패킷 캡처를 위해 root 권한이 필요할 수 있습니다.")
     main()
+
+

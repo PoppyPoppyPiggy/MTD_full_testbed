@@ -1,183 +1,300 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-# 파일명: dvd_lite/dvd_attacks_lpc/monitors/qos_monitor.py
-# 설명: MTD 타겟 IP를 추적하여 네트워크 품질(RTT, Loss, Jitter) 측정 (v1.1 - 안정성 강화)
-
-import os
-import sys
 import time
 import json
-import datetime
-import subprocess
-import re
-from typing import Tuple # typing.Tuple 대신 사용
+import os
+import logging
+import psutil # 시스템 리소스 사용량 측정을 위해 psutil 사용
+from datetime import datetime
+import subprocess # ping 실행용
+import threading
+import platform # platform 모듈 import 추가
+from datetime import datetime, timezone # timezone 추가
 
-# --- 경로 설정 및 유틸리티 임포트 ---
-MONITORS_DIR = os.path.dirname(os.path.realpath(__file__))
-LPC_DIR = os.path.dirname(MONITORS_DIR)
-BUS_DIR = os.path.join(LPC_DIR, 'bus')
-LOG_FILE_PATH = os.path.join(BUS_DIR, 'bus_qos.log') # QoS 전용 로그
-CURRENT_ATTACK_LABEL = os.environ.get('ATTACK_NAME', 'normal')
-SOURCE_IP = os.environ.get('MY_IP_ADDRESS', "10.13.0.200") # 공격자 컨테이너 IP
-PING_INTERVAL_SEC = 5
-PING_COUNT = 5 # 핑 횟수 줄이기 (테스트 환경 고려)
-PING_TIMEOUT_SEC = 3 # 전체 핑 타임아웃
+# 로깅 설정
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-# utils 디렉토리를 PYTHONPATH에 추가 (가정)
-UTILS_DIR_PATH = os.path.join(LPC_DIR, 'utils')
-if UTILS_DIR_PATH not in sys.path:
-    sys.path.insert(0, UTILS_DIR_PATH)
+# 환경 변수 또는 기본값 설정
+BUS_LOG_PATH = os.environ.get('BUS_LOG_PATH', './bus.log')
+MONITOR_INTERVAL = int(os.environ.get('QOS_MONITOR_INTERVAL', 5)) # 초 단위 모니터링 간격
+PING_TARGET = os.environ.get('QOS_PING_TARGET', '8.8.8.8') # 네트워크 지연 시간 측정을 위한 대상 IP
+PING_COUNT = int(os.environ.get('QOS_PING_COUNT', 3)) # ping 횟수
+PING_TIMEOUT = int(os.environ.get('QOS_PING_TIMEOUT', 5)) # ping 명령 타임아웃 (초)
 
-# MTD 상태 리더 임포트 시도 및 Fallback
-try:
-    from utils import mtd_state_reader
-    print("[QoS Monitor] MTD 상태 리더 로드 성공.")
-except ImportError:
+# 스레드 종료 플래그
+terminate_flag = threading.Event()
+
+def get_system_resource_usage():
+    """
+    시스템의 CPU, 메모리, 디스크, 네트워크 사용량 등 상세 정보를 측정합니다.
+    """
     try:
-        from mtd import mtd_state_reader
-        print("[QoS Monitor] MTD 상태 리더(mtd) 로드 성공.")
-    except ImportError:
-        class mtd_state_reader:
-            @staticmethod
-            def get_current_target(): return None, None
-            @staticmethod
-            def stop_monitor(): pass
-        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!", file=sys.stderr)
-        print("!!! 경고: MTD 상태 리더(mtd_state_reader)를 찾을 수 없습니다. !!!", file=sys.stderr)
-        print("!!! MTD 타겟 추적 없이 기본 IP(10.13.0.3)로 QoS 측정 시도   !!!", file=sys.stderr)
-        print("!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!", file=sys.stderr)
+        # CPU
+        # interval=None 또는 0: non-blocking, 이전 호출 이후 사용량 반환 / interval > 0: blocking, 해당 시간 동안 측정
+        cpu_percent_overall = psutil.cpu_percent(interval=0.5) # 전체 CPU 사용률 (0.5초 측정)
+        cpu_percent_per_core = psutil.cpu_percent(interval=None, percpu=True) # 코어별 사용률 (non-blocking)
+        cpu_times = psutil.cpu_times_percent(interval=None) # CPU 시간 사용 비율 (user, system, idle 등)
+        load_avg = psutil.getloadavg() # 시스템 부하 평균 (1분, 5분, 15분) - Linux/macOS only
 
+        # Memory
+        memory_info = psutil.virtual_memory()
+        swap_info = psutil.swap_memory()
 
-def write_jsonl(record: dict):
-    """JSONL 형식으로 로그를 파일에 씁니다."""
-    record['attack_label'] = CURRENT_ATTACK_LABEL
+        # Disk
+        disk_usage_root = psutil.disk_usage('/') # 루트 디스크 기준
+        disk_io = psutil.disk_io_counters() # 누적 Disk IO 카운터
+
+        # Network (전체 인터페이스 합산)
+        net_io = psutil.net_io_counters() # 누적 Net IO 카운터
+
+        # Processes
+        process_count = len(psutil.pids())
+
+        return {
+            'cpu_percent_overall': cpu_percent_overall,
+            'cpu_percent_per_core': cpu_percent_per_core,
+            'cpu_times_percent': cpu_times._asdict() if cpu_times else None,
+            'load_avg': load_avg if hasattr(psutil, 'getloadavg') else None,
+
+            'memory_percent': memory_info.percent,
+            'memory_total_gb': round(memory_info.total / (1024**3), 2),
+            'memory_used_gb': round(memory_info.used / (1024**3), 2),
+            'memory_available_gb': round(memory_info.available / (1024**3), 2),
+
+            'swap_percent': swap_info.percent,
+            'swap_total_gb': round(swap_info.total / (1024**3), 2),
+            'swap_used_gb': round(swap_info.used / (1024**3), 2),
+
+            'disk_percent_root': disk_usage_root.percent,
+            'disk_total_gb_root': round(disk_usage_root.total / (1024**3), 2),
+            'disk_used_gb_root': round(disk_usage_root.used / (1024**3), 2),
+            'disk_read_count': disk_io.read_count,
+            'disk_write_count': disk_io.write_count,
+            'disk_read_bytes': disk_io.read_bytes,
+            'disk_write_bytes': disk_io.write_bytes,
+            'disk_read_time_ms': getattr(disk_io, 'read_time', None), # 디스크 읽기 시간 (ms)
+            'disk_write_time_ms': getattr(disk_io, 'write_time', None), # 디스크 쓰기 시간 (ms)
+
+            'net_bytes_sent': net_io.bytes_sent,
+            'net_bytes_recv': net_io.bytes_recv,
+            'net_packets_sent': net_io.packets_sent,
+            'net_packets_recv': net_io.packets_recv,
+            'net_errin': net_io.errin,
+            'net_errout': net_io.errout,
+            'net_dropin': net_io.dropin,
+            'net_dropout': net_io.dropout,
+
+            'process_count': process_count,
+            'boot_time_timestamp': psutil.boot_time() # 시스템 부팅 시간 (Unix timestamp)
+        }
+    except Exception as e:
+        logger.error(f"시스템 리소스 측정 중 오류 발생: {e}", exc_info=True)
+        return None
+
+def get_network_latency(target=PING_TARGET, count=PING_COUNT, timeout=PING_TIMEOUT):
+    """
+    지정된 대상 IP로 ping을 실행하여 네트워크 지연 시간(RTT) 및 패킷 손실률을 측정합니다.
+    {'avg_rtt_ms': float, 'packet_loss_percent': float} 딕셔너리를 반환합니다. 실패 시 None 또는 부분 정보 반환.
+    """
+    result_data = {'avg_rtt_ms': None, 'packet_loss_percent': None}
     try:
-        with open(LOG_FILE_PATH, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False) + "\n")
-    except IOError as e:
-        print(f"❌ [QoS Monitor] 로그 파일 쓰기 오류: {e}", file=sys.stderr)
+        # 운영체제별 ping 명령어 조정
+        if platform.system() == 'Windows':
+            # -w: timeout in ms
+            command = ['ping', '-n', str(count), '-w', str(timeout * 1000), target]
+        else: # Linux/macOS
+            # -W: timeout in seconds
+            # -i: interval (optional)
+            command = ['ping', '-c', str(count), '-W', str(timeout), target]
 
-def get_ping_stats(target_ip: str) -> Tuple[float, float, float]:
-    """지정된 IP로 ping을 보내 RTT(평균), 패킷 손실, Jitter(mdev)를 반환합니다."""
-    # -c: 핑 횟수, -i: 간격(초), -W: 타임아웃(초), -I: 출발지 인터페이스/IP
-    # ⭐️ 언어 독립적인 파싱을 위해 노력 (하지만 완벽하진 않음)
-    ping_cmd = ["ping", "-c", str(PING_COUNT), "-i", "0.2", "-W", "1", "-I", SOURCE_IP, target_ip]
-    try:
-        # 언어 설정을 C (POSIX/영어)로 고정하여 출력 형식 일관성 유지 시도
-        env = os.environ.copy()
-        env['LANG'] = 'C'
-        result = subprocess.run(
-            ping_cmd,
-            capture_output=True, text=True, timeout=PING_TIMEOUT_SEC, env=env,
-            errors='ignore' # UTF-8 디코딩 오류 발생 시 무시
-        )
-        output = result.stdout
-        # print(f"--- PING OUTPUT for {target_ip} ---\n{output}\n--------------------------") # 디버깅용
+        logger.debug(f"Executing ping command: {' '.join(command)}")
+        result = subprocess.run(command, capture_output=True, text=True, timeout=timeout + 2) # 명령어 자체 타임아웃 추가
 
-        avg_rtt, mdev_rtt, packet_loss = -1.0, -1.0, 100.0
+        stdout = result.stdout.strip()
+        stderr = result.stderr.strip()
+        logger.debug(f"Ping stdout:\n{stdout}")
+        if stderr:
+            logger.debug(f"Ping stderr:\n{stderr}")
 
-        # RTT 파싱 (min/avg/max/mdev 또는 round-trip min/avg/max/stddev)
-        rtt_match = re.search(r"(?:rtt|round-trip)\s*(?:min/avg/max/(?:mdev|stddev)|avg)\s*=\s*[\d.]+/([\d.]+)/?[\d.]*/?([\d.]+)?", output)
-        if rtt_match:
-            try:
-                avg_rtt = float(rtt_match.group(1))
-                # mdev/stddev 값이 있을 경우 jitter로 사용
-                if rtt_match.group(2):
-                    mdev_rtt = float(rtt_match.group(2))
-                else:
-                    mdev_rtt = 0.0 # mdev 없으면 0으로 처리 (일부 ping 버전)
-            except (ValueError, IndexError):
-                print(f"[QoS Monitor] 경고: RTT 파싱 실패 (출력: ...{output[-100:]})")
-                avg_rtt, mdev_rtt = -1.0, -1.0
+        # --- 패킷 손실률 파싱 ---
+        loss_percent = None
+        if platform.system() == 'Windows':
+            # 예: Packets: Sent = 3, Received = 3, Lost = 0 (0% loss),
+            for line in stdout.split('\n'):
+                if 'loss' in line and '%' in line:
+                    try:
+                        loss_str = line.split('(')[1].split('%')[0]
+                        loss_percent = float(loss_str)
+                        result_data['packet_loss_percent'] = loss_percent
+                        break
+                    except (IndexError, ValueError) as e:
+                        logger.warning(f"Windows ping 손실률 파싱 오류: {e} - line: {line}")
+        else: # Linux/macOS
+            # 예: 3 packets transmitted, 3 received, 0% packet loss, time 2003ms
+            for line in stdout.split('\n'):
+                if 'packet loss' in line:
+                    try:
+                        loss_str = line.split('%')[0].split(',')[-1].strip()
+                        loss_percent = float(loss_str)
+                        result_data['packet_loss_percent'] = loss_percent
+                        break
+                    except (IndexError, ValueError) as e:
+                        logger.warning(f"Linux/macOS ping 손실률 파싱 오류: {e} - line: {line}")
 
-        # 패킷 손실 파싱 (packet loss 또는 Verluste)
-        loss_match = re.search(r"(\d+(?:[.,]\d+)?)%\s*(?:packet loss|Paketverlust)", output)
-        if loss_match:
-            try:
-                # 쉼표를 점으로 변환 후 float으로 변환
-                packet_loss = float(loss_match.group(1).replace(',', '.'))
-            except ValueError:
-                 print(f"[QoS Monitor] 경고: 패킷 손실 파싱 실패 (값: {loss_match.group(1)})")
-                 packet_loss = 100.0
-        elif "100% packet loss" in output or f"{PING_COUNT} packets transmitted, 0 received" in output:
-             packet_loss = 100.0
-        elif avg_rtt != -1.0: # RTT 정보가 있는데 손실 정보가 없으면 0%로 간주
-             packet_loss = 0.0
+        if loss_percent is None:
+            logger.warning(f"'{target}' ping 결과에서 패킷 손실률 파싱 실패.")
 
+        # --- 평균 RTT 파싱 ---
+        avg_rtt = None
+        if result.returncode == 0 or loss_percent is not None and loss_percent < 100: # 성공 또는 부분 성공 시 RTT 파싱 시도
+            if platform.system() == 'Windows':
+                 # 예: Minimum = 11ms, Maximum = 12ms, Average = 11ms
+                 for line in stdout.split('\n'):
+                     if 'Average =' in line:
+                         try:
+                             avg_rtt_str = line.split('Average =')[1].strip().split('ms')[0]
+                             avg_rtt = float(avg_rtt_str)
+                             result_data['avg_rtt_ms'] = avg_rtt
+                             break
+                         except (IndexError, ValueError) as e:
+                             logger.warning(f"Windows ping RTT 파싱 오류: {e} - line: {line}")
+            else: # Linux/macOS
+                # 예: rtt min/avg/max/mdev = 10.123/11.456/12.789/0.987 ms
+                # 예: round-trip min/avg/max/stddev = 10.123/11.456/12.789/0.987 ms
+                for line in stdout.split('\n'):
+                    if 'rtt min/avg/max' in line or 'round-trip min/avg/max' in line:
+                         try:
+                             parts = line.split('=')[1].strip().split('/')
+                             if len(parts) >= 4:
+                                avg_rtt = float(parts[1]) # 평균값
+                                result_data['avg_rtt_ms'] = avg_rtt
+                                break
+                         except (IndexError, ValueError) as e:
+                             logger.warning(f"Linux/macOS ping RTT 파싱 오류: {e} - line: {line}")
 
-        # 가끔 mdev가 0인데 avg_rtt가 있는 경우 처리
-        if avg_rtt > 0 and mdev_rtt == -1.0:
-            mdev_rtt = 0.0
+            if avg_rtt is None:
+                logger.warning(f"'{target}' ping 결과에서 평균 RTT 파싱 실패 (출력 확인 필요).")
+        else:
+             logger.warning(f"'{target}' ping 실패 (returncode={result.returncode}, loss={loss_percent}%). RTT 측정 불가.")
 
-        return avg_rtt, packet_loss, mdev_rtt
+        return result_data
 
     except subprocess.TimeoutExpired:
-        print(f"[QoS Monitor] 경고: Ping 타임아웃 ({target_ip})")
-        return -1.0, 100.0, -1.0
+        logger.warning(f"'{target}' ping 시간 초과 ({timeout}초).")
+        result_data['packet_loss_percent'] = 100.0 # 타임아웃은 100% 손실로 간주
+        return result_data
     except FileNotFoundError:
-        print(f"❌ [QoS Monitor] 오류: 'ping' 명령어를 찾을 수 없습니다. iputils-ping 패키지가 설치되었는지 확인하세요.", file=sys.stderr)
-        # 이 경우 반복적인 오류를 막기 위해 종료 또는 다른 처리 필요
-        sys.exit(1) # 심각한 오류로 간주하고 종료
+        logger.error(f"'ping' 명령을 찾을 수 없습니다. PATH를 확인하세요.")
+        return result_data # 빈 결과 반환
     except Exception as e:
-        print(f"❌ [QoS Monitor] Ping 실행 중 예외 발생 ({target_ip}): {e}", file=sys.stderr)
-        return -1.0, 100.0, -1.0
+        logger.error(f"네트워크 지연 시간 측정 중 오류 발생: {e}", exc_info=True)
+        return result_data # 빈 결과 반환
+
+def calculate_rates(current_stats, last_stats, time_diff):
+    """ 이전 통계와 현재 통계를 비교하여 변화율(per second)을 계산합니다. """
+    rates = {}
+    if not last_stats or time_diff <= 0:
+        return rates # 이전 데이터 없거나 시간 차이 없으면 계산 불가
+
+    # Disk IO Rates (Bytes per second)
+    rates['disk_read_bps'] = round((current_stats.get('disk_read_bytes', 0) - last_stats.get('disk_read_bytes', 0)) / time_diff)
+    rates['disk_write_bps'] = round((current_stats.get('disk_write_bytes', 0) - last_stats.get('disk_write_bytes', 0)) / time_diff)
+    # Disk IO Rates (Operations per second)
+    rates['disk_read_iops'] = round((current_stats.get('disk_read_count', 0) - last_stats.get('disk_read_count', 0)) / time_diff)
+    rates['disk_write_iops'] = round((current_stats.get('disk_write_count', 0) - last_stats.get('disk_write_count', 0)) / time_diff)
+
+    # Network Rates (Bytes per second -> Bits per second)
+    rates['net_sent_bps'] = round((current_stats.get('net_bytes_sent', 0) - last_stats.get('net_bytes_sent', 0)) * 8 / time_diff)
+    rates['net_recv_bps'] = round((current_stats.get('net_bytes_recv', 0) - last_stats.get('net_bytes_recv', 0)) * 8 / time_diff)
+    # Network Rates (Packets per second)
+    rates['net_sent_pps'] = round((current_stats.get('net_packets_sent', 0) - last_stats.get('net_packets_sent', 0)) / time_diff)
+    rates['net_recv_pps'] = round((current_stats.get('net_packets_recv', 0) - last_stats.get('net_packets_recv', 0)) / time_diff)
+
+    # Network Error Rates (Errors/Drops per second)
+    rates['net_errin_rate'] = round((current_stats.get('net_errin', 0) - last_stats.get('net_errin', 0)) / time_diff)
+    rates['net_errout_rate'] = round((current_stats.get('net_errout', 0) - last_stats.get('net_errout', 0)) / time_diff)
+    rates['net_dropin_rate'] = round((current_stats.get('net_dropin', 0) - last_stats.get('net_dropin', 0)) / time_diff)
+    rates['net_dropout_rate'] = round((current_stats.get('net_dropout', 0) - last_stats.get('net_dropout', 0)) / time_diff)
+
+    # 음수 값 방지 (카운터 리셋 등 고려)
+    for key, value in rates.items():
+        if value < 0:
+            rates[key] = 0
+
+    return rates
+
+
+def log_to_bus(qos_data):
+    """QoS 데이터를 bus 로그 파일에 기록합니다."""
+    log_entry = {
+        # datetime.utcnow() -> datetime.now(timezone.utc)
+        "timestamp": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
+        "source": "qos_monitor",
+        "type": "system_qos",
+        "data": qos_data
+    }
+    try:
+        with open(BUS_LOG_PATH, 'a') as f:
+            f.write(json.dumps(log_entry) + '\n')
+    except IOError as e:
+        logger.error(f"Bus 로그 파일 '{BUS_LOG_PATH}'에 쓰기 실패: {e}")
+    except Exception as e:
+        logger.error(f"로그 기록 중 예상치 못한 오류 발생: {e}")
 
 def main():
-    os.makedirs(os.path.dirname(LOG_FILE_PATH), exist_ok=True)
-    print(f"[QoS Monitor] 네트워크 품질 측정 시작 (Source: {SOURCE_IP}) -> {LOG_FILE_PATH}")
-    print(f"✅ [QoS Monitor] 현재 공격 라벨: {CURRENT_ATTACK_LABEL}")
+    """주기적으로 시스템 리소스 및 네트워크 품질(QoS)을 모니터링하고 로그를 기록합니다."""
+    logger.info("QoS 모니터 시작.")
+    last_resource_stats = None
+    last_timestamp = time.time()
 
-    # Fallback IP (mtd_state_reader 실패 시 사용)
-    fallback_target_ip = "10.13.0.3"
+    while not terminate_flag.is_set():
+        current_timestamp = time.time()
+        time_diff = current_timestamp - last_timestamp
 
-    while True:
-        try:
-            target_ip, _ = mtd_state_reader.get_current_target()
+        # 시스템 리소스 측정
+        current_resource_stats = get_system_resource_usage()
+        # 네트워크 지연 시간/손실률 측정
+        network_quality = get_network_latency()
 
-            if not target_ip:
-                # MTD 리더가 활성화되지 않았거나 타겟 정보가 없는 경우 Fallback IP 사용
-                if 'get_current_target' in dir(mtd_state_reader): # mtd_state_reader가 임포트되었는지 확인
-                     print("[QoS Monitor] 대기 중: MTD 타겟 정보를 찾을 수 없습니다...")
-                     target_ip = None # 명시적으로 None 설정
-                else: # Fallback 클래스가 사용 중인 경우
-                     print(f"[QoS Monitor] 경고: MTD 리더 비활성. Fallback 타겟({fallback_target_ip})으로 측정 시도.")
-                     target_ip = fallback_target_ip
+        if current_resource_stats:
+            # 변화율 계산
+            rates = calculate_rates(current_resource_stats, last_resource_stats, time_diff)
 
-            if target_ip: # 유효한 타겟 IP가 있을 때만 ping 실행
-                avg_rtt, packet_loss, jitter = get_ping_stats(target_ip)
+            # 로그 데이터 구성
+            qos_data = {
+                'interval_seconds': round(time_diff, 2),
+                'system_resources_cumulative': current_resource_stats, # 현재 누적값
+                'system_resources_rates': rates, # 계산된 변화율 (per second)
+                'network_quality': network_quality, # ping 결과 (avg RTT, loss)
+                'ping_target': PING_TARGET
+            }
+            logger.debug(f"현재 QoS 상태: CPU={qos_data['system_resources_cumulative'].get('cpu_percent_overall')}% Mem={qos_data['system_resources_cumulative'].get('memory_percent')}% RTT={qos_data['network_quality'].get('avg_rtt_ms')}ms Loss={qos_data['network_quality'].get('packet_loss_percent')}%")
+            log_to_bus(qos_data)
 
-                record = {
-                    "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-                    "ts": time.time(),
-                    "source": "qos_monitor",
-                    "type": "network_qos",
-                    "data": {
-                        "target_ip": target_ip,
-                        "source_ip": SOURCE_IP,
-                        "avg_rtt_ms": avg_rtt if avg_rtt != -1.0 else None, # -1은 Null로 기록
-                        "packet_loss_pct": packet_loss,
-                        "jitter_ms": jitter if jitter != -1.0 else None # -1은 Null로 기록
-                    }
-                }
-                write_jsonl(record)
-                status = "OK" if packet_loss < 100 else "FAIL"
-                print(f"[QoS Monitor] Target: {target_ip:<15} | RTT: {avg_rtt:6.2f} ms | Loss: {packet_loss:5.1f}% | Jitter: {jitter:6.2f} ms | Status: {status}")
-            else:
-                 # 타겟 IP가 없는 경우 (MTD 리더는 있지만 정보 못 읽음) 로그 스킵
-                 pass
+            # 다음 계산을 위해 현재 상태 저장
+            last_resource_stats = current_resource_stats
+            last_timestamp = current_timestamp
+        else:
+            logger.warning("시스템 리소스 정보를 가져오지 못했습니다. 일부 비율 계산이 부정확할 수 있습니다.")
+            # 리소스 정보 없이 네트워크 품질만 로깅 (선택적)
+            if network_quality:
+                 log_to_bus({'network_quality': network_quality, 'ping_target': PING_TARGET})
 
-            # 다음 측정까지 대기
-            time.sleep(PING_INTERVAL_SEC)
 
-        except KeyboardInterrupt:
-            print("\n[QoS Monitor] 사용자 요청으로 모니터링 중지.")
-            break
-        except Exception as e:
-            print(f"❌ [QoS Monitor] 메인 루프 처리 중 예외 발생: {e}", file=sys.stderr)
-            time.sleep(5) # 예외 발생 시 잠시 대기 후 재시도
+        # 다음 모니터링까지 대기 (종료 플래그 확인하며)
+        elapsed_time = time.time() - current_timestamp
+        sleep_time = max(0, MONITOR_INTERVAL - elapsed_time)
+        logger.debug(f"다음 QoS 측정까지 {sleep_time:.2f}초 대기...")
+        terminate_flag.wait(sleep_time) # sleep 대신 wait 사용
 
-    mtd_state_reader.stop_monitor() # 종료 시 MTD 리더 스레드 정리 요청
-    print("[*] QoS 모니터링 종료.")
+    logger.info("QoS 모니터 종료.")
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except KeyboardInterrupt:
+        logger.info("사용자에 의해 모니터링 중단 신호 수신...")
+        terminate_flag.set()
+    finally:
+        logger.info("프로그램 종료 처리 완료.")
+
+

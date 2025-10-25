@@ -1,4 +1,14 @@
 #!/usr/bin/env bash
+
+# --- Process Command Line Arguments ---
+# Example: Assign first arg to INTENSITY, default 'medium'
+# INTENSITY="${1:-medium}"
+# Example: Assign second arg to DURATION_SECONDS, default '30'
+# DURATION_SECONDS="${2:-30}"
+# echo "Parameters: Intensity=$INTENSITY, Duration=$DURATION_SECONDS"
+# Add more parameter processing as needed for the specific script
+# ------------------------------------
+
 # Auto-generated from: /home/kali/MTD_full_testbed/Damn-Vulnerable-Drone.wiki/Companion-Computer-Discovery.md
 # Created: 2025-09-14 13:46:03
 # NOTE: 설명/서사는 제거되었고, 코드블록/프롬프트 명령만 포함됩니다.
@@ -67,4 +77,3 @@ PORT     STATE SERVICE
 554/tcp  open  rtsp
 3000/tcp open  ppp
 Nmap done: 1 IP address (1 host up) scanned in 0.07 seconds
-

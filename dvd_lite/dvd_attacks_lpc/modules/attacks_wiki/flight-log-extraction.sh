@@ -1,4 +1,14 @@
 #!/usr/bin/env bash
+
+# --- Process Command Line Arguments ---
+# Example: Assign first arg to INTENSITY, default 'medium'
+# INTENSITY="${1:-medium}"
+# Example: Assign second arg to DURATION_SECONDS, default '30'
+# DURATION_SECONDS="${2:-30}"
+# echo "Parameters: Intensity=$INTENSITY, Duration=$DURATION_SECONDS"
+# Add more parameter processing as needed for the specific script
+# ------------------------------------
+
 # Auto-generated from: /home/kali/MTD_full_testbed/Damn-Vulnerable-Drone.wiki/Flight-Log-Extraction.md
 # Created: 2025-09-14 13:46:03
 # NOTE: 설명/서사는 제거되었고, 코드블록/프롬프트 명령만 포함됩니다.
@@ -124,4 +134,3 @@ python log-extract.py tcp:${TARGET_IP}:5760 1
 
 log "[BLOCK 5] type=shell"
 bin2csv -o logs_csv log_1.bin
-

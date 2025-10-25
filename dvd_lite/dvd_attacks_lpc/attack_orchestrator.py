@@ -1,610 +1,844 @@
 #!/usr/bin/env python3
-# -*- coding: utf-8 -*-
+
 import argparse
+import json
+import logging
 import os
 import subprocess
-import time
-import json
-import signal
-import threading
-from typing import List, Dict, Any, Optional, Tuple
 import sys
-import socket
-import re
-import random # RL 모드에서 확률적 실행 위해 추가
-import numpy as np # RL 상태 벡터 위해 추가
-
-# --- RL 관련 임포트 (Seeker 모드용) ---
-try:
-    import torch
-    import torch.nn as nn
-    from torch.distributions import Categorical
-    # train.py 또는 rl_driven_deception_manager.py 와 동일한 ActorCritic 클래스 정의
-    class ActorCritic(nn.Module):
-        def __init__(self, state_dim: int, action_dim: int):
-            super(ActorCritic, self).__init__()
-            self.shared = nn.Sequential(nn.Linear(state_dim, 128), nn.Tanh(), nn.Linear(128, 128), nn.Tanh())
-            self.actor = nn.Linear(128, action_dim)
-            self.critic = nn.Linear(128, 1) # Critic은 여기서 사용 안 함
-
-        def forward(self, state):
-            x = self.shared(state)
-            # Critic은 필요 없으므로 액터 로짓만 반환하도록 수정 가능하나, 호환성 위해 유지
-            return Categorical(logits=self.actor(x)), self.critic(x).squeeze(-1)
-
-        def act(self, state):
-            dist, value = self.forward(state)
-            action = dist.sample() # 확률적으로 행동 선택
-            # 평가 시에는 dist.probs.argmax() 사용 가능
-            return action, dist.log_prob(action), value # log_prob, value는 Seeker 모드에서 직접 사용 안 함
-    RL_AVAILABLE = True
-except ImportError:
-    print("WARNING: PyTorch가 설치되지 않았습니다. --seeker 모드를 사용할 수 없습니다.", file=sys.stderr)
-    ActorCritic = None # 클래스 정의 없애기
-    RL_AVAILABLE = False
-
+import time
+import random
+import yaml
+# Use timezone-aware UTC time
+from datetime import datetime, timezone
+from threading import Thread, Event
+from typing import Dict, List, Optional, Tuple
+import re # Import regex module
 
 # --- 경로 설정 ---
-LPC_DIR = os.path.dirname(os.path.realpath(__file__))
-ATTACKS_DIR = os.path.join(LPC_DIR, 'modules', 'attacks_wiki')
-ATTACK_META_DIR = os.path.join(ATTACKS_DIR, 'json')
-SHARED_STATE_CONTAINER_PATH = "/shared/mtd_state.json"
-SHARED_STATE_HOST_FALLBACK = os.path.join(LPC_DIR, 'mtd', 'shared_state', 'mtd_state.json')
-# ⭐️ Seeker 모델 경로 추가
-SEEKER_MODEL_PATH = os.path.join(LPC_DIR, 'rl', 'models', 'seeker_policy.pth')
+# 이 스크립트 파일의 위치를 기준으로 상대 경로 설정
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# 기본값 설정 (명령행 인수로 덮어쓸 수 있음)
+DEFAULT_BUS_LOG_PATH = os.path.join(BASE_DIR, 'bus.log')
+DEFAULT_MTD_STATE_PATH = os.path.join(BASE_DIR, 'mtd/shared_state/mtd_state.json')
+DEFAULT_ATTACK_MODULES_DIR = os.path.join(BASE_DIR, 'modules/attacks')
+DEFAULT_TARGETS_FILE = os.path.join(DEFAULT_ATTACK_MODULES_DIR, 'targets/targets.yml')
 
-# --- PYTHONPATH 자동 설정 ---
-if LPC_DIR not in sys.path:
-    sys.path.insert(0, LPC_DIR)
+# --- 로깅 설정 ---
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger("AttackOrchestrator")
 
-# --- 로거 설정 ---
-try:
-    from bus.logger import log_bus_event
-    print("[Attack Orchestrator] bus.logger 로드 성공. 이벤트는 bus.log에 기록됩니다.")
-except ImportError:
-    print("WARNING: bus.logger를 임포트할 수 없습니다. 이벤트는 stdout으로 출력됩니다.", file=sys.stderr)
-    def log_bus_event(type: str, data: Dict[str, Any], source_override: str = "orchestrator"):
-        record = {"ts": time.time(), "source": source_override, "type": type, "data": data}
-        print(json.dumps(record))
+# 전역 변수로 BUS_LOG_PATH 관리 (명령행 인수로 수정 가능)
+BUS_LOG_PATH = DEFAULT_BUS_LOG_PATH
 
-# --- 전역 변수 ---
-attack_process: Optional[subprocess.Popen] = None
-attack_lock = threading.RLock()
-stop_event = threading.Event()
-try:
-    MY_IP_ADDRESS = subprocess.check_output(['hostname', '-I']).decode('utf-8').strip().split()[0]
-except Exception:
-    MY_IP_ADDRESS = '10.13.0.200'
+# --- Helper Functions ---
 
-# --- Seeker RL 모드용 전역 변수 ---
-seeker_policy: Optional[ActorCritic] = None
-seeker_state_dim = 5 # train.py _obs_seek() 차원
-seeker_action_dim = 5 # train.py SEEKER_META_ACTIONS 개수
-# Seeker 동적 파라미터 (train.py Config 와 유사)
-seeker_dyn_params = {
-    "attack_bias": {"val": 1.0, "min": 0.5, "max": 2.0},
-    "scan_effort": {"val": 1.0, "min": 0.5, "max": 2.0}
-}
-seeker_meta_actions = { # train.py SEEKER_META_ACTIONS
-    0: ("attack_bias", 1.2), 1: ("attack_bias", 0.8),
-    2: ("scan_effort", 1.2), 3: ("scan_effort", 0.8),
-    4: ("none", 1.0)
-}
-# Seeker 환경 관찰 변수
-seeker_known_target = False # 현재 타겟 IP/Port를 아는가?
-seeker_last_target_ip: Optional[str] = None
-seeker_last_mtd_state_mtime: float = 0.0 # 상태 파일 최종 수정 시간
-seeker_observed_shuffle_ema = 0.0 # MTD 셔플 관찰 빈도 (EMA)
-
-# ==============================================================================
-# 유틸리티 함수 (기존과 동일)
-# ==============================================================================
-def get_mtd_state_file_path() -> str:
-    """MTD 상태 파일의 실제 경로를 결정합니다."""
-    if os.path.exists(SHARED_STATE_CONTAINER_PATH):
-        return SHARED_STATE_CONTAINER_PATH
-    elif os.path.exists(SHARED_STATE_HOST_FALLBACK):
-        # print(f"[정보] 컨테이너 경로({SHARED_STATE_CONTAINER_PATH}) 없음. 호스트 경로({SHARED_STATE_HOST_FALLBACK}) 사용.")
-        return SHARED_STATE_HOST_FALLBACK
-    else:
-        print(f"[경고] MTD 상태 파일을 찾을 수 없음: {SHARED_STATE_CONTAINER_PATH} 또는 {SHARED_STATE_HOST_FALLBACK}", file=sys.stderr)
-        return SHARED_STATE_HOST_FALLBACK
-
-def read_mtd_target(state_file: str) -> Tuple[Optional[str], Optional[int]]:
-    """MTD 상태 파일에서 현재 타겟 IP와 Port를 읽습니다."""
+def log_to_bus(event_type: str, data: Dict):
+    """Logs a structured message to the central bus log file."""
+    log_entry = {
+        # Use timezone-aware UTC time
+        "timestamp": datetime.now(timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z'),
+        "source": "attack_orchestrator",
+        "event_type": event_type,
+        "data": data
+    }
     try:
-        current_mtime = os.path.getmtime(state_file) # 파일 수정 시간 확인
-        with open(state_file, "r", encoding="utf-8") as f:
-            state = json.load(f)
-        target_str = state.get("current_target")
-        if not target_str or ":" not in target_str:
-            return None, None, current_mtime # 수정 시간 반환 추가
-        ip, port_str = target_str.split(":", 1)
-        return ip, int(port_str), current_mtime # 수정 시간 반환 추가
+        # BUS_LOG_PATH는 전역 변수 사용
+        with open(BUS_LOG_PATH, 'a') as f:
+            f.write(json.dumps(log_entry) + '\n')
+    except Exception as e:
+        # Avoid logging recursion if bus log itself fails
+        print(f"[ERROR] Failed to write to bus log ({BUS_LOG_PATH}): {e}", file=sys.stderr)
+        # logger.error(f"Failed to write to bus log ({BUS_LOG_PATH}): {e}") # Avoid potential recursion
+
+def load_targets(targets_file: str) -> Dict:
+    """Loads target definitions from the YAML file."""
+    abs_path = os.path.abspath(targets_file)
+    try:
+        with open(abs_path, 'r') as f:
+            targets = yaml.safe_load(f)
+            # Check if targets is None OR if 'targets' key doesn't exist or is None/empty
+            if targets is None or not targets.get('targets'):
+                logger.warning(f"Targets file ({abs_path}) is empty, invalid, or missing the top-level 'targets:' key with entries.")
+                return {}
+            logger.info(f"Loaded targets from {abs_path}")
+            return targets.get('targets', {}) # Return the dictionary under the 'targets' key
     except FileNotFoundError:
-        return None, None, 0.0 # 수정 시간 0 반환
-    except (json.JSONDecodeError, ValueError, Exception) as e:
-        print(f"[경고] MTD 상태 파일({state_file}) 읽기/파싱 오류: {e}", file=sys.stderr)
-        return None, None, seeker_last_mtd_state_mtime # 이전 수정 시간 반환
-
-def get_available_attacks() -> List[str]:
-    """사용 가능한 공격 스크립트(.sh) 목록을 가져옵니다."""
-    if not os.path.isdir(ATTACKS_DIR):
-        print(f"⛔ 오류: 공격 스크립트 디렉토리 '{ATTACKS_DIR}'를 찾을 수 없습니다.", file=sys.stderr)
-        return []
-    try:
-        attacks = sorted([f for f in os.listdir(ATTACKS_DIR) if f.endswith('.sh') and os.path.isfile(os.path.join(ATTACKS_DIR, f))])
-        if not attacks:
-             print(f"⛔ 오류: '{ATTACKS_DIR}' 디렉토리에 실행 가능한 .sh 공격 스크립트가 없습니다.", file=sys.stderr)
-        return attacks
-    except OSError as e:
-        print(f"⛔ 오류: 공격 스크립트 디렉토리 '{ATTACKS_DIR}' 접근 중 오류 발생: {e}", file=sys.stderr)
-        return []
-
-def get_attack_metadata(attack_name: str) -> Dict[str, Any]:
-    """공격 스크립트 이름에서 메타데이터(카테고리=스크립트명, MITRE)를 추론합니다."""
-    base_name = attack_name.replace('.sh', '')
-    meta = {"mitre_tactics": [], "attack_category": base_name}
-    json_path = os.path.join(ATTACK_META_DIR, f"{base_name}_attack_tree.json")
-    if os.path.exists(json_path):
-        try:
-            with open(json_path, 'r', encoding='utf-8') as f: attack_tree = json.load(f)
-            tactics = re.findall(r'TA\d{4}', json.dumps(attack_tree))
-            meta['mitre_tactics'] = sorted(list(set(tactics)))
-        except Exception: pass
-    return meta
-
-# ==============================================================================
-# 공격 프로세스 관리 (기존과 동일)
-# ==============================================================================
-def _kill_process_group(proc: subprocess.Popen):
-    if proc and proc.poll() is None:
-        pgid = 0
-        try:
-            pgid = os.getpgid(proc.pid)
-            # print(f"[프로세스 관리] SIGTERM 전송 (PGID:{pgid}, PID:{proc.pid})...")
-            os.killpg(pgid, signal.SIGTERM)
-            proc.wait(timeout=3)
-            # print(f"[프로세스 관리] 정상 종료됨 (PGID:{pgid}, RC: {proc.returncode}).")
-        except ProcessLookupError: pass # 이미 종료됨
-        except subprocess.TimeoutExpired:
-            print(f"[프로세스 관리] SIGTERM 타임아웃. SIGKILL 전송 (PGID:{pgid})...")
-            try:
-                os.killpg(pgid, signal.SIGKILL)
-                proc.wait(timeout=1)
-            except Exception: pass # 최후의 수단
-        except Exception: pass
-
-def cleanup_attack_process(reason: str):
-    global attack_process
-    with attack_lock:
-        proc_to_clean = attack_process
-        if proc_to_clean:
-            attack_process = None
-            print(f"[정리] 공격 프로세스 정리 (사유: {reason}, PID: {proc_to_clean.pid})")
-            log_bus_event("attack_cleanup", {"reason": reason, "pid": proc_to_clean.pid}, source_override="attack_orchestrator")
-            _kill_process_group(proc_to_clean)
-
-def terminate_orchestrator(reason: str):
-    print(f"\n[종료] 오케스트레이터 종료 시작 (사유: {reason})")
-    if not stop_event.is_set():
-        stop_event.set()
-        cleanup_attack_process(f"orchestrator_shutdown_{reason}")
-        print("[종료] 오케스트레이터 종료 완료.")
-
-def stream_reader(pipe, stream_name: str, attack_name: str):
-    if not pipe: return
-    try:
-        for line in iter(pipe.readline, ''):
-            if stop_event.is_set(): break
-            line_stripped = line.strip()
-            if line_stripped:
-                 log_bus_event(f"attack_{stream_name}", {"attack": attack_name, "output": line_stripped}, source_override="attack_script")
-    except ValueError: pass
-    except Exception: pass
-    finally:
-        if pipe:
-            try: pipe.close()
-            except Exception: pass
-
-# ==============================================================================
-# Seeker RL 모드 함수
-# ==============================================================================
-def load_seeker_policy(path: str) -> Optional[ActorCritic]:
-    """Seeker RL 정책 모델을 로드합니다."""
-    if not RL_AVAILABLE: return None
-    if not os.path.exists(path):
-        print(f"❌ RL Seeker 정책 모델을 찾을 수 없습니다: {path}", file=sys.stderr)
-        print("   먼저 train.py를 실행하여 모델을 학습시키고, 올바른 경로에 배치해야 합니다.")
-        return None
-
-    print(f"🤖 RL Seeker 정책 모델 로드 중: {path}")
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    policy = ActorCritic(seeker_state_dim, seeker_action_dim).to(device)
-    try:
-        policy.load_state_dict(torch.load(path, map_location=device))
-        policy.eval()
-        print("✅ RL Seeker 정책 모델 로드 완료.")
-        return policy
+        logger.error(f"Targets file not found: {abs_path}")
+        return {}
+    except yaml.YAMLError as e:
+        logger.error(f"Error parsing targets file {abs_path}: {e}")
+        return {}
     except Exception as e:
-        print(f"❌ RL Seeker 정책 모델 로드 실패: {e}", file=sys.stderr)
-        return None
+        logger.error(f"Unexpected error loading targets file {abs_path}: {e}")
+        return {}
 
-def observe_environment_seeker(state_file: str) -> Tuple[torch.Tensor, bool]:
-    """Seeker 관점에서 환경을 관찰하고 상태 벡터를 생성합니다."""
-    global seeker_known_target, seeker_last_target_ip, seeker_last_mtd_state_mtime, seeker_observed_shuffle_ema
-
-    # MTD 상태 파일 읽기
-    current_target_ip, _, current_mtime = read_mtd_target(state_file)
-    observed_move = False # 이번 관찰에서 MTD 이동이 감지되었는가?
-
-    if current_mtime > seeker_last_mtd_state_mtime: # 상태 파일 변경 감지
-        if seeker_last_mtd_state_mtime != 0.0: # 첫 실행이 아니면
-            print(f"[Seeker 관찰] MTD 상태 변경 감지됨 (이전: {seeker_last_target_ip}, 현재: {current_target_ip})")
-            observed_move = True
-            seeker_known_target = False # MTD 발생 시 일단 모른다고 가정
-            # EMA 업데이트 (셔플 빈도 추정)
-            seeker_observed_shuffle_ema = 0.8 * seeker_observed_shuffle_ema + 0.2 * 1.0 # 셔플 감지
-        seeker_last_target_ip = current_target_ip
-        seeker_last_mtd_state_mtime = current_mtime
-    else:
-        # EMA 업데이트 (셔플 없음)
-        seeker_observed_shuffle_ema = 0.8 * seeker_observed_shuffle_ema + 0.2 * 0.0
-
-    # TODO: 실제 스캔 결과 등을 통해 known_target 업데이트 로직 추가 필요
-    # 예시: 최근 N초 내 스캔 성공 로그가 있으면 known_target = True
-    # 현재는 MTD 발생 시 False, 그 외에는 True 유지 (단순화)
-    if not observed_move and current_target_ip is not None:
-        # 간단히, MTD가 없었고 타겟 IP가 있으면 안다고 가정
-        # (실제로는 스캔 성공 여부 확인 필요)
-        seeker_known_target = True
-
-
-    # 상태 벡터 구성 (train.py _obs_seek() 와 동일)
-    norm_atk_bias = np.clip((seeker_dyn_params["attack_bias"]["val"] - seeker_dyn_params["attack_bias"]["min"]) / \
-                           (seeker_dyn_params["attack_bias"]["max"] - seeker_dyn_params["attack_bias"]["min"]), 0, 1)
-    norm_scan_effort = np.clip((seeker_dyn_params["scan_effort"]["val"] - seeker_dyn_params["scan_effort"]["min"]) / \
-                             (seeker_dyn_params["scan_effort"]["max"] - seeker_dyn_params["scan_effort"]["min"]), 0, 1)
-
-    state_values = [
-        float(seeker_known_target), # 현재 타겟 아는지 여부 (0.0 또는 1.0)
-        float(observed_move),      # 방금 MTD 이동 관찰 여부 (0.0 또는 1.0)
-        np.clip(seeker_observed_shuffle_ema, 0, 1), # MTD 셔플 빈도 추정치
-        norm_atk_bias,             # 현재 공격 편향
-        norm_scan_effort           # 현재 스캔 노력
-    ]
-    # NaN 값 방지
-    state_values = [0.0 if np.isnan(v) else v for v in state_values]
-
-    state = torch.tensor(state_values, dtype=torch.float32)
-
-    return state.unsqueeze(0), observed_move # 배치 차원 추가 및 이동 관찰 여부 반환
-
-def apply_action_seeker(action_idx: int):
-    """Seeker RL 에이전트가 선택한 행동을 내부 파라미터 변경으로 적용합니다."""
-    action = seeker_meta_actions.get(action_idx)
-    if not action or action[0] == "none":
-        print("    - Seeker 행동: 유지 (None)")
-        return
-
-    param_name, value = action
-    current_val = seeker_dyn_params[param_name]["val"]
-    new_val = current_val * value # 곱셈 방식으로 업데이트
-
-    p_min = seeker_dyn_params[param_name]["min"]
-    p_max = seeker_dyn_params[param_name]["max"]
-    seeker_dyn_params[param_name]["val"] = float(np.clip(new_val, p_min, p_max))
-
-    print(f"    - Seeker 행동: {param_name} -> {seeker_dyn_params[param_name]['val']:.2f}")
-
-def select_attack_script_based_on_policy() -> Optional[str]:
-    """Seeker 정책 파라미터에 따라 실행할 공격 스크립트를 확률적으로 선택합니다."""
-    scan_prob = np.clip(0.4 * seeker_dyn_params["scan_effort"]["val"], 0.1, 0.8)
-    attack_prob_base = seeker_dyn_params["attack_bias"]["val"] * (0.8 if seeker_known_target else 0.1)
-    attack_prob = np.clip(attack_prob_base, 0.05, 0.9)
-
-    available_attacks = get_available_attacks()
-    discovery_attacks = [a for a in available_attacks if "discovery" in a or "scan" in a or "sniff" in a]
-    exploit_attacks = [a for a in available_attacks if a not in discovery_attacks]
-
-    rand_val = random.random()
-
-    if rand_val < scan_prob and discovery_attacks:
-        # 스캔 실행 (Discovery 스크립트 중 무작위 선택)
-        selected_attack = random.choice(discovery_attacks)
-        print(f"  [Seeker 결정] 스캔 실행 (확률: {scan_prob:.2f}). 선택된 스크립트: {selected_attack}")
-        return selected_attack
-    elif rand_val < scan_prob + attack_prob and exploit_attacks:
-        # 공격 실행 (Exploit 스크립트 중 무작위 선택)
-        selected_attack = random.choice(exploit_attacks)
-        print(f"  [Seeker 결정] 공격 실행 (확률: {attack_prob:.2f}, Known: {seeker_known_target}). 선택된 스크립트: {selected_attack}")
-        return selected_attack
-    else:
-        # 아무것도 안 함
-        print(f"  [Seeker 결정] 행동 안 함 (스캔 확률: {scan_prob:.2f}, 공격 확률: {attack_prob:.2f})")
-        return None
-
-
-# ==============================================================================
-# 메인 실행 로직 수정
-# ==============================================================================
-def run_single_attack(attack_to_run: str, state_file: str) -> Optional[subprocess.Popen]:
-    """단일 공격 스크립트를 실행하고 로그 스트리밍 스레드를 시작합니다."""
-    global attack_process
-
-    # 이전 공격 정리 (기존 로직 유지)
-    with attack_lock:
-        if attack_process and attack_process.poll() is None:
-            cleanup_attack_process("new_attack_request")
-
-    attack_script_path = os.path.join(ATTACKS_DIR, attack_to_run)
-    if not (os.path.exists(attack_script_path) and os.access(attack_script_path, os.X_OK)):
-        print(f"⛔ 스크립트 오류: {attack_script_path}", file=sys.stderr)
-        log_bus_event("attack_exception", {"attack": attack_to_run, "error": "Script not found or not executable"}, source_override="attack_orchestrator")
-        return None
-
-    target_ip, target_port, _ = read_mtd_target(state_file) # mtime은 여기서 사용 안 함
-    if not target_ip or not target_port:
-        target_ip, target_port = "10.13.0.3", 14550 # 기본값
-
-    attack_base_name = attack_to_run.replace('.sh', '')
-    attack_meta = get_attack_metadata(attack_to_run)
-
-    process_env = os.environ.copy()
-    process_env['TARGET_IP'] = target_ip
-    process_env['TARGET_PORT'] = str(target_port)
-    process_env['ATTACK_NAME'] = attack_base_name
-    process_env['MY_IP'] = MY_IP_ADDRESS
-    python_executable_dir = os.path.dirname(sys.executable)
-    process_env['PATH'] = f"{python_executable_dir}:{os.environ.get('PATH', '')}"
-    process_env['VIRTUAL_ENV'] = os.environ.get('VIRTUAL_ENV', os.path.dirname(python_executable_dir))
-
-    proc = None
+def read_mtd_state(mtd_state_file: str) -> Dict:
+    """Reads the current MTD state from the JSON file."""
+    abs_path = os.path.abspath(mtd_state_file)
     try:
-        print("\n" + "="*23 + " 공격 시작 " + "="*24)
-        print(f"  - 스크립트         : {attack_to_run}")
-        print(f"  - 타겟             : {target_ip}:{target_port}")
-        print(f"  - 공격 카테고리    : {attack_meta['attack_category']}")
-        print("="*58)
-
-        log_bus_event("attack_started", {
-            "attack": attack_to_run, "target": f"{target_ip}:{target_port}", "source_ip": MY_IP_ADDRESS,
-            "attack_category": attack_meta['attack_category'], "mitre_tactics": attack_meta['mitre_tactics']
-        }, source_override="attack_orchestrator")
-
-        proc = subprocess.Popen(
-            ['/bin/bash', attack_script_path],
-            stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
-            encoding='utf-8', errors='replace', preexec_fn=os.setsid, env=process_env
-        )
-        with attack_lock: attack_process = proc
-
-        threading.Thread(target=stream_reader, args=(proc.stdout, "stdout", attack_to_run), daemon=True).start()
-        threading.Thread(target=stream_reader, args=(proc.stderr, "stderr", attack_to_run), daemon=True).start()
-
+        with open(abs_path, 'r') as f:
+            state = json.load(f)
+            logger.debug(f"Read MTD state from {abs_path}: {state}")
+            # Ensure active_rules key exists and is a list
+            if 'active_rules' not in state or not isinstance(state.get('active_rules'), list):
+                logger.warning(f"MTD state file {abs_path} missing or has invalid 'active_rules' list. Assuming empty list.")
+                state['active_rules'] = [] # Ensure it's always a list
+            return state
+    except FileNotFoundError:
+        logger.warning(f"MTD state file not found: {abs_path}. Assuming default/initial state (no active MTD rules).")
+        return {"active_rules": []} # 파일이 없으면 활성 규칙 리스트가 없는 것으로 간주
+    except json.JSONDecodeError as e:
+        logger.error(f"Error decoding MTD state file {abs_path}: {e}. Assuming default state.")
+        return {"active_rules": []}
     except Exception as e:
-        print(f"❌ 공격 실행 예외 ({attack_to_run}): {e}", file=sys.stderr)
-        log_bus_event("attack_exception", {"attack": attack_to_run, "error": str(e)}, source_override="attack_orchestrator")
-        with attack_lock: attack_process = None
-        if proc and proc.poll() is None: _kill_process_group(proc)
+        logger.error(f"Error reading MTD state file {abs_path}: {e}. Assuming default state.")
+        return {"active_rules": []}
+
+def resolve_target_address(target_name: str, targets_config: Dict, mtd_state: Dict) -> Optional[Tuple[str, str]]:
+    """
+    Resolves the actual IP address and port for a target name, considering MTD state
+    based on the 'active_rules' list in mtd_state.json.
+    Returns (ip, port) or None if resolution fails.
+    """
+    if not targets_config:
+        # This warning is now potentially redundant due to check in load_targets, but keep as safety
+        logger.error("Targets configuration is empty (load_targets likely failed). Cannot resolve target.")
+        return None
+    if target_name not in targets_config:
+        logger.error(f"Target name '{target_name}' not found in targets configuration keys: {list(targets_config.keys())}")
         return None
 
-    return proc
+    target_info = targets_config[target_name]
+    default_ip = target_info.get('ip')
+    default_port = str(target_info.get('port', '')) # Ensure port is string, handle missing port
 
-# ⭐️ Seeker RL 모드 메인 루프 함수
-def run_seeker_mode(state_file: str, decision_interval: int):
-    """Seeker RL 정책에 따라 주기적으로 행동을 결정하고 공격/스캔을 실행합니다."""
-    global seeker_policy
-    if not seeker_policy:
-        print("❌ Seeker 모드 실행 불가: RL 정책 모델 로드 실패.")
-        return
+    if not default_ip or not default_port:
+        logger.error(f"Target '{target_name}' definition in config is missing IP or Port: ip={default_ip}, port={default_port}")
+        return None
 
-    print("\n--- 🤖 Seeker RL 모드 시작 ---")
-    print(f"    결정 주기: {decision_interval}초")
+    # Start with default values
+    current_ip = default_ip
+    current_port = default_port
 
-    while not stop_event.is_set():
-        start_time = time.time()
-        print("\n" + "="*18 + " Seeker Decision Cycle " + "="*18)
+    # active_rules should be guaranteed to be a list by read_mtd_state
+    active_rules = mtd_state.get('active_rules', [])
+    logger.debug(f"Resolving target '{target_name}' (default: {default_ip}:{default_port}) with {len(active_rules)} active MTD rules.")
 
-        # 1. 환경 관찰
-        current_state, observed_move = observe_environment_seeker(state_file)
-        print(f"  [Seeker 관찰] 현재 상태: {np.round(current_state.numpy(), 3)}")
-        print(f"                타겟 인지: {'Yes' if seeker_known_target else 'No'}, MTD 이동 감지: {'Yes' if observed_move else 'No'}")
+    applied_rule = None
+    for rule in reversed(active_rules): # Check newest rules first
+        rule_type = rule.get('type')
+        original_rule_ip = rule.get('original_ip')
+        original_rule_port_str = str(rule.get('original_port', ''))
 
-        # 2. 행동 결정
-        action_idx = 4 # 기본값 'none'
-        try:
-            with torch.no_grad():
-                action_tensor, _, _ = seeker_policy.act(current_state)
-                action_idx = action_tensor.item()
-        except Exception as e:
-            print(f"❌ Seeker 정책 모델 실행 오류: {e}", file=sys.stderr)
-
-        print(f"  [Seeker 결정] 선택된 행동 인덱스: {action_idx}")
-
-        # 3. 행동 적용 (내부 파라미터 업데이트)
-        apply_action_seeker(action_idx)
-
-        # 4. 공격/스캔 스크립트 선택 및 실행 (확률 기반)
-        attack_script_to_run = select_attack_script_based_on_policy()
-
-        if attack_script_to_run:
-            proc = run_single_attack(attack_script_to_run, state_file)
-            if proc:
-                # Seeker 모드에서는 공격이 완료될 때까지 기다리지 않고 다음 결정 주기로 넘어감
-                # (스크립트 자체의 duration은 내부에서 관리)
-                # 필요 시, 공격 완료 후 결과(성공/실패)를 관찰하여 known_target 업데이트 가능
-                print(f"    '{attack_script_to_run}' 실행 시작됨 (백그라운드).")
-                # 공격 종료 로깅은 run_single_attack 내부 또는 별도 스레드에서 처리해야 함
-                # (현재 구조에서는 wait() 없이는 return code 알 수 없음)
-                # -> 간단화를 위해 attack_finished 로깅은 이 모드에서 생략하거나,
-                #    별도의 프로세스 모니터링 스레드 필요
+        # Check for port shuffling DNAT rule matching original IP and Port
+        if rule_type == 'port_shuffling' and original_rule_ip == default_ip and original_rule_port_str == default_port:
+            # The 'new_ip' in port_shuffling usually refers to the *entry point* IP for the DNAT rule.
+            # We should attack this new_ip and new_port.
+            new_ip = rule.get('new_ip') # IP the attacker should target
+            new_port_str = str(rule.get('new_port', '')) # Port the attacker should target
+            if new_ip and new_port_str: # Ensure both new IP and new Port are present
+                current_ip = new_ip
+                current_port = new_port_str
+                applied_rule = rule
+                logger.info(f"MTD Applied (Port Shuffle): Target '{target_name}' ({default_ip}:{default_port}) should now be targeted at {current_ip}:{current_port}")
+                break # Found the most recent matching rule
             else:
-                print(f"    '{attack_script_to_run}' 실행 실패.")
+                logger.warning(f"Port shuffling rule for {default_ip}:{default_port} is incomplete (missing new_ip or new_port): {rule}")
+
+
+        # Check for NAT rule matching original IP
+        elif rule_type == 'nat' and original_rule_ip == default_ip:
+             # NAT rule maps NEW_IP -> ORIGINAL_IP. Attacker should target NEW_IP.
+             new_ip = rule.get('new_ip')
+             if new_ip:
+                 current_ip = new_ip
+                 # Port remains the original default port for simple NAT
+                 applied_rule = rule
+                 logger.info(f"MTD Applied (NAT): Target '{target_name}' ({default_ip}:{default_port}) IP redirected. Should now be targeted at {current_ip}:{current_port}")
+                 break # Found the most recent matching rule
+             else:
+                  logger.warning(f"NAT rule for {default_ip} is incomplete (missing new_ip): {rule}")
+
+
+    if not applied_rule:
+        logger.info(f"No applicable MTD rules found for target '{target_name}'. Using default target address: {current_ip}:{current_port}")
+
+    resolved_address = (current_ip, current_port)
+    logger.debug(f"Resolved target '{target_name}' final address: {resolved_address}")
+    return resolved_address
+
+
+# --- AttackRunner Thread ---
+
+class AttackRunner(Thread):
+    def __init__(self, attack_script_path: str, duration: int, targets_config: Dict, mtd_state_file: str, params: Optional[List[str]] = None):
+        super().__init__()
+        self.attack_script_path = attack_script_path
+        self.duration = duration
+        self.targets_config = targets_config
+        self.mtd_state_file = mtd_state_file # Store the path
+        self.params = params if params else []
+        self.process = None
+        self._stop_event = Event()
+        self.attack_name = os.path.basename(attack_script_path).replace('.sh', '')
+        self.resolved_targets = {}
+        self.start_time = None
+        self.return_code = None
+
+    def run(self):
+        """Executes the attack script."""
+        # Check script existence and permissions
+        if not os.path.exists(self.attack_script_path):
+             logger.error(f"Attack script path does not exist: {self.attack_script_path}")
+             # Log failure and return early
+             log_to_bus("attack_failed_to_start", {
+                 "attack_name": self.attack_name, "script": self.attack_script_path, "error": "Script path not found."
+             })
+             return
+        if not os.access(self.attack_script_path, os.X_OK):
+             # Log warning but attempt execution with /bin/bash anyway
+             logger.warning(f"Attack script is not marked executable: {self.attack_script_path}. Will attempt execution via /bin/bash.")
+             # No need to return here, just warn.
+
+        # --- MTD State Synchronization ---
+        # Read the state file *just before* execution
+        mtd_state = read_mtd_state(self.mtd_state_file)
+
+        # --- Target Resolution and Environment Variable Setup ---
+        env = os.environ.copy()
+        target_names_in_script = self.extract_target_names_from_script()
+        resolved_any_target = False
+
+        log_data_start = {
+            "attack_name": self.attack_name,
+            "script": os.path.basename(self.attack_script_path), # Log only script name
+            "duration_requested": self.duration,
+            "params_provided": self.params,
+            "resolved_targets": {}
+        }
+
+        # Check if targets_config is valid before resolving
+        if not self.targets_config:
+             logger.error("Cannot resolve targets because targets configuration failed to load or is empty.")
+             # Log failure and return early
+             log_to_bus("attack_failed_to_start", {
+                "attack_name": self.attack_name, "script": os.path.basename(self.attack_script_path),
+                "error": "Targets configuration empty or invalid."
+             })
+             return
+
+
+        for target_name in target_names_in_script:
+            # Pass the freshly read mtd_state
+            resolved = resolve_target_address(target_name, self.targets_config, mtd_state)
+            if resolved:
+                ip_var = f"TARGET_{target_name.upper()}_IP"
+                port_var = f"TARGET_{target_name.upper()}_PORT"
+                env[ip_var] = resolved[0]
+                env[port_var] = resolved[1]
+                logger.info(f"Setting Env for '{target_name}': {ip_var}={resolved[0]}, {port_var}={resolved[1]}")
+                self.resolved_targets[target_name] = f"{resolved[0]}:{resolved[1]}"
+                log_data_start["resolved_targets"][target_name] = self.resolved_targets[target_name]
+                resolved_any_target = True
+            else:
+                logger.warning(f"Could not resolve target '{target_name}' for script {self.attack_script_path}. Script might fail or use defaults.")
+                log_data_start["resolved_targets"][target_name] = "resolution_failed"
+
+        # Resolve default 'drone' target if TARGET_IP/PORT are used but 'drone' wasn't explicitly extracted
+        if 'drone' in self.targets_config and 'drone' not in target_names_in_script:
+             # Check if script content actually uses generic TARGET_IP/PORT
+             try:
+                 with open(self.attack_script_path, 'r', encoding='utf-8', errors='ignore') as f:
+                     content = f.read()
+                     # Check for $TARGET_IP, ${TARGET_IP}, $TARGET_PORT, ${TARGET_PORT}
+                     if re.search(r'\$\{?TARGET_(IP|PORT)\}?', content):
+                         resolved_default = resolve_target_address('drone', self.targets_config, mtd_state)
+                         if resolved_default:
+                             if 'TARGET_IP' not in env: # Set only if not already set by specific target
+                                 env['TARGET_IP'] = resolved_default[0]
+                                 logger.info(f"Setting Default Env (drone): TARGET_IP={resolved_default[0]}")
+                             if 'TARGET_PORT' not in env:
+                                 env['TARGET_PORT'] = resolved_default[1]
+                                 logger.info(f"Setting Default Env (drone): TARGET_PORT={resolved_default[1]}")
+                             # Log this resolution attempt
+                             log_key = "default_drone(fallback)"
+                             self.resolved_targets[log_key] = f"{resolved_default[0]}:{resolved_default[1]}"
+                             log_data_start["resolved_targets"][log_key] = self.resolved_targets[log_key]
+                         else:
+                              logger.warning("Script uses generic TARGET_IP/PORT, but failed to resolve default 'drone' target.")
+             except Exception as e:
+                 logger.error(f"Error checking script content for default targets: {e}")
+
+
+        # --- Execute Attack ---
+        # Using /bin/bash explicitly can be more portable if scripts lack shebang or exec permission
+        command = ["/bin/bash", self.attack_script_path] + self.params
+        logger.info(f"Starting attack '{self.attack_name}': {' '.join(command)}")
+
+        # Log attack start event just before starting the process
+        log_to_bus("attack_started", log_data_start)
+        self.start_time = time.time()
+
+        stdout_log = ""
+        stderr_log = ""
+
+        try:
+            self.process = subprocess.Popen(
+                command,
+                env=env,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1, # Line buffered
+                universal_newlines=True,
+                encoding='utf-8', # Specify encoding
+                errors='replace' # Handle potential decoding errors
+            )
+            logger.debug(f"Attack '{self.attack_name}' process started (PID: {self.process.pid}).")
+
+            # Wait for duration or stop event
+            remaining_time = self.duration
+            while remaining_time > 0 and not self._stop_event.is_set():
+                 wait_interval = min(remaining_time, 0.5) # Check every 0.5s or less
+                 try:
+                     # Use timeout in wait() to check if process finished
+                     self.process.wait(timeout=wait_interval)
+                     # If wait doesn't raise TimeoutExpired, process finished
+                     logger.info(f"Attack process '{self.attack_name}' finished early (before duration).")
+                     break # Exit the wait loop
+                 except subprocess.TimeoutExpired:
+                     pass # Process still running, continue waiting
+                 remaining_time -= wait_interval
+
+            # --- Stop or wait for Attack to finish naturally ---
+            # Check if process is *still* running after the loop (duration ended or stop requested)
+            if self.process.poll() is None:
+                if self._stop_event.is_set():
+                    logger.info(f"Stop requested. Terminating attack: {self.attack_name} (PID: {self.process.pid})")
+                else: # Duration ended
+                    logger.info(f"Duration ({self.duration}s) ended. Terminating attack: {self.attack_name} (PID: {self.process.pid})")
+
+                self.process.terminate() # Try SIGTERM first
+                try:
+                    # Wait a short time for graceful termination and capture output
+                    stdout_log, stderr_log = self.process.communicate(timeout=5)
+                    logger.info(f"Attack '{self.attack_name}' terminated gracefully.")
+                except subprocess.TimeoutExpired:
+                    logger.warning(f"Force killing attack process {self.attack_name} (PID: {self.process.pid}) after terminate timeout.")
+                    self.process.kill() # Force kill with SIGKILL
+                    # Capture output after kill (might be incomplete)
+                    stdout_log, stderr_log = self.process.communicate()
+            else:
+                 # Process had already finished before/during the loop, capture remaining output
+                 stdout_log, stderr_log = self.process.communicate()
+                 logger.debug(f"Attack '{self.attack_name}' had already finished, capturing output.")
+
+            # Log captured output snippets regardless of how it finished
+            logger.debug(f"Attack {self.attack_name} final STDOUT snippet:\n{stdout_log[:500]}...")
+            logger.debug(f"Attack {self.attack_name} final STDERR snippet:\n{stderr_log[:500]}...")
+
+
+        except FileNotFoundError as e: # Catch if /bin/bash or script itself is missing at Popen time
+            logger.error(f"Failed to execute command '{' '.join(command)}': {e}")
+            stderr_log = f"Execution Error: {e}"
+            self.return_code = -1 # Indicate failure
+        except Exception as e:
+            logger.error(f"Error during attack execution or termination '{self.attack_name}': {e}", exc_info=True)
+            # Try to capture stderr even on error
+            if self.process and self.process.poll() is None:
+                 try: # Quick attempt to kill and get output
+                     self.process.kill()
+                     _, stderr_rem = self.process.communicate(timeout=1)
+                     stderr_log += stderr_rem
+                 except: pass # Ignore errors during cleanup
+            stderr_log += f"\nOrchestrator Error: {e}"
+            self.return_code = -1 # Indicate orchestrator-level error
+        finally:
+            actual_duration = time.time() - self.start_time if self.start_time else 0
+            # Get return code if process existed and return_code wasn't set by an exception
+            if self.process and self.return_code is None:
+                 self.return_code = self.process.returncode
+
+            logger.info(f"Attack '{self.attack_name}' finished. Duration: {actual_duration:.2f}s, Return Code: {self.return_code}.")
+            # Log attack end to bus
+            log_data_end = {
+                "attack_name": self.attack_name,
+                "script": os.path.basename(self.attack_script_path),
+                "duration_actual": round(actual_duration, 2),
+                "return_code": self.return_code,
+                "stopped_by_request": self._stop_event.is_set(),
+                "stdout_snippet": stdout_log[:500] + ('...' if len(stdout_log) > 500 else ''),
+                "stderr_snippet": stderr_log[:500] + ('...' if len(stderr_log) > 500 else '')
+            }
+            log_to_bus("attack_stopped", log_data_end)
+
+
+    def stop(self):
+        """Signals the attack thread to stop."""
+        if not self._stop_event.is_set():
+            logger.info(f"Stop signal received for attack: {self.attack_name}")
+            self._stop_event.set()
         else:
-             # 행동 안 함
-             pass
+            logger.debug(f"Stop signal already sent for attack: {self.attack_name}")
+        # Actual termination happens in the run loop checks
 
-        print("="*58)
+    def extract_target_names_from_script(self) -> List[str]:
+        """
+        Extracts target variable names (e.g., TARGET_DRONE_IP) used in the shell script.
+        Improved regex to handle different variable usage patterns like $VAR and ${VAR}.
+        Returns a list of unique target base names (e.g., ['drone', 'gcs']).
+        """
+        target_names = set()
+        if not self.attack_script_path or not os.path.exists(self.attack_script_path):
+            logger.error(f"Cannot extract targets, script path invalid: {self.attack_script_path}")
+            return []
+        try:
+            with open(self.attack_script_path, 'r', encoding='utf-8', errors='ignore') as f:
+                content = f.read()
+                # Regex V3: More robustly find TARGET_NAME_IP/PORT, including defaults like TARGET_IP/PORT
+                # Looks for optional _{NAME}_ part.
+                matches = re.findall(r'\$\{?TARGET(?:_([A-Z0-9_]+))?_(?:IP|PORT)\}?', content)
+                found_generic = False
+                for name_part in matches:
+                    if name_part: # If NAME part was captured (e.g., TARGET_DRONE_IP -> DRONE)
+                        target_names.add(name_part.lower())
+                    else: # If NAME part was NOT captured (e.g. TARGET_IP, TARGET_PORT)
+                         found_generic = True
 
-        # 다음 결정까지 대기 (stop_event 감지하며 대기)
-        elapsed_time = time.time() - start_time
-        wait_time = max(0, decision_interval - elapsed_time)
-        interrupted = stop_event.wait(timeout=wait_time)
-        if interrupted:
-             print("[Seeker 모드] 종료 신호 감지됨. 루프 종료.")
-             break
+                # If generic $TARGET_IP / $TARGET_PORT were found AND 'drone' is a configured target,
+                # assume it refers to 'drone'. Add 'drone' only if not already added specifically.
+                if found_generic and 'drone' in self.targets_config and 'drone' not in target_names:
+                     logger.debug("Found generic $TARGET_IP/PORT usage, assuming target 'drone'.")
+                     target_names.add('drone')
 
-    print("--- 🤖 Seeker RL 모드 종료 ---")
+        except Exception as e:
+            logger.error(f"Failed to read or parse script {self.attack_script_path} for targets: {e}")
+
+        logger.debug(f"Extracted potential target names from {self.attack_name}: {list(target_names)}")
+        return list(target_names)
 
 
-def main():
-    def signal_handler(signum, frame):
-        sig_name = signal.Signals(signum).name
-        print(f"\n[메인] 종료 신호 ({sig_name}) 수신...")
-        terminate_orchestrator(f"signal_{sig_name}")
+# --- AttackOrchestrator Class ---
 
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
+class AttackOrchestrator:
+    def __init__(self, targets_file: str = DEFAULT_TARGETS_FILE,
+                 mtd_state_file: str = DEFAULT_MTD_STATE_PATH,
+                 attack_modules_dir: str = DEFAULT_ATTACK_MODULES_DIR,
+                 bus_log_file: str = DEFAULT_BUS_LOG_PATH): # Add bus_log_file parameter
 
-    parser = argparse.ArgumentParser(description="DVD 공격 오케스트레이터 v2.6 (Seeker RL Mode)")
-    parser.add_argument('-a', '--attack', help="실행할 특정 공격 스크립트 (.sh 파일 이름)")
-    parser.add_argument('--run-all', action='store_true', help="사용 가능한 모든 공격을 순차적으로 실행 (Seeker 모드와 동시 사용 불가)")
-    parser.add_argument('--duration', type=int, default=60, help="--run-all 모드에서 각 공격 실행 최대 시간 (초)")
-    parser.add_argument('--delay', type=int, default=5, help="--run-all 모드에서 공격 사이 대기 시간 (초)")
-    # ⭐️ Seeker RL 모드 옵션 추가
-    parser.add_argument('--seeker', action='store_true', help="Seeker RL 정책 모델을 사용하여 공격/스캔 수행")
-    parser.add_argument('--seeker-interval', type=int, default=15, help="Seeker 모드 결정 주기 (초)")
+        # Update global BUS_LOG_PATH if provided
+        global BUS_LOG_PATH
+        BUS_LOG_PATH = os.path.abspath(bus_log_file) # Ensure absolute path for global
+
+        # Store absolute paths internally
+        self.targets_file_abs = os.path.abspath(targets_file)
+        self.mtd_state_file_abs = os.path.abspath(mtd_state_file)
+        self.attack_modules_dir_abs = os.path.abspath(attack_modules_dir)
+        # Derive wiki path relative to the *attack* modules dir
+        # Be careful if attack_modules_dir is the root project dir
+        parent_dir = os.path.dirname(self.attack_modules_dir_abs)
+        self.attack_wiki_dir_abs = os.path.abspath(os.path.join(parent_dir, 'modules/attacks_wiki')) # Adjusted path assumption
+
+        logger.info(f"Initializing Attack Orchestrator:")
+        logger.info(f"  Targets File: {self.targets_file_abs}")
+        logger.info(f"  MTD State File: {self.mtd_state_file_abs}")
+        logger.info(f"  Attack Modules Dir: {self.attack_modules_dir_abs}")
+        logger.info(f"  Attack Wiki Dir: {self.attack_wiki_dir_abs}")
+        logger.info(f"  Bus Log File: {BUS_LOG_PATH}") # Use global
+
+
+        self.targets_config = load_targets(self.targets_file_abs)
+        # Log warning here if config is empty, AFTER load_targets tried and potentially logged error
+        if not self.targets_config:
+            logger.warning(f"Initialized with empty targets configuration. Target resolution will likely fail.")
+
+        self.running_attacks: Dict[str, AttackRunner] = {} # Track running attacks by name
+
+    def find_attack_script(self, attack_name: str) -> Optional[str]:
+        """Finds the full path to an attack script in primary or wiki directories."""
+        script_filename = f"{attack_name}.sh"
+
+        # Check primary attack directory first
+        path_primary = os.path.join(self.attack_modules_dir_abs, script_filename)
+        logger.debug(f"Checking for script at: {path_primary}")
+        if os.path.isfile(path_primary):
+            # logger.info(f"Found attack script at: {path_primary}") # Reduce verbosity
+            return path_primary
+
+        # Check wiki attacks directory as fallback
+        path_wiki = os.path.join(self.attack_wiki_dir_abs, script_filename)
+        logger.debug(f"Checking for script at: {path_wiki}")
+        if os.path.isfile(path_wiki):
+            # logger.info(f"Found attack script at: {path_wiki}") # Reduce verbosity
+            return path_wiki
+
+        logger.error(f"Attack script '{script_filename}' not found in primary '{self.attack_modules_dir_abs}' or wiki '{self.attack_wiki_dir_abs}' directories.")
+        return None
+
+    def find_all_attack_scripts(self) -> Dict[str, str]:
+        """Finds all available attack scripts and returns a dict {name: path}."""
+        scripts = {}
+        # Scan primary directory
+        try:
+            if os.path.isdir(self.attack_modules_dir_abs):
+                for f in os.listdir(self.attack_modules_dir_abs):
+                    full_path = os.path.join(self.attack_modules_dir_abs, f)
+                    if f.endswith('.sh') and not f.startswith('_') and os.path.isfile(full_path):
+                        name = f.replace('.sh', '')
+                        scripts[name] = full_path
+            else:
+                 logger.error(f"Primary attack directory is not a valid directory: {self.attack_modules_dir_abs}")
+        except OSError as e:
+             logger.error(f"Cannot access primary attack directory {self.attack_modules_dir_abs}: {e}")
+
+        # Scan wiki directory, don't overwrite primary if name clashes
+        try:
+             if os.path.isdir(self.attack_wiki_dir_abs):
+                 for f in os.listdir(self.attack_wiki_dir_abs):
+                     full_path = os.path.join(self.attack_wiki_dir_abs, f)
+                     if f.endswith('.sh') and not f.startswith('_') and os.path.isfile(full_path):
+                         name = f.replace('.sh', '')
+                         if name not in scripts: # Add only if not found in primary
+                             scripts[name] = full_path
+             else:
+                  logger.warning(f"Wiki attack directory is not a valid directory: {self.attack_wiki_dir_abs}")
+        except OSError as e:
+            logger.warning(f"Cannot access wiki attack directory {self.attack_wiki_dir_abs}: {e}")
+
+        logger.info(f"Found {len(scripts)} available attack scripts.")
+        return scripts
+
+
+    def start_attack(self, attack_name: str, duration: int, params: Optional[List[str]] = None) -> Optional[AttackRunner]:
+        """Starts a specific attack. Returns the runner thread or None."""
+        # Check if already running (thread alive)
+        if attack_name in self.running_attacks:
+            runner = self.running_attacks[attack_name]
+            if runner.is_alive():
+                logger.warning(f"Attack '{attack_name}' seems to be already running (Thread active).")
+                return None # Indicate it wasn't started now
+            else:
+                 logger.info(f"Found previous tracker for '{attack_name}', but thread is finished. Starting new instance.")
+                 # Allow restarting by removing the old entry before creating a new one
+                 del self.running_attacks[attack_name]
+
+
+        attack_script_path = self.find_attack_script(attack_name)
+        if not attack_script_path:
+            log_to_bus("attack_failed_to_start", {
+                 "attack_name": attack_name,
+                 "duration_requested": duration,
+                 "params_provided": params if params else [],
+                 "error": "Attack script not found."
+            })
+            return None # Indicate failure
+
+        logger.info(f"Initiating attack '{attack_name}' from '{attack_script_path}' for {duration} seconds.")
+        # Pass necessary absolute paths to the runner
+        runner = AttackRunner(
+            attack_script_path,
+            duration,
+            self.targets_config,
+            self.mtd_state_file_abs, # Pass absolute path
+            params
+        )
+        self.running_attacks[attack_name] = runner
+        runner.start()
+        logger.info(f"Attack '{attack_name}' thread started.")
+        return runner # Return the thread
+
+
+    def stop_attack(self, attack_name: str):
+        """Stops a specific running attack."""
+        runner = self.running_attacks.get(attack_name)
+        if runner and runner.is_alive():
+            logger.info(f"Attempting to stop attack: {attack_name}")
+            runner.stop() # Signal the thread to stop
+            runner.join(timeout=10) # Wait for thread to finish (with timeout)
+            if runner.is_alive():
+                logger.warning(f"Attack thread {attack_name} did not terminate gracefully after join timeout.")
+                # Process might still be running, though thread might exit soon.
+            else:
+                logger.info(f"Attack thread {attack_name} terminated.")
+            # Remove after attempting to stop and join
+            if attack_name in self.running_attacks: # Check again
+                del self.running_attacks[attack_name]
+        elif runner: # Runner exists but is not alive (already finished)
+             logger.info(f"Attack '{attack_name}' was already finished. Removing tracker.")
+             if attack_name in self.running_attacks:
+                 del self.running_attacks[attack_name]
+        else:
+            logger.warning(f"Attack '{attack_name}' not found in running attacks list.")
+
+
+    def list_attacks(self):
+        """Lists available and running attacks."""
+        available_scripts = self.find_all_attack_scripts()
+        available_names = sorted(list(available_scripts.keys()))
+
+        # Check which attacks are actually running by checking thread status
+        # Cleanup finished threads first
+        self.cleanup_finished_attacks()
+        running_names = sorted(list(self.running_attacks.keys())) # Keys are names of running threads
+
+        print("\n=== Attack Status ===")
+        print(f"Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+        print("Available attacks:")
+        if available_names:
+            for name in available_names:
+                # Indicate source directory more clearly
+                script_path = available_scripts[name]
+                if self.attack_modules_dir_abs and script_path.startswith(self.attack_modules_dir_abs):
+                     source_dir = "primary"
+                elif self.attack_wiki_dir_abs and script_path.startswith(self.attack_wiki_dir_abs):
+                     source_dir = "wiki"
+                else:
+                     source_dir = "unknown" # Should not happen if paths are correct
+                print(f"  - {name:<40} (source: {source_dir})") # Aligned output
+        else:
+             print("  (No attack scripts found)")
+
+
+        print("\nRunning attacks:")
+        if running_names:
+            for name in running_names:
+                pid_info = ""
+                runner = self.running_attacks.get(name) # Should exist if in running_names after cleanup
+                if runner and runner.process:
+                    # Check if process is still alive (poll() returns None if running)
+                    if runner.process.poll() is None:
+                         pid_info = f" (PID: {runner.process.pid})"
+                    else:
+                         # Include exit code if known
+                         rc = runner.return_code if runner.return_code is not None else runner.process.poll()
+                         pid_info = f" (PID: {runner.process.pid} - Exited {rc})"
+                elif runner:
+                     pid_info = " (Thread running, process info unavailable)"
+                else: # Should not happen after cleanup
+                     pid_info = " (Tracker exists, but thread missing?)"
+
+                print(f"  - {name}{pid_info}")
+        else:
+            print("  (None)")
+        print("=====================")
+
+    def cleanup_finished_attacks(self):
+         """Removes trackers for threads that have finished."""
+         # Use list comprehension to avoid modifying dict while iterating
+         finished_attacks = [
+             name for name, runner in self.running_attacks.items()
+             if not runner.is_alive()
+         ]
+         if finished_attacks:
+             logger.debug(f"Cleaning up finished attack trackers: {finished_attacks}")
+             for name in finished_attacks:
+                 if name in self.running_attacks: # Check if still exists before deleting
+                     # Ensure join is called even if missed, non-blocking
+                     try:
+                         self.running_attacks[name].join(timeout=0.1)
+                     except Exception: pass # Ignore errors on final join attempt
+                     del self.running_attacks[name]
+
+
+    def stop_all_attacks(self):
+        """Stops all running attacks."""
+        # Cleanup first to avoid trying to stop already finished ones
+        self.cleanup_finished_attacks()
+
+        if not self.running_attacks:
+            logger.info("No attacks currently running to stop.")
+            return
+
+        logger.info(f"Stopping all {len(self.running_attacks)} tracked attacks...")
+        attack_names = list(self.running_attacks.keys()) # Copy keys before iterating
+        threads_to_join = []
+
+        for attack_name in attack_names:
+            runner = self.running_attacks.get(attack_name)
+            # Check is_alive() again, cleanup might have missed concurrent finish
+            if runner and runner.is_alive():
+                logger.info(f"Sending stop signal to: {attack_name}")
+                runner.stop()
+                threads_to_join.append((attack_name, runner))
+            elif runner: # Not alive, cleanup missed it? Remove now.
+                logger.debug(f"Removing tracker for already finished attack during stop-all: {attack_name}")
+                del self.running_attacks[attack_name]
+
+        if not threads_to_join:
+            logger.info("No active threads needed stopping.")
+            return
+
+        logger.info(f"Waiting for {len(threads_to_join)} attack threads to terminate...")
+        # Wait for all signaled threads to finish
+        for name, runner in threads_to_join:
+            runner.join(timeout=10) # Wait with timeout
+            if runner.is_alive():
+                 logger.warning(f"Attack thread {name} did not terminate gracefully after stop-all.")
+            else:
+                 logger.info(f"Attack thread {name} terminated successfully.")
+            # Remove tracker after joining attempt
+            if name in self.running_attacks:
+                 del self.running_attacks[name]
+
+        logger.info("Finished stopping all attacks.")
+        self.list_attacks() # Show status after stopping
+
+
+# --- Main Execution Logic ---
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Orchestrate drone attack simulations.")
+    # Global arguments
+    parser.add_argument("--targets-file", default=DEFAULT_TARGETS_FILE, help=f"Path to the targets YAML file (default: {DEFAULT_TARGETS_FILE})")
+    parser.add_argument("--mtd-state-file", default=DEFAULT_MTD_STATE_PATH, help=f"Path to the MTD state JSON file (default: {DEFAULT_MTD_STATE_PATH})")
+    parser.add_argument("--attack-modules-dir", default=DEFAULT_ATTACK_MODULES_DIR, help=f"Base directory for attack modules (default: {DEFAULT_ATTACK_MODULES_DIR})")
+    parser.add_argument("--bus-log-file", default=DEFAULT_BUS_LOG_PATH, help=f"Path to the bus log file (default: {DEFAULT_BUS_LOG_PATH})")
+    parser.add_argument("-v", "--verbose", action="store_true", help="Enable debug logging.")
+
+    subparsers = parser.add_subparsers(dest="command", required=True, help="Available commands")
+
+    # List command
+    list_parser = subparsers.add_parser("list", help="List available attacks and running instances.")
+
+    # Start command
+    start_parser = subparsers.add_parser("start", help="Start a specific attack.")
+    start_parser.add_argument("attack_name", help="Name of the attack to start (e.g., 'gps-spoofing').")
+    start_parser.add_argument("-d", "--duration", type=int, default=60, help="Duration to run the attack in seconds (default: 60).")
+    start_parser.add_argument("-p", "--params", nargs='*', help="Optional parameters to pass to the attack script.")
+
+    # Stop command
+    stop_parser = subparsers.add_parser("stop", help="Stop a running attack instance.")
+    stop_parser.add_argument("attack_name", help="Name of the attack to stop.")
+
+    # Stop-all command
+    stop_all_parser = subparsers.add_parser("stop-all", help="Stop all running attack instances.")
+
+    # Monitor command
+    monitor_parser = subparsers.add_parser("monitor", help="Monitor running attacks and clean up finished ones.")
+    monitor_parser.add_argument("-i", "--interval", type=int, default=5, help="Interval in seconds to check running attacks (default: 5).")
+
+    # --- Run-all command ---
+    run_all_parser = subparsers.add_parser("run-all", help="Run all available attacks sequentially.")
+    run_all_parser.add_argument("-d", "--duration", type=int, default=30, help="Duration for each attack in seconds (default: 30).")
+    # run_all_parser.add_argument("--exclude", nargs='*', help="List of attack names to exclude.") # Optional: add exclude functionality later
 
     args = parser.parse_args()
 
-    # 옵션 충돌 확인
-    if args.seeker and (args.run_all or args.attack):
-        print("⛔ 오류: --seeker 옵션은 --run-all 또는 -a 옵션과 함께 사용할 수 없습니다.")
-        sys.exit(1)
-    if not RL_AVAILABLE and args.seeker:
-        print("⛔ 오류: --seeker 모드를 사용하려면 PyTorch를 설치해야 합니다.")
-        sys.exit(1)
+    # Set logging level
+    if args.verbose:
+        # Set level for the specific logger used in this script
+        logger.setLevel(logging.DEBUG)
+        # Optionally set the root logger level if other libraries log verbosely
+        # logging.getLogger().setLevel(logging.DEBUG)
+        logger.debug("Debug logging enabled.")
 
+    # --- Instantiate Orchestrator ---
+    # Pass paths from args to the constructor
+    # Make sure to pass the bus_log_file path as well
+    orchestrator = AttackOrchestrator(
+        targets_file=args.targets_file,
+        mtd_state_file=args.mtd_state_file,
+        attack_modules_dir=args.attack_modules_dir,
+        bus_log_file=args.bus_log_file # Pass the potentially overridden bus log path
+    )
 
-    state_file = get_mtd_state_file_path()
-    all_attacks = get_available_attacks()
+    try:
+        # --- Command Handling ---
+        if args.command == "list":
+            orchestrator.list_attacks()
+        elif args.command == "start":
+            orchestrator.start_attack(args.attack_name, args.duration, args.params)
+            # Give a moment for the thread to start and log initial messages
+            time.sleep(0.5)
+            orchestrator.list_attacks() # Show status after starting
+        elif args.command == "stop":
+            orchestrator.stop_attack(args.attack_name)
+            time.sleep(1.5) # Give time for termination
+            orchestrator.list_attacks()
+        elif args.command == "stop-all":
+            orchestrator.stop_all_attacks()
+            time.sleep(1.5)
+            orchestrator.list_attacks()
+        elif args.command == "monitor":
+            logger.info("Starting monitor mode. Press Ctrl+C to exit.")
+            while True:
+                orchestrator.list_attacks()
+                # cleanup_finished_attacks is called within list_attacks now
+                time.sleep(args.interval)
+        # --- Handle run-all command ---
+        elif args.command == "run-all":
+            attack_scripts = orchestrator.find_all_attack_scripts()
+            attack_names = sorted(list(attack_scripts.keys())) # Get names and sort
 
-    # --- Seeker RL 모드 실행 ---
-    if args.seeker:
-        global seeker_policy
-        seeker_policy = load_seeker_policy(SEEKER_MODEL_PATH)
-        if seeker_policy:
-            run_seeker_mode(state_file, args.seeker_interval)
-        else:
-             sys.exit(1) # 모델 로드 실패 시 종료
+            if not attack_names:
+                logger.info("No attacks found to run.")
+                sys.exit(0)
 
-    # --- 기존 모드 실행 (run-all 또는 단일 공격) ---
-    elif args.run_all:
-        print(f"--- 전체 공격 순차 실행 모드 시작 ({len(all_attacks)}개 공격) ---")
-        # ... (기존 run-all 로직과 동일) ...
-        print(f"    각 공격 최대 실행 시간: {args.duration}초")
-        print(f"    공격 간 대기 시간: {args.delay}초")
-        for i, attack_name in enumerate(all_attacks, 1):
-            if stop_event.is_set(): break
-            attack_meta = get_attack_metadata(attack_name)
-            print(f"\n--- [{i}/{len(all_attacks)}] '{attack_name}' 공격 실행 ---")
-            proc = run_single_attack(attack_name, state_file)
-            if proc:
-                return_code = None
+            logger.info(f"Found {len(attack_names)} attacks. Starting sequentially (duration: {args.duration}s each)...")
+
+            for attack_name in attack_names:
+                # Optional: Add exclude logic here if implemented
+                # if args.exclude and attack_name in args.exclude:
+                #     logger.info(f"--- Skipping excluded attack: {attack_name} ---")
+                #     continue
+
+                logger.info(f"\n--- Starting attack: {attack_name} ---")
                 try:
-                    proc.wait(timeout=args.duration)
-                    return_code = proc.returncode
-                    print(f"    '{attack_name}' 정상 종료 (RC: {return_code}).")
-                except subprocess.TimeoutExpired:
-                    cleanup_attack_process(f"duration_limit ({args.duration}s)")
-                    return_code = -1
-                    print(f"    '{attack_name}' 시간 초과. 정리됨.")
-                except Exception as wait_err:
-                     cleanup_attack_process(f"wait_error_{type(wait_err).__name__}")
-                     return_code = -2
-                     print(f"❌ '{attack_name}' 대기 오류: {wait_err}", file=sys.stderr)
+                    # Start the attack (returns the thread)
+                    runner_thread = orchestrator.start_attack(attack_name, args.duration, params=None) # No params for run-all simplicity
 
-                log_bus_event("attack_finished", {"attack": attack_name, "return_code": return_code, "attack_category": attack_meta['attack_category']}, source_override="attack_orchestrator")
-            else:
-                log_bus_event("attack_exception", {"attack": attack_name, "error": "Failed to start"}, source_override="attack_orchestrator")
+                    if runner_thread:
+                        # Wait for the thread to finish or timeout
+                        logger.info(f"Waiting for '{attack_name}' to complete or run for {args.duration}s...")
+                        # Join with a timeout slightly longer than the duration
+                        runner_thread.join(timeout=args.duration + 10) # Add buffer time
 
-            if not stop_event.is_set() and i < len(all_attacks) and args.delay > 0:
-                print(f"    다음 공격까지 {args.delay}초 대기...")
-                interrupted = stop_event.wait(timeout=args.delay)
-                if interrupted: break
-        print("--- 전체 공격 순차 실행 완료 ---")
+                        if runner_thread.is_alive():
+                            logger.warning(f"Attack '{attack_name}' thread still alive after timeout. Attempting stop...")
+                            orchestrator.stop_attack(attack_name) # Request stop
+                            # No need to join again here, stop_attack handles join
+                        else:
+                            # Access return code after thread finishes
+                            rc = runner_thread.return_code
+                            logger.info(f"Attack '{attack_name}' completed (Return Code: {rc}).")
+
+                        # Ensure cleanup happens even if stop was needed (cleanup is also called in list_attacks)
+                        # orchestrator.cleanup_finished_attacks() # Might be redundant if list_attacks is called often
+
+                    else:
+                         # start_attack already logs errors if it fails to start
+                         logger.error(f"Skipping wait for '{attack_name}' as it failed to start.")
+
+                    time.sleep(2) # Short pause between attacks
+
+                except Exception as e:
+                    logger.error(f"Error occurred while running or waiting for attack '{attack_name}': {e}", exc_info=True)
+                    # Decide if we should continue with the next attack or stop
+                    # continue # Continue to next attack
+                    logger.warning(f"Attempting to continue with the next attack after error.")
 
 
-    elif args.attack:
-        if args.attack not in all_attacks:
-             print(f"⛔ 오류: 지정된 공격 '{args.attack}' 없음.", file=sys.stderr)
-             sys.exit(1)
-        attack_meta = get_attack_metadata(args.attack)
-        print(f"--- 단일 공격 실행 모드: '{args.attack}' ---")
-        proc = run_single_attack(args.attack, state_file)
-        if proc:
-            return_code = -99 # 초기값
-            try:
-                 proc.wait()
-                 return_code = proc.returncode
-                 print(f"    '{args.attack}' 종료됨 (RC: {return_code}).")
-            except KeyboardInterrupt: return_code = -9 # signal_handler가 처리
-            except Exception as wait_err: return_code = -2; print(f"❌ 대기 오류: {wait_err}", file=sys.stderr)
-            # 종료 로그는 signal_handler 또는 finally 블록에서 처리되므로 중복 기록 방지
-            # cleanup은 wait 후 필요 없음 (프로세스 이미 종료)
-        else:
-             print(f"    '{args.attack}' 실행 시작 실패.")
-             # 실패 로그는 run_single_attack 내부에서 기록됨
+            logger.info("\n--- Finished running all attacks sequentially. ---")
 
-    else:
-        # 옵션 없이 실행 시 사용법 안내
-        print("사용법: attack_orchestrator.py [--seeker | -a <attack.sh> | --run-all]")
-        print("\n사용 가능한 공격 스크립트:")
-        if all_attacks:
-            for attack in all_attacks: print(f"  - {attack}")
-        else:
-             print("  (없음)")
+
+    except KeyboardInterrupt:
+        logger.info("Interrupted by user. Stopping all attacks...")
+        orchestrator.stop_all_attacks()
         sys.exit(0)
-
-    # 정상 종료 시 최종 정리 (signal_handler가 호출되지 않은 경우)
-    if not stop_event.is_set():
-        terminate_orchestrator("normal_completion")
-
-if __name__ == "__main__":
-    main()
-# ```
-
-# **주요 변경 및 추가 사항:**
-
-# 1.  **`--seeker` 옵션 추가**: `argparse`를 사용하여 `--seeker` 플래그와 `--seeker-interval` 옵션을 추가했습니다. `--seeker`는 `--run-all` 또는 `-a`와 함께 사용할 수 없습니다.
-# 2.  **RL 관련 임포트 및 클래스 정의**: 스크립트 상단에 `torch`, `ActorCritic` 등 필요한 모듈을 임포트하고 클래스를 정의했습니다. PyTorch가 설치되지 않은 경우 `--seeker` 옵션을 사용할 수 없도록 `RL_AVAILABLE` 플래그로 관리합니다.
-# 3.  **Seeker 정책 로드 (`load_seeker_policy`)**: `--seeker` 모드 시 `seeker_policy.pth` 파일을 로드하는 함수를 추가했습니다.
-# 4.  **Seeker 환경 관찰 (`observe_environment_seeker`)**:
-#     * `read_mtd_target` 함수를 수정하여 MTD 상태 파일의 최종 수정 시간(`mtime`)을 반환하도록 했습니다.
-#     * 이전 `mtime`과 비교하여 상태 파일 변경(MTD 셔플) 여부를 감지합니다 (`observed_move`).
-#     * MTD 셔플 발생 시 `seeker_known_target`을 `False`로 초기화합니다. (실제로는 스캔 결과 등을 반영해야 더 정확해집니다.)
-#     * 관찰된 셔플 빈도를 EMA(`seeker_observed_shuffle_ema`)로 추적합니다.
-#     * `train.py`의 `_obs_seek`와 동일한 5차원 상태 벡터를 생성하여 반환합니다.
-# 5.  **Seeker 행동 적용 (`apply_action_seeker`)**: Seeker 모델이 결정한 메타 행동에 따라 내부 `attack_bias`, `scan_effort` 파라미터를 업데이트하는 함수를 추가했습니다.
-# 6.  **확률 기반 공격 선택 (`select_attack_script_based_on_policy`)**:
-#     * 현재 `attack_bias`, `scan_effort`, `seeker_known_target` 값을 기반으로 스캔 또는 공격을 수행할 확률을 계산합니다.
-#     * 사용 가능한 `.sh` 스크립트를 이름에 따라 Discovery/Exploit 그룹으로 나눕니다.
-#     * 계산된 확률과 `random.random()` 값을 비교하여 실행할 행동(스캔/공격/안함)과 스크립트(해당 그룹 내 무작위 선택)를 결정합니다.
-# 7.  **Seeker RL 모드 메인 루프 (`run_seeker_mode`)**:
-#     * `--seeker-interval` 주기로 환경 관찰, 행동 결정, 파라미터 업데이트, 공격/스캔 선택 및 실행을 반복합니다.
-#     * 공격 스크립트는 `run_single_attack`을 통해 실행하되, 완료될 때까지 기다리지 않고(`proc.wait()` 호출 안 함) 다음 주기로 넘어갑니다. (백그라운드 실행)
-# 8.  **`main` 함수 수정**: `--seeker` 옵션 유무에 따라 `run_seeker_mode`를 호출하거나 기존의 `run-all`/단일 공격 로직을 수행하도록 분기합니다.
-
-# **사용 방법:**
-
-# ```bash
-# # Seeker RL 모드로 실행 (결정 주기 15초)
-# python3 attack_orchestrator.py --seeker --seeker-interval 15
-
-# # 기존 방식: 모든 공격 30초씩 실행
-# # python3 attack_orchestrator.py --run-all --duration 30
-
-# # 기존 방식: 특정 공격 1회 실행
-# # python3 attack_orchestrator.py -a network-scan.sh
+    except Exception as e:
+        logger.error(f"An unexpected error occurred: {e}", exc_info=True)
+        logger.info("Attempting to stop all attacks due to error...")
+        orchestrator.stop_all_attacks()
+        sys.exit(1)
+    finally:
+        # Ensure cleanup runs at the very end if not interrupted before stop_all_attacks finishes
+        orchestrator.cleanup_finished_attacks()
+        if len(orchestrator.running_attacks) > 0:
+             # This might list threads that are in the process of being stopped by stop_all_attacks
+             logger.warning(f"{len(orchestrator.running_attacks)} attack trackers remain. Threads might be stopping.")
+             # Give stop_all_attacks a bit more time?
+             time.sleep(2)
+             orchestrator.cleanup_finished_attacks() # Final cleanup attempt
+             if len(orchestrator.running_attacks) > 0:
+                  logger.error(f"Could not cleanly stop all attack threads: {list(orchestrator.running_attacks.keys())}")
 
