@@ -1,562 +1,549 @@
-import pandas as pd
-import json
-import logging
-import time
-import os
-from datetime import datetime
-from dataset_manager import DatasetManager # Assuming DatasetManager handles saving
-from watchdog.observers import Observer # Added for streaming example
-from watchdog.events import FileSystemEventHandler # Added for streaming example
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+파일명: dvd_lite/dvd_attacks_lpc/ml/data_builder.py
+설  명: bus.log를 배치로 읽어 피처를 생성하고 CSV로 저장
+       - docker 재시작/placeholder 통계(None) 안전 처리
+       - 공격 시작/종료 이벤트 기반 레이블 상태머신
+       - 경로/인코딩/형변환/결측 처리 강화
+"""
 
-# Setup basic logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+import os
+import sys
+import json
+import time
+import logging
+import argparse
+from datetime import datetime
+from typing import Any, Dict, Optional
+
+import pandas as pd
+
+# 스트리밍 예시용(현재 비활성) 의존성
+try:
+    from watchdog.observers import Observer  # noqa: F401
+    from watchdog.events import FileSystemEventHandler  # noqa: F401
+except Exception:
+    # watchdog 미설치 환경 고려
+    class FileSystemEventHandler:  # type: ignore
+        pass
+
+# ----------------------------
+# 로깅 설정
+# ----------------------------
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
 logger = logging.getLogger("DataBuilder")
 
-# --- 경로 설정 ---
-# 이 스크립트 파일의 위치를 기준으로 상대 경로 설정
+
+# ----------------------------
+# 안전 변환 헬퍼
+# ----------------------------
+def _safe_float(x):
+    try:
+        return float(x) if x is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _bytes_to_mb(x):
+    try:
+        return (float(x) / (1024.0 * 1024.0)) if x is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+# ----------------------------
+# 경로 기본값(절대경로)
+# ----------------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-# 기본값 설정 (명령행 인수로 덮어쓸 수 있음)
-DEFAULT_BUS_LOG_PATH = os.path.abspath(os.path.join(BASE_DIR, '../bus.log')) # Use absolute path
-DEFAULT_OUTPUT_DIR = os.path.abspath(os.path.join(BASE_DIR, './processed_data')) # Use absolute path
-DEFAULT_MAPPING_FILE = os.path.abspath(os.path.join(BASE_DIR, 'event_mapping.json')) # Use absolute path
+DEFAULT_BUS_LOG_PATH = os.path.abspath(os.path.join(BASE_DIR, "../bus/bus.log"))
+DEFAULT_OUTPUT_DIR = os.path.abspath(os.path.join(BASE_DIR, "./processed_data"))
+DEFAULT_MAPPING_FILE = os.path.abspath(os.path.join(BASE_DIR, "event_mapping.json"))
+
+
+# ----------------------------
+# DatasetManager (별도 파일 권장)
+# ----------------------------
+try:
+    # 같은 디렉토리에 dataset_manager.py가 있는 경우 이를 사용
+    from dataset_manager import DatasetManager  # type: ignore
+except Exception:
+    class DatasetManager:
+        """간단한 CSV 저장기(임시). 실제 프로젝트에선 별도 파일로 두는 것을 권장합니다."""
+        def __init__(self, output_dir: str):
+            self.output_dir = output_dir
+            os.makedirs(self.output_dir, exist_ok=True)
+
+        def save_dataframe(self, df: pd.DataFrame, filename: str) -> None:
+            if not isinstance(df, pd.DataFrame):
+                print("[DatasetManager Error] df is not a DataFrame.", file=sys.stderr)
+                return
+            try:
+                output_path = os.path.join(self.output_dir, filename)
+                df.to_csv(output_path, index=False)
+            except Exception as e:
+                print(f"[DatasetManager Error] Failed to save {filename}: {e}", file=sys.stderr)
+
 
 class DataBuilder:
-    def __init__(self, bus_log_path=DEFAULT_BUS_LOG_PATH, output_dir=DEFAULT_OUTPUT_DIR, mapping_file=DEFAULT_MAPPING_FILE):
+    def __init__(
+        self,
+        bus_log_path: str = DEFAULT_BUS_LOG_PATH,
+        output_dir: str = DEFAULT_OUTPUT_DIR,
+        mapping_file: str = DEFAULT_MAPPING_FILE
+    ):
         self.bus_log_path = bus_log_path
         self.output_dir = output_dir
-        self.dataset_manager = DatasetManager(output_dir) # DatasetManager needs absolute path
-        self.event_mapping = {} # Initialize empty
+        self.dataset_manager = DatasetManager(output_dir)
+        self.event_mapping: Dict[str, int] = {}
 
-        # Ensure output directory exists
         os.makedirs(self.output_dir, exist_ok=True)
 
+        # 공격명 -> 정수 라벨 매핑 로드
         try:
-            with open(mapping_file, 'r') as f:
+            with open(mapping_file, "r", encoding="utf-8") as f:
                 self.event_mapping = json.load(f)
             logger.info(f"Loaded event mapping from {mapping_file}")
         except FileNotFoundError:
-            logger.error(f"Event mapping file not found at {mapping_file}. Cannot automatically label attack data. Using empty mapping.")
+            logger.error(
+                f"Event mapping file not found at {mapping_file}. "
+                f"Cannot automatically label attack data. Using empty mapping."
+            )
         except json.JSONDecodeError as e:
             logger.error(f"Error decoding JSON from {mapping_file}: {e}. Using empty mapping.")
         except Exception as e:
-            logger.error(f"Unexpected error loading event mapping file {mapping_file}: {e}. Using empty mapping.")
+            logger.error(f"Unexpected error loading event mapping: {e}. Using empty mapping.")
 
-        # For streaming: track last processed position/time
+        # streaming 모드 관련 내부 상태(현재 비활성)
         self._last_file_position = 0
-        self._last_log_timestamp = None # Optional: Use timestamp if seeking by position is unreliable
+        self._last_log_timestamp: Optional[datetime] = None
 
-    def parse_log_entry(self, line):
-        """Parses a single JSON entry from the bus log."""
+    # ----------------------------
+    # 로그 파서
+    # ----------------------------
+    def parse_log_entry(self, line: str) -> Optional[Dict[str, Any]]:
+        """bus.log의 한 줄(JSON)을 dict로 파싱 + timestamp 표준화."""
         try:
             log_entry = json.loads(line)
-            # Standardize timestamp parsing (handle potential errors)
-            ts_str = log_entry.get('timestamp')
-            if ts_str:
-                 # Try ISO format with ZULU timezone first
-                 try:
-                     log_entry['timestamp'] = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
-                 except ValueError:
-                     # Try other common formats if needed, or fallback
-                     try:
-                        # Example: Fallback to assuming local time if format differs
-                        log_entry['timestamp'] = datetime.fromisoformat(ts_str)
-                        logger.warning(f"Timestamp '{ts_str}' missing ZULU indicator, parsed as local time.")
-                     except ValueError:
+            ts_str = log_entry.get("timestamp")
+            ts_posix = log_entry.get("ts")
+
+            if ts_posix:
+                log_entry["timestamp_dt"] = datetime.fromtimestamp(float(ts_posix))
+            elif ts_str:
+                try:
+                    # ISO8601(Z 표기 지원)
+                    log_entry["timestamp_dt"] = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
+                except ValueError:
+                    try:
+                        log_entry["timestamp_dt"] = datetime.fromisoformat(ts_str)
+                        logger.warning(f"Timestamp '{ts_str}' parsed as local time.")
+                    except ValueError:
                         logger.error(f"Could not parse timestamp format: {ts_str}. Using current time.")
-                        log_entry['timestamp'] = datetime.now() # Fallback
+                        log_entry["timestamp_dt"] = datetime.now()
             else:
-                 logger.warning("Log entry missing 'timestamp'. Using current time.")
-                 log_entry['timestamp'] = datetime.now()
+                logger.warning("Log entry missing 'timestamp' and 'ts'. Using current time.")
+                log_entry["timestamp_dt"] = datetime.now()
+
+            # 원본 문자열 보존
+            log_entry["timestamp_str"] = ts_str if ts_str else log_entry["timestamp_dt"].isoformat()
             return log_entry
+
         except json.JSONDecodeError:
-            # Log potentially sensitive info at DEBUG level
-            logger.debug(f"Skipping malformed JSON log entry: {line.strip()}")
+            logger.debug(f"Skipping malformed JSON: {line.strip()}")
             return None
         except Exception as e:
-            logger.error(f"Error parsing log entry: {line.strip()} - Error: {e}")
+            logger.error(f"Error parsing log entry: {e}")
             return None
 
-    def extract_features(self, log_entry):
+    # ----------------------------
+    # 피처 추출
+    # ----------------------------
+    def extract_features(self, log_entry: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Extracts features from a parsed log entry. Enhanced based on monitor types.
+        모니터링/이벤트 레코드로부터 피처를 생성.
+        레이블 할당은 process_logs_batch()의 상태머신에서 수행.
         """
-        features = {'timestamp': log_entry['timestamp']} # Always include timestamp
-        source = log_entry.get('source', 'unknown')
-        event_type = log_entry.get('event_type', 'unknown')
-        data = log_entry.get('data', {})
+        features: Dict[str, Any] = {
+            "timestamp": log_entry["timestamp_str"],
+            "ts": log_entry.get("ts", log_entry["timestamp_dt"].timestamp()),
+        }
 
-        # --- Feature Extraction Logic ---
+        source = log_entry.get("source", "unknown")
+        log_type = log_entry.get("type", "unknown")
+        data = log_entry.get("data", {}) or {}
 
-        # Example 1: Network Traffic Monitor Data
-        if source == 'network_traffic_monitor':
-            # Basic connection info (consider anonymizing IPs if needed)
-            features['net_protocol'] = data.get('protocol', 'unknown').lower() # e.g., 'tcp', 'udp', 'icmp'
-            features['net_src_ip'] = data.get('src_ip')
-            features['net_dst_ip'] = data.get('dst_ip')
-            features['net_src_port'] = data.get('src_port')
-            features['net_dst_port'] = data.get('dst_port')
-            # Traffic volume stats
-            features['net_packet_count'] = data.get('packet_count')
-            features['net_total_bytes'] = data.get('total_bytes')
-            # Packet size stats (handle potential missing keys)
-            pkt_stats = data.get('packet_size_stats', {})
-            features['net_pkt_size_avg'] = pkt_stats.get('avg')
-            features['net_pkt_size_std'] = pkt_stats.get('std')
-            features['net_pkt_size_min'] = pkt_stats.get('min')
-            features['net_pkt_size_max'] = pkt_stats.get('max')
-            # Flow duration/frequency (if provided by monitor)
-            features['net_flow_duration_sec'] = data.get('flow_duration_sec')
-            features['net_flow_bytes_per_sec'] = data.get('flow_bytes_per_sec')
-            # Advanced features (hypothetical - need implementation in monitor)
-            features['net_conn_freq'] = data.get('conn_frequency') # How often this pair communicates
-            features['net_payload_entropy'] = data.get('payload_entropy') # Randomness of payload
+        # 1) 네트워크 모니터
+        if source == "network_traffic_monitor" and log_type == "network_packet":
+            features["net_protocol"] = data.get("transport_protocol", data.get("protocol", "unknown")).lower()
+            features["net_src_ip"] = data.get("ip_src", data.get("ipv6_src"))
+            features["net_dst_ip"] = data.get("ip_dst", data.get("ipv6_dst"))
+            features["net_src_port"] = data.get("tcp_srcport", data.get("udp_srcport"))
+            features["net_dst_port"] = data.get("tcp_dstport", data.get("udp_dstport"))
+            features["net_pkt_len"] = data.get("length")
+            # TCP/ARP 세부
+            if features["net_protocol"] == "tcp":
+                features["net_tcp_flags"] = data.get("tcp_flags")
+            elif features["net_protocol"] == "arp":
+                features["net_arp_opcode"] = data.get("arp_opcode")
 
-        # Example 2: Telemetry Monitor Data
-        elif source == 'dvd_telemetry_monitor':
-            if event_type == 'mavlink_message':
-                 # General MAVLink info
-                 features['mav_msg_id'] = data.get('msg_id')
-                 features['mav_msg_name'] = data.get('msg_name', 'UNKNOWN').upper()
-                 features['mav_sys_id'] = data.get('sys_id')
-                 features['mav_comp_id'] = data.get('comp_id')
-                 # Payload features (extract important fields per message type)
-                 payload = data.get('payload', {})
-                 msg_name = features['mav_msg_name']
+        # 2) 텔레메트리(MAVLink)
+        elif source == "dvd_telemetry_monitor" and log_type.startswith("mavlink_"):
+            msg_name = log_type.replace("mavlink_", "").upper()
+            features["mav_msg_name"] = msg_name
+            payload = data
 
-                 if msg_name == 'HEARTBEAT':
-                     features['mav_hb_type'] = payload.get('type')
-                     features['mav_hb_autopilot'] = payload.get('autopilot')
-                     features['mav_hb_status'] = payload.get('system_status')
-                 elif msg_name == 'GLOBAL_POSITION_INT':
-                     features['mav_gps_lat'] = payload.get('lat')
-                     features['mav_gps_lon'] = payload.get('lon')
-                     features['mav_gps_alt'] = payload.get('alt') # Altitude MSL
-                     features['mav_gps_rel_alt'] = payload.get('relative_alt') # Altitude relative to home
-                     features['mav_gps_vx'] = payload.get('vx') # Ground speed N/S
-                     features['mav_gps_vy'] = payload.get('vy') # Ground speed E/W
-                     features['mav_gps_vz'] = payload.get('vz') # Ground speed Dwon
-                     features['mav_gps_hdg'] = payload.get('hdg') # Heading
-                 elif msg_name == 'ATTITUDE':
-                     features['mav_att_roll'] = payload.get('roll')
-                     features['mav_att_pitch'] = payload.get('pitch')
-                     features['mav_att_yaw'] = payload.get('yaw')
-                     features['mav_att_rollspeed'] = payload.get('rollspeed')
-                 elif msg_name == 'SYS_STATUS':
-                     features['mav_sys_voltage'] = payload.get('voltage_battery')
-                     features['mav_sys_current'] = payload.get('current_battery')
-                     features['mav_sys_load'] = payload.get('load')
-                     features['mav_sys_errors'] = payload.get('errors_count1') # Example error count
+            if msg_name == "HEARTBEAT":
+                features["mav_hb_type"] = payload.get("type")
+                features["mav_hb_autopilot"] = payload.get("autopilot")
+                features["mav_hb_status"] = payload.get("system_status")
 
-        # Example 3: Container Monitor Data
-        elif source == 'dvd_container_monitor':
-            # Target container info (consider mapping ID/name to roles if useful)
-            # features['cont_id'] = data.get('container_id') # Maybe less useful than name
-            features['cont_name'] = data.get('container_name')
-            # Resource usage
-            features['cont_cpu_usage_pct'] = data.get('cpu_usage') # Assuming percentage
-            features['cont_mem_usage_mb'] = data.get('memory_usage') # Assuming MB
-            features['cont_mem_limit_mb'] = data.get('memory_limit')
-            features['cont_mem_pct'] = data.get('memory_percent')
-            # Network I/O
-            features['cont_net_rx_bytes'] = data.get('network_rx_bytes')
-            features['cont_net_tx_bytes'] = data.get('network_tx_bytes')
-            # Disk I/O (if available)
-            features['cont_disk_read_bytes'] = data.get('disk_read_bytes')
-            features['cont_disk_write_bytes'] = data.get('disk_write_bytes')
+            elif msg_name == "GLOBAL_POSITION_INT":
+                features["mav_gps_lat"] = payload.get("lat")
+                features["mav_gps_lon"] = payload.get("lon")
+                features["mav_gps_alt"] = payload.get("alt")
+                features["mav_gps_rel_alt"] = payload.get("relative_alt")
+                features["mav_gps_vx"] = payload.get("vx")
+                features["mav_gps_vy"] = payload.get("vy")
+                features["mav_gps_vz"] = payload.get("vz")
+                features["mav_gps_hdg"] = payload.get("hdg")
 
-        # Example 4: QoS Monitor Data
-        elif source == 'qos_monitor':
-            # Network quality metrics between specific points (e.g., GCS <-> Drone)
-            features['qos_target'] = data.get('target_pair', 'unknown') # e.g., 'gcs_drone'
-            features['qos_latency_ms'] = data.get('latency_ms')
-            features['qos_jitter_ms'] = data.get('jitter_ms')
-            features['qos_packet_loss_pct'] = data.get('packet_loss_rate') # Assuming rate is 0-1 or 0-100
-            features['qos_throughput_kbps'] = data.get('throughput_kbps') # If measured
+            elif msg_name == "ATTITUDE":
+                features["mav_att_roll"] = payload.get("roll")
+                features["mav_att_pitch"] = payload.get("pitch")
+                features["mav_att_yaw"] = payload.get("yaw")
+                features["mav_att_rollspeed"] = payload.get("rollspeed")
 
-        # Example 5: System Event Monitor Data
-        elif source == 'system_event_monitor':
-             # OS-level or application-level events
-             features['sys_event_type'] = data.get('type') # e.g., 'login_failed', 'file_access', 'process_start'
-             features['sys_event_user'] = data.get('username', 'unknown')
-             features['sys_event_process'] = data.get('process_name')
-             features['sys_event_path'] = data.get('file_path') # e.g., for file access events
-             features['sys_event_success'] = data.get('success') # Boolean: did the event succeed?
+            elif msg_name == "SYS_STATUS":
+                features["mav_sys_voltage"] = payload.get("voltage_battery")
+                features["mav_sys_current"] = payload.get("current_battery")
+                features["mav_sys_load"] = payload.get("load")
+                features["mav_sys_errors"] = payload.get("errors_count1")
 
-        # Example 6: Attack Orchestrator Events for Labeling
-        elif source == 'attack_orchestrator':
-             if event_type == 'attack_started':
-                 attack_name = data.get('attack_name')
-                 # Map attack name to a numerical label using event_mapping
-                 label = self.event_mapping.get(attack_name, 0) # Default to 0 (normal) if not found
-                 if label == 0 and attack_name: # Log warning if attack started but not in mapping
-                      logger.warning(f"Attack '{attack_name}' started but not found in event mapping. Assigning label 0.")
-                 features['label'] = label
-                 features['attack_in_progress'] = 1 # Flag indicating an attack is active during this log entry
-             elif event_type == 'attack_stopped':
-                 # When attack stops, mark as not in progress and reset label to normal
-                 features['attack_in_progress'] = 0
-                 features['label'] = 0 # Assume normal state after attack stops (adjust if needing post-attack analysis)
+        # 3) 컨테이너 모니터
+        elif source == "dvd_container_monitor" and log_type == "container_stats_details":
+            features["cont_name"] = data.get("name")
+            features["cont_status"] = data.get("status")
+            features["cont_restarting"] = bool(data.get("restarting", False))
+            features["cont_exit_code"] = data.get("exit_code")
 
-        # Fallback/Default features (Legacy or Uncategorized)
-        else:
-             # Basic MAVLink parsing (can be removed if fully covered by telemetry monitor)
-             if log_entry.get('message_type') == 'MAVLink' and 'mav_msg_id' not in features:
-                 features['mav_msg_id'] = log_entry.get('msgid') # Use different prefix to avoid clash
-                 logger.debug("Processed legacy MAVLink entry.")
-             # Basic Network Scan parsing (can be removed if covered by network monitor)
-             elif 'scan detected' in log_entry.get('message', '').lower():
-                 features['scan_detected'] = 1
-                 logger.debug("Processed legacy scan detection entry.")
-             # Add other specific fallback parsing if necessary
+            stats = data.get("stats") or {}
+            # 도커 placeholder(읽을 수 없는 통계) 감지
+            is_placeholder = stats.get("read_time") in (None, "", "0001-01-01T00:00:00Z")
 
-        # --- Default Values & Type Consistency ---
-        # Ensure label and attack_in_progress always exist
-        features.setdefault('label', 0)
-        features.setdefault('attack_in_progress', 0)
+            if not is_placeholder:
+                features["cont_cpu_usage_pct"] = _safe_float(stats.get("cpu_percent"))
+                features["cont_mem_usage_mb"] = _bytes_to_mb(stats.get("memory_usage_bytes"))
+                features["cont_mem_limit_mb"] = _bytes_to_mb(stats.get("memory_limit_bytes"))
+                features["cont_mem_pct"] = _safe_float(stats.get("memory_percent"))
+                # 누적 카운터류는 None이면 0
+                features["cont_net_rx_bytes"] = stats.get("network_rx_bytes") or 0
+                features["cont_net_tx_bytes"] = stats.get("network_tx_bytes") or 0
+                features["cont_disk_read_bytes"] = stats.get("disk_read_bytes") or 0
+                features["cont_disk_write_bytes"] = stats.get("disk_write_bytes") or 0
+                features["cont_pids"] = stats.get("pids") if stats.get("pids") is not None else 0
+            else:
+                # 재시작/중지 직후 등 유효 통계 없음
+                features["cont_cpu_usage_pct"] = None
+                features["cont_mem_usage_mb"] = None
+                features["cont_mem_limit_mb"] = None
+                features["cont_mem_pct"] = None
+                features["cont_net_rx_bytes"] = 0
+                features["cont_net_tx_bytes"] = 0
+                features["cont_disk_read_bytes"] = 0
+                features["cont_disk_write_bytes"] = 0
+                features["cont_pids"] = 0
 
-        # Ensure numeric features have a consistent type (e.g., float)
-        # Add more features to this list as needed
+        # 4) QoS 모니터
+        elif source == "qos_monitor" and log_type == "system_qos":
+            rates = data.get("system_resources_rates", {}) or {}
+            quality = data.get("network_quality", {}) or {}
+            cumulative = data.get("system_resources_cumulative", {}) or {}
+
+            features["qos_cpu_overall_pct"] = cumulative.get("cpu_percent_overall")
+            features["qos_mem_pct"] = cumulative.get("memory_percent")
+            features["qos_disk_read_bps"] = rates.get("disk_read_bps")
+            features["qos_disk_write_bps"] = rates.get("disk_write_bps")
+            features["qos_net_sent_bps"] = rates.get("net_sent_bps")
+            features["qos_net_recv_bps"] = rates.get("net_recv_bps")
+            features["qos_ping_rtt_ms"] = quality.get("avg_rtt_ms")
+            features["qos_ping_loss_pct"] = quality.get("packet_loss_percent")
+
+        # 5) Docker 이벤트
+        elif source == "docker_event_monitor" and log_type == "docker_event":
+            features["docker_cont_name"] = data.get("name")
+            features["docker_event_status"] = data.get("status")
+            if data.get("status") == "health_status":
+                features["docker_health_status"] = data.get("health_status")
+
+        # 숫자형 통일 캐스팅(가능한 항목만)
         numeric_cols = [
-            'net_src_port', 'net_dst_port', 'net_packet_count', 'net_total_bytes',
-            'net_pkt_size_avg', 'net_pkt_size_std', 'net_pkt_size_min', 'net_pkt_size_max',
-            'net_flow_duration_sec', 'net_flow_bytes_per_sec', 'net_conn_freq', 'net_payload_entropy',
-            'mav_msg_id', 'mav_sys_id', 'mav_comp_id', 'mav_hb_type', 'mav_hb_autopilot', 'mav_hb_status',
-            'mav_gps_lat', 'mav_gps_lon', 'mav_gps_alt', 'mav_gps_rel_alt', 'mav_gps_vx', 'mav_gps_vy', 'mav_gps_vz', 'mav_gps_hdg',
-            'mav_att_roll', 'mav_att_pitch', 'mav_att_yaw', 'mav_att_rollspeed',
-            'mav_sys_voltage', 'mav_sys_current', 'mav_sys_load', 'mav_sys_errors',
-            'cont_cpu_usage_pct', 'cont_mem_usage_mb', 'cont_mem_limit_mb', 'cont_mem_pct',
-            'cont_net_rx_bytes', 'cont_net_tx_bytes', 'cont_disk_read_bytes', 'cont_disk_write_bytes',
-            'qos_latency_ms', 'qos_jitter_ms', 'qos_packet_loss_pct', 'qos_throughput_kbps',
-            'scan_detected', 'label', 'attack_in_progress'
+            "ts", "net_src_port", "net_dst_port", "net_pkt_len", "net_arp_opcode",
+            "mav_hb_type", "mav_hb_autopilot", "mav_hb_status",
+            "mav_gps_lat", "mav_gps_lon", "mav_gps_alt", "mav_gps_rel_alt",
+            "mav_gps_vx", "mav_gps_vy", "mav_gps_vz", "mav_gps_hdg",
+            "mav_att_roll", "mav_att_pitch", "mav_att_yaw", "mav_att_rollspeed",
+            "mav_sys_voltage", "mav_sys_current", "mav_sys_load", "mav_sys_errors",
+            "cont_cpu_usage_pct", "cont_mem_usage_mb", "cont_mem_limit_mb", "cont_mem_pct",
+            "cont_net_rx_bytes", "cont_net_tx_bytes", "cont_disk_read_bytes", "cont_disk_write_bytes", "cont_pids",
+            "qos_cpu_overall_pct", "qos_mem_pct", "qos_disk_read_bps", "qos_disk_write_bps",
+            "qos_net_sent_bps", "qos_net_recv_bps", "qos_ping_rtt_ms", "qos_ping_loss_pct"
         ]
         for col in numeric_cols:
             if col in features:
-                 try:
-                     # Attempt conversion to float, handle None or non-convertible values
-                     features[col] = float(features[col]) if features[col] is not None else None # Keep None for now, handle in fillna
-                 except (ValueError, TypeError):
-                     logger.warning(f"Could not convert feature '{col}' value '{features[col]}' to float. Setting to None.")
-                     features[col] = None # Set invalid conversions to None
+                try:
+                    features[col] = float(features[col]) if features[col] is not None else None
+                except (ValueError, TypeError):
+                    logger.warning(f"Could not convert '{col}' value '{features[col]}' to float. Set to None.")
+                    features[col] = None
 
         return features
 
-    def _post_process_dataframe(self, df):
-        """Applies post-processing steps like handling missing values and categorical data."""
+    # ----------------------------
+    # 후처리 (결측/범주 등)
+    # ----------------------------
+    def _post_process_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
         if df.empty:
             return df
 
         logger.info(f"Shape before post-processing: {df.shape}")
 
-        # --- Handle Missing Values (More Specific) ---
-        # Strategy: Fill counts, bytes, sizes, progress flags with 0. Fill ports with -1. Fill stats (avg, std, etc.) with 0 or mean/median.
-        fill_zeros = [col for col in df.columns if 'count' in col or 'bytes' in col or 'size' in col or '_id' in col or '_status' in col or '_type' in col or 'progress' in col or 'detected' in col]
-        fill_neg_one = [col for col in df.columns if 'port' in col]
-        # Fill remaining numeric NaNs (like stats, GPS, attitude, QoS metrics) with 0 for simplicity,
-        # but consider using df[col].mean() or df[col].median() for better results in training.
-        remaining_numeric = df.select_dtypes(include='number').columns.difference(['timestamp', 'label'] + fill_zeros + fill_neg_one)
+        # 레이블/공격명 기본값
+        if "label" in df.columns:
+            df["label"] = df["label"].fillna(0)
+        else:
+            df["label"] = 0
+        if "attack_name" in df.columns:
+            df["attack_name"] = df["attack_name"].fillna("normal")
+        else:
+            df["attack_name"] = "normal"
 
-        for col in fill_zeros:
-            if col in df.columns: df[col] = df[col].fillna(0)
-        for col in fill_neg_one:
-            if col in df.columns: df[col] = df[col].fillna(-1)
-        for col in remaining_numeric:
-             if col in df.columns:
-                 # Option 1: Fill with 0
-                 df[col] = df[col].fillna(0)
-                 # Option 2: Fill with mean (uncomment to use)
-                 # if pd.api.types.is_numeric_dtype(df[col]) and df[col].isnull().any():
-                 #     mean_val = df[col].mean()
-                 #     df[col] = df[col].fillna(mean_val)
-                 #     logger.debug(f"Filled NaNs in {col} with mean ({mean_val})")
+        # 채움 전략
+        fill_zeros = [
+            c for c in df.columns
+            if ("count" in c or "bytes" in c or c.endswith("_id") or c.endswith("_status")
+                or c.endswith("_type") or "progress" in c or "detected" in c or "opcode" in c or c.endswith("pids"))
+        ]
+        fill_neg_one = [c for c in df.columns if c.endswith("port")]
 
+        # 나머지 숫자형(통계/QoS/GPS 등)은 0으로
+        numeric_cols = df.select_dtypes(include="number").columns.tolist()
+        remaining_numeric = list(
+            set(numeric_cols).difference(set(["ts", "label"] + fill_zeros + fill_neg_one))
+        )
 
-        # --- Handle Categorical Features ---
-        # Example: One-hot encode protocol (limited cardinality)
-        if 'net_protocol' in df.columns:
-            logger.debug("Applying one-hot encoding to 'net_protocol'.")
-            try:
-                # fillna needed before get_dummies if protocol can be NaN
-                df['net_protocol'] = df['net_protocol'].fillna('unknown')
-                df = pd.get_dummies(df, columns=['net_protocol'], prefix='proto', dummy_na=False)
-            except Exception as e:
-                 logger.error(f"Failed to one-hot encode 'net_protocol': {e}")
+        for c in fill_zeros:
+            if c in df.columns:
+                df[c] = df[c].fillna(0)
+        for c in fill_neg_one:
+            if c in df.columns:
+                df[c] = df[c].fillna(-1)
+        for c in remaining_numeric:
+            if c in df.columns:
+                df[c] = df[c].fillna(0)
 
+        # 범주형 처리(원-핫, 과도한 cardinality 억제)
+        categorical_cols = [
+            "net_protocol", "mav_msg_name", "cont_name", "cont_status",
+            "docker_cont_name", "docker_event_status", "docker_health_status", "net_tcp_flags"
+        ]
+        for col in categorical_cols:
+            if col in df.columns:
+                df[col] = df[col].fillna("UNKNOWN")
+                try:
+                    top_categories = df[col].value_counts().nlargest(50).index
+                    df[col] = df[col].where(df[col].isin(top_categories), "OTHER")
+                    df = pd.get_dummies(df, columns=[col], prefix=col, dummy_na=False)
+                except Exception as e:
+                    logger.error(f"One-hot encoding failed for '{col}': {e}")
 
-        # Example: IP Addresses (High Cardinality - Consider other methods)
-        # One-hot encoding IPs is usually infeasible. Alternatives:
-        # 1. Frequency encoding
-        # 2. Target encoding (if labels are available)
-        # 3. Hashing trick
-        # 4. Embedding layers (in neural networks)
-        # 5. Extract features (e.g., is private IP, part of subnet) - Often preferred
-        ip_cols = [col for col in df.columns if '_ip' in col]
+        # IP 주소 열은 분석/학습 전에 제거 예정(경고만)
+        ip_cols = [c for c in df.columns if c.endswith("_ip")]
         if ip_cols:
-             logger.warning(f"IP address columns {ip_cols} found. Consider specialized encoding (e.g., feature extraction, hashing) instead of one-hot encoding for production models.")
-             # Example: Simple feature extraction - is private IP?
-             # def is_private(ip):
-             #     if not isinstance(ip, str): return 0
-             #     try:
-             #         parts = list(map(int, ip.split('.')))
-             #         return (parts[0] == 10 or
-             #                 (parts[0] == 172 and 16 <= parts[1] <= 31) or
-             #                 (parts[0] == 192 and parts[1] == 168))
-             #     except:
-             #         return 0
-             # for ip_col in ip_cols:
-             #      if ip_col in df.columns: df[f'{ip_col}_is_private'] = df[ip_col].apply(is_private)
-
-
-        # Example: MAVLink message names (Moderate cardinality)
-        if 'mav_msg_name' in df.columns:
-            logger.debug("Applying one-hot encoding to 'mav_msg_name'.")
-            try:
-                df['mav_msg_name'] = df['mav_msg_name'].fillna('UNKNOWN')
-                # Limit cardinality if too many unique messages appear
-                top_msg_names = df['mav_msg_name'].value_counts().nlargest(50).index # Keep top 50
-                df['mav_msg_name'] = df['mav_msg_name'].where(df['mav_msg_name'].isin(top_msg_names), 'OTHER')
-                df = pd.get_dummies(df, columns=['mav_msg_name'], prefix='mav_msg', dummy_na=False)
-            except Exception as e:
-                logger.error(f"Failed to one-hot encode 'mav_msg_name': {e}")
-
-
-        # Drop original categorical columns if they were encoded and no longer needed
-        # (pd.get_dummies usually handles this unless drop_first=False)
-        # Be careful not to drop timestamp or label here
-
-        # Ensure timestamp is suitable index if needed later (optional here)
-        # df = df.set_index('timestamp').sort_index()
+            logger.warning(f"IP address columns {ip_cols} found. They may be dropped in later stages.")
+            for c in ip_cols:
+                df[c] = df[c].fillna("UNKNOWN")
 
         logger.info(f"Shape after post-processing: {df.shape}")
-        logger.info(f"Final columns: {df.columns.tolist()}")
         return df
 
+    # ----------------------------
+    # 배치 처리
+    # ----------------------------
+    def process_logs_batch(self) -> Optional[pd.DataFrame]:
+        """
+        bus.log 전체를 일괄 처리하여 피처 CSV 생성.
+        attack_orchestrator의 attack_started/attack_stopped로 상태를 추적하여 레이블링.
+        """
+        extracted: list[Dict[str, Any]] = []
+        logger.info(f"Starting batch processing of: {self.bus_log_path}")
 
-    def process_logs_batch(self):
-        """Processes the entire bus log file in batch mode."""
-        extracted_data = []
-        logging.info(f"Starting batch processing of log file: {self.bus_log_path}")
+        current_attack_label = 0
+        current_attack_name = "normal"
+
         try:
-            with open(self.bus_log_path, 'r', encoding='utf-8', errors='ignore') as f:
+            with open(self.bus_log_path, "r", encoding="utf-8", errors="ignore") as f:
                 for i, line in enumerate(f):
                     log_entry = self.parse_log_entry(line)
-                    if log_entry:
-                        try:
-                            features = self.extract_features(log_entry)
-                            extracted_data.append(features)
-                        except Exception as e_feat:
-                            logger.error(f"Error extracting features from log entry {i+1}: {log_entry} - Error: {e_feat}", exc_info=True) # Log traceback
-                    # Optional: Add progress logging for large files
-                    # if (i + 1) % 10000 == 0:
-                    #     logger.info(f"Processed {i+1} log lines...")
+                    if not log_entry:
+                        continue
+
+                    source = log_entry.get("source")
+                    log_type = log_entry.get("type")
+                    if source == "attack_orchestrator":
+                        data = log_entry.get("data", {}) or {}
+                        attack_name = data.get("attack_name")
+
+                        if log_type == "attack_started" and attack_name:
+                            current_attack_label = self.event_mapping.get(attack_name, 0)
+                            current_attack_name = attack_name
+                            if current_attack_label == 0:
+                                logger.warning(f"Attack '{attack_name}' not in mapping. Label=0.")
+                            logger.info(
+                                f"Attack STATE CHANGE: '{attack_name}'(Label:{current_attack_label}) START @ {log_entry['timestamp_str']}"
+                            )
+                        elif log_type == "attack_stopped":
+                            stopped_name = attack_name or "unknown"
+                            logger.info(
+                                f"Attack STATE CHANGE: '{stopped_name}' STOP @ {log_entry['timestamp_str']}"
+                            )
+                            current_attack_label = 0
+                            current_attack_name = "normal"
+                        # 오케스트레이터 로그는 피처화하지 않음
+                        continue
+
+                    try:
+                        feats = self.extract_features(log_entry)
+                        if feats:
+                            feats["label"] = current_attack_label
+                            feats["attack_name"] = current_attack_name
+                            extracted.append(feats)
+                        # 진행 로그
+                        if (i + 1) % 50000 == 0:
+                            logger.info(f"Processed {i+1} lines... (state: {current_attack_name})")
+                    except Exception as e_feat:
+                        logger.error(
+                            f"Error extracting features at line {i+1}: {e_feat}",
+                            exc_info=True
+                        )
 
         except FileNotFoundError:
             logger.error(f"Log file not found: {self.bus_log_path}")
             return None
         except Exception as e:
-            logger.error(f"An error occurred during log file reading: {e}", exc_info=True)
+            logger.error(f"Error during log reading: {e}", exc_info=True)
             return None
 
-        if not extracted_data:
-            logger.warning("No data extracted from the log file.")
+        if not extracted:
+            logger.warning("No data extracted from log file.")
             return None
 
-        logging.info(f"Creating DataFrame from {len(extracted_data)} extracted records.")
-        df = pd.DataFrame(extracted_data)
-
-        # Apply post-processing
+        logger.info(f"Creating DataFrame from {len(extracted)} records.")
+        df = pd.DataFrame(extracted)
         df = self._post_process_dataframe(df)
 
         if df.empty:
-             logger.warning("DataFrame is empty after post-processing.")
-             return None
+            logger.warning("DataFrame is empty after post-processing.")
+            return None
 
-        # Save the processed data using DatasetManager
+        # 저장
         timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-        output_filename = f"features_batch_{timestamp_str}.csv"
+        out_name = f"features_batch_{timestamp_str}.csv"
         try:
-            self.dataset_manager.save_dataframe(df, output_filename)
-            logger.info(f"Saved processed batch data to {os.path.join(self.output_dir, output_filename)}")
+            self.dataset_manager.save_dataframe(df, out_name)
+            logger.info(f"Saved processed batch data to {os.path.join(self.output_dir, out_name)}")
         except Exception as e:
             logger.error(f"Failed to save processed data: {e}", exc_info=True)
 
         return df
 
-    # --- Streaming Implementation Example (using watchdog) ---
-    def _process_new_log_lines(self):
-        """Internal helper to process new lines since last check."""
-        new_features_list = []
-        try:
-            with open(self.bus_log_path, 'r', encoding='utf-8', errors='ignore') as f:
-                f.seek(self._last_file_position)
-                for line in f:
-                    log_entry = self.parse_log_entry(line)
-                    if log_entry:
-                        try:
-                             features = self.extract_features(log_entry)
-                             new_features_list.append(features)
-                        except Exception as e:
-                             logger.error(f"Streaming: Error extracting features: {e}", exc_info=True)
-                # Update position for next read
-                self._last_file_position = f.tell()
-        except FileNotFoundError:
-            logger.error(f"Streaming: Log file not found at {self.bus_log_path}")
-            # Reset position? Or wait for file creation?
-            self._last_file_position = 0
-            return None
-        except Exception as e:
-            logger.error(f"Streaming: Error reading log file: {e}")
-            return None # Indicate error
+    # ----------------------------
+    # 스트리밍(비활성)
+    # ----------------------------
+    def _process_new_log_lines(self) -> pd.DataFrame:
+        logger.warning("Streaming is handled by cti_agent.py, not DataBuilder.")
+        return pd.DataFrame()
 
-        if new_features_list:
-            logger.info(f"Streaming: Processed {len(new_features_list)} new log entries.")
-            df_new = pd.DataFrame(new_features_list)
-            # Apply post-processing (might need adjustments for streaming context)
-            df_processed = self._post_process_dataframe(df_new.copy()) # Process a copy
-
-            if not df_processed.empty:
-                # --- Actions for streaming data ---
-                # 1. Append to a larger file/database
-                # 2. Send to a prediction endpoint/model
-                # 3. Update internal state for time-window features (more complex)
-                # Example: Save incrementally (can be inefficient for many small updates)
-                ts_str = datetime.now().strftime("%Y%m%d_%H%M%S_%f") # Microseconds for uniqueness
-                out_file = f"features_stream_{ts_str}.csv"
-                try:
-                    self.dataset_manager.save_dataframe(df_processed, out_file)
-                    logger.debug(f"Saved streaming chunk: {out_file}")
-                except Exception as e:
-                     logger.error(f"Streaming: Failed to save data chunk: {e}")
-
-                # Return the processed chunk for potential immediate use
-                return df_processed
-            else:
-                 logger.debug("Streaming: New data chunk was empty after post-processing.")
-                 return pd.DataFrame() # Return empty DataFrame
-
-        return pd.DataFrame() # Return empty DataFrame if no new lines processed
+    def process_logs_streaming(self) -> None:
+        logger.error("Streaming mode is not supported here. Use 'batch' mode.")
 
 
-    def process_logs_streaming(self):
-        """
-        Monitors the log file for changes and processes new lines.
-        NOTE: Requires 'watchdog' library (`pip install watchdog`).
-        This is a basic example; robust streaming often uses message queues.
-        """
-        logger.info(f"Starting streaming processing for log file: {self.bus_log_path}")
-        logger.warning("Ensure 'watchdog' is installed (`pip install watchdog`) for streaming.")
+# (옵션) 파일 변경 이벤트 핸들러(현재 비활성)
+class LogFileHandler(FileSystemEventHandler):  # type: ignore
+    def __init__(self, data_builder_instance: DataBuilder):
+        self.builder = data_builder_instance
+        self.log_filename = os.path.basename(data_builder_instance.bus_log_path)
 
-        # Initial read of existing content
-        logger.info("Performing initial read of existing log content...")
-        self._last_file_position = 0 # Reset position for full initial read
-        initial_df = self._process_new_log_lines()
-        if initial_df is not None:
-             logger.info(f"Initial read processed {len(initial_df)} entries.")
-        else:
-             logger.warning("Initial read failed or produced no data.")
+    def on_modified(self, event):
+        pass
 
 
-        # Setup watchdog observer
-        event_handler = LogFileHandler(self)
-        observer = Observer()
-        # Observe the directory containing the log file
-        log_dir = os.path.dirname(self.bus_log_path)
-        observer.schedule(event_handler, log_dir, recursive=False)
-        observer.start()
-        logger.info(f"Watching for changes in {log_dir} (specifically monitoring {os.path.basename(self.bus_log_path)})...")
-
-        try:
-            while True:
-                # Keep the main thread alive, processing happens in the handler
-                time.sleep(1)
-        except KeyboardInterrupt:
-            logger.info("Stopping streaming observer.")
-            observer.stop()
-        except Exception as e:
-             logger.error(f"Streaming observer encountered an error: {e}", exc_info=True)
-             observer.stop()
-
-        observer.join()
-        logger.info("Streaming processing stopped.")
-
-
-class LogFileHandler(FileSystemEventHandler):
-     """Handles file system events for the bus log file."""
-     def __init__(self, data_builder_instance):
-         self.builder = data_builder_instance
-         self.log_filename = os.path.basename(data_builder_instance.bus_log_path)
-
-     def on_modified(self, event):
-         # Check if the modified file is the one we are monitoring
-         if not event.is_directory and os.path.basename(event.src_path) == self.log_filename:
-             logger.debug(f"Detected modification in {event.src_path}, processing new lines.")
-             # Trigger processing of new lines
-             processed_chunk = self.builder._process_new_log_lines()
-             if processed_chunk is not None and not processed_chunk.empty:
-                  # Placeholder: Trigger prediction or further action with processed_chunk
-                  logger.debug(f"Streaming: Trigger action with {len(processed_chunk)} new processed records.")
-                  pass
-
-
-# Example Usage
+# ----------------------------
+# 실행부
+# ----------------------------
 if __name__ == "__main__":
-    import argparse
-    parser = argparse.ArgumentParser(description="Build features from bus log.")
-    parser.add_argument("--mode", choices=['batch', 'stream'], default='batch', help="Processing mode: batch or stream.")
-    parser.add_argument("--log-file", default=DEFAULT_BUS_LOG_PATH, help="Path to the bus log file.")
-    parser.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR, help="Directory to save processed data.")
-    parser.add_argument("--mapping-file", default=DEFAULT_MAPPING_FILE, help="Path to event mapping JSON file.")
-    parser.add_argument("-v", "--verbose", action="store_true", help="Enable debug logging.")
-
+    parser = argparse.ArgumentParser(description="Build features from bus.log")
+    parser.add_argument("--mode", choices=["batch", "stream"], default="batch")
+    parser.add_argument("--log-file", default=DEFAULT_BUS_LOG_PATH)
+    parser.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR)
+    parser.add_argument("--mapping-file", default=DEFAULT_MAPPING_FILE)
+    parser.add_argument("-v", "--verbose", action="store_true")
     args = parser.parse_args()
 
-    # Set logging level
     if args.verbose:
         logger.setLevel(logging.DEBUG)
-        logging.getLogger().setLevel(logging.DEBUG) # Set root logger level too
+        logging.getLogger().setLevel(logging.DEBUG)
         logger.debug("Debug logging enabled.")
 
-    # Create necessary directories and dummy files if they don't exist for the example
     os.makedirs(args.output_dir, exist_ok=True)
-    if not os.path.exists(args.mapping_file):
-        dummy_mapping = {"gps-spoofing": 1, "communication-link-flooding": 2, "mavlink-injection-attack": 3}
-        try:
-            with open(args.mapping_file, 'w') as f:
-                json.dump(dummy_mapping, f, indent=4)
-            logger.info(f"Created dummy mapping file: {args.mapping_file}")
-        except IOError as e:
-            logger.error(f"Could not create dummy mapping file: {e}")
 
-    # Ensure log file exists, create if not (for testing)
-    if not os.path.exists(args.log_file):
-        logger.warning(f"Log file {args.log_file} not found. Creating empty file for testing.")
+    # event_mapping.json이 없으면 샘플 작성
+    if not os.path.exists(args.mapping_file):
+        dummy_mapping = {
+            "example_attack_1": 1,
+            "example_attack_2": 2,
+            "gps-spoofing": 3,
+            "communication-link-flooding": 4,
+            "mavlink-injection-attack": 5
+        }
         try:
-            open(args.log_file, 'a').close()
+            with open(args.mapping_file, "w", encoding="utf-8") as f:
+                json.dump(dummy_mapping, f, indent=4, ensure_ascii=False)
+            logger.info(f"Created dummy mapping: {args.mapping_file}")
+        except IOError as e:
+            logger.error(f"Could not create mapping file: {e}")
+
+    # bus.log이 없으면 빈 파일 생성(테스트 편의)
+    if not os.path.exists(args.log_file):
+        logger.warning(f"Log file {args.log_file} not found. Creating empty file.")
+        try:
+            os.makedirs(os.path.dirname(args.log_file), exist_ok=True)
+            open(args.log_file, "a").close()
         except IOError as e:
             logger.error(f"Could not create log file {args.log_file}: {e}")
-            # Exit if log file cannot be created/accessed
-            exit(1)
+            sys.exit(1)
 
+    builder = DataBuilder(
+        bus_log_path=args.log_file,
+        output_dir=args.output_dir,
+        mapping_file=args.mapping_file
+    )
 
-    # Initialize DataBuilder with paths from args
-    builder = DataBuilder(bus_log_path=args.log_file,
-                          output_dir=args.output_dir,
-                          mapping_file=args.mapping_file)
-
-    if args.mode == 'batch':
+    if args.mode == "batch":
         logger.info("Running in BATCH mode.")
-        processed_df = builder.process_logs_batch()
-        if processed_df is not None:
-            logger.info("Batch log processing complete.")
-            # Further steps like training can be initiated here
+        df_out = builder.process_logs_batch()
+        if df_out is not None:
+            logger.info("Batch processing complete.")
+            if "label" in df_out.columns:
+                logger.info("--- Label Distribution ---")
+                logger.info(df_out["label"].value_counts(normalize=True).sort_index())
+                logger.info("--------------------------")
+            else:
+                logger.error("'label' column not found in DataFrame.")
         else:
-            logger.error("Batch log processing failed.")
-
-    elif args.mode == 'stream':
-        logger.info("Running in STREAM mode (Example implementation).")
-        try:
-             builder.process_logs_streaming()
-        except ImportError:
-             logger.error("Failed to run in stream mode: 'watchdog' library not found. Please install it (`pip install watchdog`).")
-        except Exception as e:
-             logger.error(f"An error occurred during streaming: {e}", exc_info=True)
-
+            logger.error("Batch processing failed.")
+    else:
+        logger.error("Streaming mode is handled by cti_agent.py; use batch mode here.")

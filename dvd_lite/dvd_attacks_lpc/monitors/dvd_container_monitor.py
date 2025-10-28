@@ -16,7 +16,9 @@ logger = logging.getLogger("DVDContainerMonitor")
 script_dir = pathlib.Path(__file__).parent.resolve()
 bus_dir_name = os.environ.get('BUS_DIR', '../bus')
 bus_dir_path = (script_dir / bus_dir_name).resolve()
-BUS_LOG_FILENAME = 'bus_container_stats.log'
+
+# [수정] 모든 로그를 단일 'bus.log' 파일로 통합합니다.
+BUS_LOG_FILENAME = 'bus.log' 
 BUS_LOG_PATH = bus_dir_path / BUS_LOG_FILENAME
 # --- 경로 설정 끝 ---
 
@@ -231,7 +233,9 @@ def get_container_stats(container):
 def log_to_bus(message_type, data):
     """지정된 형식으로 메시지를 bus 로그 파일에 기록합니다."""
     log_entry = {
+        # [수정] DataBuilder와 CTI Agent가 'ts' 필드를 사용할 수 있도록 POSIX 타임스탬프 추가
         "timestamp": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
+        "ts": time.time(), 
         "source": "dvd_container_monitor",
         "type": message_type,
         "data": data
@@ -262,40 +266,47 @@ def monitor_containers(client):
 
             # 이름 기준으로 대상 컨테이너 필터링
             for container in containers:
-                 if container.name in CONTAINER_NAME_PATTERNS:
-                     target_containers.append(container)
+                if container.name in CONTAINER_NAME_PATTERNS:
+                    target_containers.append(container)
 
             logger.debug(f"확인 대상 컨테이너 {len(target_containers)}개 발견.")
 
             for container in target_containers:
-                 container_name = container.name
-                 logger.debug(f"Processing container: {container_name} ({container.short_id})")
+                container_name = container.name
+                logger.debug(f"Processing container: {container_name} ({container.short_id})")
 
-                 details = get_container_details(container)
-                 if details is None: # NotFound 등 상세 정보 가져오기 실패
-                      continue
-                 if details.get('status') == 'api_error': # API 오류 시 로그만 남기고 통계 시도 안 함
-                      logger.error(f"컨테이너 '{container_name}' 상세 정보 가져오기 실패 (API 오류): {details.get('error_message')}")
-                      all_containers_data[container_name] = details # 오류 정보 포함하여 기록
-                      continue
+                details = get_container_details(container)
+                if details is None: # NotFound 등 상세 정보 가져오기 실패
+                    continue
+                if details.get('status') == 'api_error': # API 오류 시 로그만 남기고 통계 시도 안 함
+                    logger.error(f"컨테이너 '{container_name}' 상세 정보 가져오기 실패 (API 오류): {details.get('error_message')}")
+                    all_containers_data[container_name] = details # 오류 정보 포함하여 기록
+                    continue
 
-                 # 실행 중인 컨테이너만 통계 수집
-                 if details.get('running'):
-                     stats = get_container_stats(container)
-                     if 'error_message' in stats:
-                         logger.warning(f"컨테이너 '{container_name}' 통계 수집 실패: {stats['error_message']}")
-                     # 통계 정보(오류 포함)를 상세 정보에 추가
-                     details['stats'] = stats
-                 else:
-                     details['stats'] = None # 실행 중 아닐 때는 stats=None
+                # 실행 중인 컨테이너만 통계 수집
+                if details.get('running'):
+                    stats = get_container_stats(container)
+                    if 'error_message' in stats:
+                        logger.warning(f"컨테이너 '{container_name}' 통계 수집 실패: {stats['error_message']}")
+                    # 통계 정보(오류 포함)를 상세 정보에 추가
+                    details['stats'] = stats
+                else:
+                    details['stats'] = None # 실행 중 아닐 때는 stats=None
 
-                 all_containers_data[container_name] = details
-                 monitored_count += 1
+                # [수정] 개별 컨테이너 데이터를 즉시 로깅 (DataBuilder가 개별 로그로 처리)
+                # all_containers_data[container_name] = details
+                
+                # 'container_stats_details' 타입을 사용하여 개별 컨테이너 로그 기록
+                log_to_bus("container_stats_details", details)
+                monitored_count += 1
 
-            # 로그 기록
-            if all_containers_data:
-                logger.info(f"총 {monitored_count}개 컨테이너 정보 수집 완료. 로깅...")
-                log_to_bus("container_stats_details", all_containers_data)
+            # [수정] 루프 종료 후 한꺼번에 로깅하는 로직 제거
+            # if all_containers_data:
+            #     logger.info(f"총 {monitored_count}개 컨테이너 정보 수집 완료. 로깅...")
+            #     log_to_bus("container_stats_details", all_containers_data)
+            
+            if monitored_count > 0:
+                logger.info(f"총 {monitored_count}개 컨테이너 정보 수집 및 로깅 완료.")
             else:
                 logger.info(f"모니터링 대상 컨테이너를 찾을 수 없습니다: {CONTAINER_NAME_PATTERNS}")
 

@@ -19,7 +19,11 @@ OUTPUT_DIR = os.path.join(ML_DIR, 'output')
 
 # --- Matplotlib 백엔드 설정 (GUI 없을 때 오류 방지) ---
 import matplotlib
-matplotlib.use('Agg') # 'Agg' 백엔드 사용
+try:
+    matplotlib.use('Agg') # 'Agg' 백엔드 사용
+except ImportError:
+    print("Matplotlib 'Agg' 백엔드를 설정할 수 없습니다. GUI 환경이 필요할 수 있습니다.")
+
 
 def plot_confusion_matrix(y_true, y_pred, labels, filepath):
     """Confusion Matrix를 시각화하고 파일로 저장합니다."""
@@ -27,7 +31,7 @@ def plot_confusion_matrix(y_true, y_pred, labels, filepath):
         cm = confusion_matrix(y_true, y_pred, labels=labels)
         cm_df = pd.DataFrame(cm, index=labels, columns=labels)
 
-        plt.figure(figsize=(max(8, len(labels)*0.8), max(6, len(labels)*0.6))) # 클래스 수에 따라 크기 조절
+        plt.figure(figsize=(max(10, len(labels)*0.5), max(8, len(labels)*0.4))) # 클래스 수에 따라 크기 조절
         sns.heatmap(cm_df, annot=True, fmt='d', cmap='Blues', linewidths=.5, linecolor='gray')
         plt.title('Confusion Matrix', fontsize=16)
         plt.xlabel('Predicted Label', fontsize=12)
@@ -42,7 +46,7 @@ def plot_confusion_matrix(y_true, y_pred, labels, filepath):
         print(f"❌ 오류: Confusion Matrix 생성 또는 저장 실패: {e}", file=sys.stderr)
 
 
-def plot_feature_importance(model, feature_names, filepath, top_n=20):
+def plot_feature_importance(model, feature_names, filepath, top_n=30):
     """Feature Importance를 시각화하고 파일로 저장합니다."""
     if not hasattr(model, 'feature_importances_'):
         print("[!] 정보: 이 모델은 Feature Importance를 제공하지 않습니다 (예: SVM).")
@@ -50,9 +54,12 @@ def plot_feature_importance(model, feature_names, filepath, top_n=20):
     try:
         importances = model.feature_importances_
         indices = np.argsort(importances)[::-1] # 중요도 순으로 정렬
+        
+        # [수정] top_n이 실제 피처 수보다 많으면 피처 수로 제한
+        top_n = min(top_n, len(feature_names))
         top_indices = indices[:top_n]
 
-        plt.figure(figsize=(10, max(5, top_n * 0.3))) # 특징 수에 따라 높이 조절
+        plt.figure(figsize=(12, max(6, top_n * 0.35))) # 특징 수에 따라 높이 조절
         plt.title(f'Top {top_n} Feature Importances', fontsize=16)
         plt.barh(range(len(top_indices)), importances[top_indices][::-1], color='skyblue', align='center') # 역순으로 플롯
         plt.yticks(range(len(top_indices)), [feature_names[i] for i in top_indices[::-1]]) # 역순으로 레이블
@@ -89,7 +96,7 @@ def main():
         print(f"[*] 테스트 데이터 로드 완료: {len(test_df)} 샘플")
     except FileNotFoundError as e:
         print(f"❌ 오류: 데이터 파일을 찾을 수 없습니다. '{e.filename}'")
-        print("       먼저 data_builder.py와 dataset_manager.py를 실행해야 합니다.")
+        print("     먼저 data_builder.py와 dataset_manager.py를 실행해야 합니다.")
         sys.exit(1)
     except Exception as e:
         print(f"❌ 오류: 데이터 로드 실패: {e}", file=sys.stderr)
@@ -156,7 +163,9 @@ def main():
     print("="*60)
     try:
         y_pred = model.predict(X_test)
-        class_labels = sorted(list(y_train.unique())) # 모든 레이블 포함 및 정렬
+        
+        # [수정] y_train과 y_test에 있는 모든 레이블을 포함
+        class_labels = sorted(list(np.unique(np.concatenate((y_train, y_test)))))
 
         accuracy = accuracy_score(y_test, y_pred)
         f1_macro = f1_score(y_test, y_pred, average='macro', zero_division=0)
@@ -176,7 +185,7 @@ def main():
         try:
              report_dict = classification_report(y_test, y_pred, labels=class_labels, zero_division=0, output_dict=True)
              with open(args.report_output, 'w') as f:
-                  json.dump(report_dict, f, indent=4)
+                 json.dump(report_dict, f, indent=4)
              print(f"[*] Classification Report 저장 완료: '{args.report_output}'")
         except Exception as report_save_err:
              print(f"❌ 오류: Classification Report 저장 실패 ({args.report_output}): {report_save_err}", file=sys.stderr)

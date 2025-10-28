@@ -1,20 +1,26 @@
+#!/usr/bin/env python3
 import time
 import json
 import os
 import logging
 import psutil # 시스템 리소스 사용량 측정을 위해 psutil 사용
-from datetime import datetime
+from datetime import datetime, timezone # [수정] timezone 추가
 import subprocess # ping 실행용
 import threading
 import platform # platform 모듈 import 추가
-from datetime import datetime, timezone # timezone 추가
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
+# [수정] BASE_DIR 정의
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
 # 환경 변수 또는 기본값 설정
-BUS_LOG_PATH = os.environ.get('BUS_LOG_PATH', './bus.log')
+# [수정] 모든 로그를 단일 '../bus/bus.log' 파일로 통합합니다.
+DEFAULT_BUS_LOG_PATH = os.path.abspath(os.path.join(BASE_DIR, '../bus/bus.log'))
+BUS_LOG_PATH = os.environ.get('BUS_LOG_PATH', DEFAULT_BUS_LOG_PATH) 
+
 MONITOR_INTERVAL = int(os.environ.get('QOS_MONITOR_INTERVAL', 5)) # 초 단위 모니터링 간격
 PING_TARGET = os.environ.get('QOS_PING_TARGET', '8.8.8.8') # 네트워크 지연 시간 측정을 위한 대상 IP
 PING_COUNT = int(os.environ.get('QOS_PING_COUNT', 3)) # ping 횟수
@@ -147,29 +153,29 @@ def get_network_latency(target=PING_TARGET, count=PING_COUNT, timeout=PING_TIMEO
         avg_rtt = None
         if result.returncode == 0 or loss_percent is not None and loss_percent < 100: # 성공 또는 부분 성공 시 RTT 파싱 시도
             if platform.system() == 'Windows':
-                 # 예: Minimum = 11ms, Maximum = 12ms, Average = 11ms
-                 for line in stdout.split('\n'):
-                     if 'Average =' in line:
-                         try:
-                             avg_rtt_str = line.split('Average =')[1].strip().split('ms')[0]
-                             avg_rtt = float(avg_rtt_str)
-                             result_data['avg_rtt_ms'] = avg_rtt
-                             break
-                         except (IndexError, ValueError) as e:
-                             logger.warning(f"Windows ping RTT 파싱 오류: {e} - line: {line}")
+                # 예: Minimum = 11ms, Maximum = 12ms, Average = 11ms
+                for line in stdout.split('\n'):
+                    if 'Average =' in line:
+                        try:
+                            avg_rtt_str = line.split('Average =')[1].strip().split('ms')[0]
+                            avg_rtt = float(avg_rtt_str)
+                            result_data['avg_rtt_ms'] = avg_rtt
+                            break
+                        except (IndexError, ValueError) as e:
+                            logger.warning(f"Windows ping RTT 파싱 오류: {e} - line: {line}")
             else: # Linux/macOS
                 # 예: rtt min/avg/max/mdev = 10.123/11.456/12.789/0.987 ms
                 # 예: round-trip min/avg/max/stddev = 10.123/11.456/12.789/0.987 ms
                 for line in stdout.split('\n'):
                     if 'rtt min/avg/max' in line or 'round-trip min/avg/max' in line:
-                         try:
-                             parts = line.split('=')[1].strip().split('/')
-                             if len(parts) >= 4:
+                        try:
+                            parts = line.split('=')[1].strip().split('/')
+                            if len(parts) >= 4:
                                 avg_rtt = float(parts[1]) # 평균값
                                 result_data['avg_rtt_ms'] = avg_rtt
                                 break
-                         except (IndexError, ValueError) as e:
-                             logger.warning(f"Linux/macOS ping RTT 파싱 오류: {e} - line: {line}")
+                        except (IndexError, ValueError) as e:
+                            logger.warning(f"Linux/macOS ping RTT 파싱 오류: {e} - line: {line}")
 
             if avg_rtt is None:
                 logger.warning(f"'{target}' ping 결과에서 평균 RTT 파싱 실패 (출력 확인 필요).")
@@ -226,13 +232,16 @@ def calculate_rates(current_stats, last_stats, time_diff):
 def log_to_bus(qos_data):
     """QoS 데이터를 bus 로그 파일에 기록합니다."""
     log_entry = {
-        # datetime.utcnow() -> datetime.now(timezone.utc)
+        # [수정] DataBuilder와 CTI Agent가 'ts' 필드를 사용할 수 있도록 POSIX 타임스탬프 추가
         "timestamp": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
+        "ts": time.time(),
         "source": "qos_monitor",
         "type": "system_qos",
         "data": qos_data
     }
     try:
+        # [수정] 로그 디렉토리 존재 확인
+        os.makedirs(os.path.dirname(BUS_LOG_PATH), exist_ok=True)
         with open(BUS_LOG_PATH, 'a') as f:
             f.write(json.dumps(log_entry) + '\n')
     except IOError as e:
@@ -243,6 +252,15 @@ def log_to_bus(qos_data):
 def main():
     """주기적으로 시스템 리소스 및 네트워크 품질(QoS)을 모니터링하고 로그를 기록합니다."""
     logger.info("QoS 모니터 시작.")
+    logger.info(f"Logging to: {BUS_LOG_PATH}") # [추가] 로그 경로 로깅
+    
+    # [추가] 로그 디렉토리 생성
+    try:
+        os.makedirs(os.path.dirname(BUS_LOG_PATH), exist_ok=True)
+    except Exception as dir_err:
+        logger.critical(f"로그 디렉토리 생성 실패 '{os.path.dirname(BUS_LOG_PATH)}': {dir_err}")
+        return
+
     last_resource_stats = None
     last_timestamp = time.time()
 
@@ -277,7 +295,7 @@ def main():
             logger.warning("시스템 리소스 정보를 가져오지 못했습니다. 일부 비율 계산이 부정확할 수 있습니다.")
             # 리소스 정보 없이 네트워크 품질만 로깅 (선택적)
             if network_quality:
-                 log_to_bus({'network_quality': network_quality, 'ping_target': PING_TARGET})
+                log_to_bus({'network_quality': network_quality, 'ping_target': PING_TARGET})
 
 
         # 다음 모니터링까지 대기 (종료 플래그 확인하며)
@@ -296,5 +314,3 @@ if __name__ == "__main__":
         terminate_flag.set()
     finally:
         logger.info("프로그램 종료 처리 완료.")
-
-

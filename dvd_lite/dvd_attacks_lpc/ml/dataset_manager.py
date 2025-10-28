@@ -1,128 +1,185 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+"""
+CTI Dataset Manager v4.2 (Stable)
+- processed_data의 최신 features_batch_*.csv 자동 탐색 (--input 미지정 시)
+- 무한대/NaN 안전 처리
+- bool/카테고리 컬럼 정리
+- 비숫자형은 자동 무시하고 '숫자형만' 학습 피처로 사용
+- 계층적(train/test) 분할 및 저장
+"""
+
 import os
+import sys
+import argparse
+import pathlib
+from typing import Optional
+
+import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
-import argparse
-import sys
-import numpy as np # numpy 임포트 추가
 
 # --- Path Configuration ---
 ML_DIR = os.path.dirname(os.path.realpath(__file__))
 PROJECT_ROOT = os.path.dirname(ML_DIR)
-OUTPUT_DIR = os.path.join(ML_DIR, 'output')
+
+PROCESSED_DATA_DIR = os.path.join(ML_DIR, "processed_data")
+OUTPUT_DIR = os.path.join(ML_DIR, "output")
+
+
+class DatasetManager:
+    """data_builder.py가 import 해서 쓰는 간단 저장기"""
+    def __init__(self, output_dir: str):
+        self.output_dir = output_dir
+        os.makedirs(self.output_dir, exist_ok=True)
+
+    def save_dataframe(self, df: pd.DataFrame, filename: str) -> None:
+        if not isinstance(df, pd.DataFrame):
+            print("❌ [DatasetManager Error] df가 DataFrame이 아닙니다.", file=sys.stderr)
+            return
+        try:
+            path = os.path.join(self.output_dir, filename)
+            df.to_csv(path, index=False)
+        except Exception as e:
+            print(f"❌ [DatasetManager Error] 저장 실패({filename}): {e}", file=sys.stderr)
+
+
+def find_latest_features_file(directory: str) -> Optional[str]:
+    """processed_data에서 최신 features_batch_*.csv 찾기"""
+    try:
+        d = pathlib.Path(directory)
+        if not d.is_dir():
+            print(f"❌ [오류] 디렉토리 없음: {directory}", file=sys.stderr)
+            return None
+        files = sorted(
+            (f for f in d.glob("features_batch_*.csv") if f.is_file()),
+            key=lambda f: f.stat().st_mtime,
+            reverse=True,
+        )
+        if not files:
+            print(f"❌ [오류] '{directory}'에 features_batch_*.csv 없음", file=sys.stderr)
+            return None
+        print(f"[*] 최신 특징 데이터 파일 발견: {files[0].name}")
+        return str(files[0])
+    except Exception as e:
+        print(f"❌ [오류] 최신 파일 검색 실패: {e}", file=sys.stderr)
+        return None
+
 
 def main():
-    parser = argparse.ArgumentParser(description="CTI Dataset Manager v4.1 (Stability Improved)")
-    parser.add_argument('--input', default=os.path.join(OUTPUT_DIR, 'cti_features_dataset.csv'), help="입력 데이터셋 CSV 파일 경로")
-    parser.add_argument('--test-size', type=float, default=0.2, help="테스트셋 비율 (0.0 ~ 1.0)")
-    parser.add_argument('--random-state', type=int, default=42, help="결과 재현을 위한 랜덤 시드")
+    parser = argparse.ArgumentParser(description="CTI Dataset Manager v4.2")
+    parser.add_argument("--input", default=None, help="입력 CSV 경로(미지정 시 processed_data 최신 파일 자동 사용)")
+    parser.add_argument("--test-size", type=float, default=0.2, help="테스트셋 비율 (0~1)")
+    parser.add_argument("--random-state", type=int, default=42, help="재현을 위한 시드")
     args = parser.parse_args()
 
-    print("🚀 [Dataset Manager v4.1] 데이터셋 분할 시작.")
+    print("🚀 [Dataset Manager v4.2] 데이터셋 분할 시작.")
 
-    if not os.path.exists(args.input):
-        print(f"❌ 오류: 입력 파일 '{args.input}'을(를) 찾을 수 없습니다.")
-        print("       먼저 data_builder.py를 실행하여 특징 데이터셋을 생성해야 합니다.")
+    input_path = args.input
+    if input_path is None:
+        print(f"[*] --input 미지정. '{PROCESSED_DATA_DIR}'에서 최신 파일 검색...")
+        input_path = find_latest_features_file(PROCESSED_DATA_DIR)
+
+    if input_path is None or not os.path.exists(input_path):
+        if input_path:
+            print(f"❌ 오류: 입력 파일 없음: {input_path}")
+        print("    먼저 data_builder.py로 특징 데이터셋을 생성하세요.")
         sys.exit(1)
 
-    # 1. 데이터셋 로드
+    # 1) 로드
     try:
-        df = pd.read_csv(args.input)
+        df = pd.read_csv(input_path)
         print(f"[*] 원본 데이터셋 로드 완료: {df.shape[0]} 샘플, {df.shape[1]} 특징")
     except Exception as e:
-        print(f"❌ 오류: 데이터셋 로드 실패 ({args.input}): {e}", file=sys.stderr)
+        print(f"❌ 오류: 로드 실패 ({input_path}): {e}", file=sys.stderr)
         sys.exit(1)
 
-    # 무한대 값 확인 및 처리 (RandomForest 등 일부 모델은 무한대 값 처리 못함)
-    if np.isinf(df.drop('label', axis=1, errors='ignore')).any().any():
-         print("[!] 경고: 데이터셋에 무한대(inf) 값이 포함되어 있습니다. 최대/최소값으로 대체합니다.")
-         df = df.replace([np.inf, -np.inf], np.nan) # inf를 NaN으로 변경
-         # 각 컬럼의 최대/최소값으로 NaN 채우기 (또는 0으로 채우기)
-         # 여기서는 간단히 0으로 채움 (fillna(0)으로 대체 가능)
-         print("    (무한대 값을 0으로 대체함)")
+    # 2) 라벨 확인
+    if "label" not in df.columns:
+        print("❌ 오류: 'label' 컬럼이 없습니다. data_builder 설정을 확인하세요.")
+        sys.exit(1)
 
+    # 3) 무한대/NaN 정리
+    #    - 우선 inf를 NaN으로 바꾸고, 후에 일괄 처리
+    if np.isinf(df.select_dtypes(include=np.number).values).any():
+        print("[!] 경고: 무한대 값 존재 → NaN으로 전환")
+        df.replace([np.inf, -np.inf], np.nan, inplace=True)
 
-    # NaN 값 확인 및 0으로 채우기 (안정성 강화)
-    if df.isnull().any().any():
-         nan_cols = df.columns[df.isnull().any()].tolist()
-         print(f"[!] 경고: 데이터셋에 NaN 값이 포함되어 있습니다 (컬럼: {nan_cols}). 0으로 대체합니다.")
-         df = df.fillna(0)
+    # 4) 불리언/카테고리 정리
+    #    - 불리언은 int(0/1)로 변환
+    bool_cols = df.select_dtypes(include=["bool"]).columns.tolist()
+    if bool_cols:
+        df[bool_cols] = df[bool_cols].astype("int64")
 
+    # 5) NaN 일괄 처리(라벨 제외 전체)
+    nan_cols = df.columns[df.isnull().any()].tolist()
+    if nan_cols:
+        print(f"[!] 경고: NaN 포함 컬럼: {nan_cols} → 0으로 대체")
+        df.fillna(0, inplace=True)
 
-    # 특징(X)과 레이블(y) 분리
-    if 'label' not in df.columns:
-         print("❌ 오류: 데이터셋에 'label' 컬럼이 없습니다.")
-         sys.exit(1)
+    # 6) X/y 분리
+    y = df["label"].astype("int64")
+    #    숫자형만 선택해서 X 구성(비숫자형은 자동 배제)
+    X = df.drop(columns=["label"], errors="ignore").select_dtypes(include=[np.number])
 
-    X = df.drop('label', axis=1)
-    y = df['label']
+    if X.empty:
+        print("❌ 오류: 숫자형 학습 피처가 없습니다. one-hot/전처리 파이프를 확인하세요.")
+        sys.exit(1)
 
-    # 레이블 종류 확인 (최소 2개 클래스 필요)
-    unique_labels = y.unique()
+    print(f"[*] 최종 학습 피처 수(숫자형만): {X.shape[1]}")
+
+    # 7) 레이블 유효성
+    unique_labels = sorted(y.unique().tolist())
     if len(unique_labels) < 2:
-        print(f"❌ 오류: 데이터셋에 고유 레이블이 하나({unique_labels[0]})만 존재합니다. 계층적 분할(stratify)을 수행할 수 없습니다.")
-        print("       정상 데이터와 최소 하나 이상의 공격 데이터가 포함되어야 합니다.")
+        print(f"❌ 오류: 고유 레이블이 1개({unique_labels})뿐입니다. stratify 분할 불가.")
+        print("    정상(0) + 최소 하나 이상 공격 라벨 필요.")
+        print("\n현재 레이블 분포:\n", y.value_counts())
         sys.exit(1)
     else:
-        print(f"[*] 발견된 고유 레이블 ({len(unique_labels)}개): {', '.join(map(str, unique_labels))}")
+        print(f"[*] 고유 레이블 {len(unique_labels)}종: {unique_labels}")
+        print("\n[*] 전체 레이블 분포(분할 전):")
+        print(y.value_counts(normalize=True).sort_index().apply(lambda x: f"{x:.4%}"))
 
-    # 모든 특징이 숫자인지 확인 및 변환 (오류 발생 시 0으로 대체)
-    try:
-        X = X.apply(pd.to_numeric, errors='coerce').fillna(0)
-    except Exception as e:
-         print(f"❌ 오류: 특징 데이터를 숫자로 변환하는 중 오류 발생: {e}", file=sys.stderr)
-         print("     data_builder.py 실행 결과를 확인해주세요.")
-         sys.exit(1)
-
-
-    # 2. 훈련/테스트 데이터 분할 (계층적 샘플링)
-    print(f"[*] 데이터를 훈련셋({1-args.test_size:.0%})과 테스트셋({args.test_size:.0%})으로 분할 중...")
+    # 8) 분할(계층적)
+    print(f"[*] 분할 진행: train {(1-args.test_size):.0%} / test {args.test_size:.0%}")
     try:
         X_train, X_test, y_train, y_test = train_test_split(
             X, y,
             test_size=args.test_size,
             random_state=args.random_state,
-            stratify=y # 중요: 클래스 비율을 유지하며 분할 (불균형 데이터 처리)
+            stratify=y
         )
     except ValueError as e:
-         if "The least populated class" in str(e):
-             print(f"❌ 오류: 계층적 분할 실패. 특정 클래스의 샘플 수가 너무 적습니다 (오류: {e}).")
-             print("     데이터를 더 많이 수집하거나 test_size를 조정해야 할 수 있습니다.")
-             label_counts = y.value_counts()
-             print("\n현재 레이블 분포:\n", label_counts)
-             minority_class = label_counts.idxmin()
-             minority_count = label_counts.min()
-             print(f"\n가장 적은 클래스 '{minority_class}'의 샘플 수: {minority_count}")
-             print(f"테스트셋 크기({args.test_size*100:.1f}%)를 유지하려면 최소 {int(np.ceil(1/args.test_size))}개 이상의 샘플이 필요합니다.")
-             # 비 계층적 분할 옵션 제공 (선택 사항)
-             # print("\n계층화 없이 분할을 시도하려면 stratify=None 옵션을 사용하세요 (권장되지 않음).")
-         else:
-             print(f"❌ 오류: 데이터 분할 중 예상치 못한 오류 발생: {e}", file=sys.stderr)
-         sys.exit(1)
+        if "The least populated class" in str(e):
+            print(f"❌ 오류: 계층분할 실패(소수 클래스 샘플 부족): {e}")
+            cnt = y.value_counts()
+            print("\n현재 레이블 분포:\n", cnt)
+            print(f"\n테스트 비율 {args.test_size*100:.1f}%면 각 클래스 최소 {int(np.floor(1/args.test_size))}개 이상 필요")
+        else:
+            print(f"❌ 오류: 데이터 분할 중 예외: {e}", file=sys.stderr)
+        sys.exit(1)
 
-
-    # 3. 분할된 데이터 저장
+    # 9) 저장
     os.makedirs(OUTPUT_DIR, exist_ok=True)
-    train_path = os.path.join(OUTPUT_DIR, 'train_dataset.csv')
-    test_path = os.path.join(OUTPUT_DIR, 'test_dataset.csv')
-
+    train_path = os.path.join(OUTPUT_DIR, "train_dataset.csv")
+    test_path  = os.path.join(OUTPUT_DIR, "test_dataset.csv")
     try:
         pd.concat([X_train, y_train], axis=1).to_csv(train_path, index=False)
-        pd.concat([X_test, y_test], axis=1).to_csv(test_path, index=False)
+        pd.concat([X_test,  y_test ], axis=1).to_csv(test_path,  index=False)
     except Exception as e:
-        print(f"❌ 오류: 분할된 데이터 저장 실패: {e}", file=sys.stderr)
+        print(f"❌ 오류: 저장 실패: {e}", file=sys.stderr)
         sys.exit(1)
 
     print("\n" + "="*60)
     print("✅ 데이터셋 분할 및 저장 완료!")
-    print(f"  - 훈련 데이터: {train_path} ({len(X_train)} 샘플)")
-    print(f"  - 테스트 데이터: {test_path} ({len(X_test)} 샘플)")
-    print("\n[훈련셋 레이블 분포]")
-    print(y_train.value_counts(normalize=True).apply(lambda x: f'{x:.2%}'))
-    print("\n[테스트셋 레이블 분포]")
-    print(y_test.value_counts(normalize=True).apply(lambda x: f'{x:.2%}'))
+    print(f"  - 훈련: {train_path} ({len(X_train)} 샘플)")
+    print(f"  - 테스트: {test_path} ({len(X_test)} 샘플)")
+    print("\n[훈련 레이블 분포]")
+    print(y_train.value_counts(normalize=True).sort_index().apply(lambda x: f"{x:.4%}"))
+    print("\n[테스트 레이블 분포]")
+    print(y_test.value_counts(normalize=True).sort_index().apply(lambda x: f"{x:.4%}"))
     print("="*60)
+
 
 if __name__ == "__main__":
     main()

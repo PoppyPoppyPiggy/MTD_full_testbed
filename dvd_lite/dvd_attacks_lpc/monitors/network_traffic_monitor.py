@@ -31,7 +31,9 @@ logger = logging.getLogger("NetworkTrafficMonitor")
 script_dir = pathlib.Path(__file__).parent.resolve()
 bus_dir_name = os.environ.get('BUS_DIR', '../bus')
 bus_dir_path = (script_dir / bus_dir_name).resolve()
-BUS_LOG_FILENAME = 'bus_network_monitor.log'
+
+# [수정] 모든 로그를 단일 'bus.log' 파일로 통합합니다.
+BUS_LOG_FILENAME = 'bus.log'
 BUS_LOG_PATH = bus_dir_path / BUS_LOG_FILENAME
 
 CAPTURE_INTERFACE = os.environ.get('NETWORK_CAPTURE_INTERFACE', 'br-simulator')
@@ -51,7 +53,9 @@ logging_thread = None
 # -----------------------------
 def log_to_bus(message_type, data):
     log_entry = {
+        # [수정] DataBuilder와 CTI Agent가 'ts' 필드를 사용할 수 있도록 POSIX 타임스탬프 추가
         "timestamp": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
+        "ts": time.time(),
         "source": "network_traffic_monitor",
         "type": message_type,
         "data": data
@@ -93,8 +97,14 @@ def log_packets_from_queue():
 
         if should_log:
             try:
-                log_to_bus("network_traffic", packet_batch)
-                logger.info(f"Logged {len(packet_batch)} packets to {BUS_LOG_PATH}.")
+                # [수정] DataBuilder가 개별 로그로 처리할 수 있도록 배치 로깅 대신 개별 로깅으로 변경
+                # log_to_bus("network_traffic_batch", packet_batch) # 기존 배치 로깅
+                
+                # [수정] 개별 패킷 로그를 "network_packet" 타입으로 기록
+                for pkt_details in packet_batch:
+                    log_to_bus("network_packet", pkt_details)
+
+                logger.info(f"Logged {len(packet_batch)} packets individually to {BUS_LOG_PATH}.")
             except Exception as log_err:
                 logger.error(f"Failed to log packet batch: {log_err}", exc_info=True)
             finally:
@@ -107,7 +117,9 @@ def log_packets_from_queue():
     if packet_batch:
         logger.info(f"Logging remaining {len(packet_batch)} packets before exit.")
         try:
-            log_to_bus("network_traffic", packet_batch)
+            # [수정] 남은 패킷도 개별 로깅
+            for pkt_details in packet_batch:
+                log_to_bus("network_packet", pkt_details)
         except Exception as final_log_err:
             logger.error(f"Failed to log final packet batch: {final_log_err}", exc_info=True)
 
@@ -117,9 +129,12 @@ def log_packets_from_queue():
 # 패킷 파싱
 # -----------------------------
 def extract_packet_details(packet):
+    # [수정] DataBuilder/CTI Agent가 사용할 'ts' 필드 추가
+    packet_sniff_time = float(getattr(packet, 'sniff_timestamp', time.time()))
+
     details = {
-        'capture_timestamp': datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
-        'timestamp': getattr(packet, 'sniff_timestamp', None),
+        'capture_timestamp': datetime.fromtimestamp(packet_sniff_time, timezone.utc).isoformat().replace('+00:00', 'Z'),
+        'ts': packet_sniff_time, # [추가] POSIX 타임스탬프
         'number': getattr(packet, 'number', None),
         'length': int(getattr(packet, 'length', 0) or 0),
         'highest_layer': getattr(packet, 'highest_layer', None),
