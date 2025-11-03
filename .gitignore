@@ -35,6 +35,7 @@ MANIFEST
 *.log
 logs/
 *.out
+*.csv
 
 # Environment
 .env
