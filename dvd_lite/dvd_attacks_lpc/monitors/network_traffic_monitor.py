@@ -31,9 +31,8 @@ logger = logging.getLogger("NetworkTrafficMonitor")
 script_dir = pathlib.Path(__file__).parent.resolve()
 bus_dir_name = os.environ.get('BUS_DIR', '../bus')
 bus_dir_path = (script_dir / bus_dir_name).resolve()
-
-# [수정] 모든 로그를 단일 'bus.log' 파일로 통합합니다.
-BUS_LOG_FILENAME = 'bus.log'
+# ⭐️ [수정] cti_agent.py가 읽는 'bus_network.log'로 파일명 변경
+BUS_LOG_FILENAME = 'bus_network.log'
 BUS_LOG_PATH = bus_dir_path / BUS_LOG_FILENAME
 
 CAPTURE_INTERFACE = os.environ.get('NETWORK_CAPTURE_INTERFACE', 'br-simulator')
@@ -52,10 +51,12 @@ logging_thread = None
 # Bus 로그 유틸
 # -----------------------------
 def log_to_bus(message_type, data):
+    current_time_dt = datetime.now(timezone.utc)
+    current_time_unix = current_time_dt.timestamp()
+
     log_entry = {
-        # [수정] DataBuilder와 CTI Agent가 'ts' 필드를 사용할 수 있도록 POSIX 타임스탬프 추가
-        "timestamp": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
-        "ts": time.time(),
+        "timestamp": current_time_dt.isoformat().replace('+00:00', 'Z'),
+        "ts": current_time_unix, # ⭐️ ML 에이전트가 사용할 Unix timestamp 추가
         "source": "network_traffic_monitor",
         "type": message_type,
         "data": data
@@ -97,14 +98,12 @@ def log_packets_from_queue():
 
         if should_log:
             try:
-                # [수정] DataBuilder가 개별 로그로 처리할 수 있도록 배치 로깅 대신 개별 로깅으로 변경
-                # log_to_bus("network_traffic_batch", packet_batch) # 기존 배치 로깅
-                
-                # [수정] 개별 패킷 로그를 "network_packet" 타입으로 기록
-                for pkt_details in packet_batch:
-                    log_to_bus("network_packet", pkt_details)
-
-                logger.info(f"Logged {len(packet_batch)} packets individually to {BUS_LOG_PATH}.")
+                # ⭐️ [수정] 로그 타입을 'network_packet'으로 변경 (cti_agent와 맞추기 위해)
+                #    (cti_agent는 data_builder 로직을 따르며, data_builder는 이 데이터를 처리하지 않았었음)
+                #    (cti_agent가 이 데이터를 처리하도록 수정하거나, 이 로그 타입을 cti_agent가 아는 타입으로 변경해야 함)
+                #    (일단은 'network_traffic_batch'로 로깅)
+                log_to_bus("network_traffic_batch", packet_batch)
+                logger.info(f"Logged {len(packet_batch)} packets to {BUS_LOG_PATH}.")
             except Exception as log_err:
                 logger.error(f"Failed to log packet batch: {log_err}", exc_info=True)
             finally:
@@ -117,129 +116,64 @@ def log_packets_from_queue():
     if packet_batch:
         logger.info(f"Logging remaining {len(packet_batch)} packets before exit.")
         try:
-            # [수정] 남은 패킷도 개별 로깅
-            for pkt_details in packet_batch:
-                log_to_bus("network_packet", pkt_details)
+            log_to_bus("network_traffic_batch", packet_batch)
         except Exception as final_log_err:
             logger.error(f"Failed to log final packet batch: {final_log_err}", exc_info=True)
 
     logger.info("Packet logging thread finished.")
 
 # -----------------------------
-# 패킷 파싱
+# 패킷 파싱 (⭐️ cti_agent.py 기대치에 맞게 수정)
 # -----------------------------
 def extract_packet_details(packet):
-    # [수정] DataBuilder/CTI Agent가 사용할 'ts' 필드 추가
-    packet_sniff_time = float(getattr(packet, 'sniff_timestamp', time.time()))
+    # ⭐️ ML 에이전트가 사용할 Unix timestamp 추가
+    try:
+        packet_timestamp = float(packet.sniff_timestamp)
+    except Exception:
+        packet_timestamp = time.time()
 
     details = {
-        'capture_timestamp': datetime.fromtimestamp(packet_sniff_time, timezone.utc).isoformat().replace('+00:00', 'Z'),
-        'ts': packet_sniff_time, # [추가] POSIX 타임스탬프
-        'number': getattr(packet, 'number', None),
+        'ts': packet_timestamp, # ⭐️ ts 필드 추가
+        'capture_timestamp': datetime.fromtimestamp(packet_timestamp, timezone.utc).isoformat().replace('+00:00', 'Z'),
         'length': int(getattr(packet, 'length', 0) or 0),
         'highest_layer': getattr(packet, 'highest_layer', None),
     }
 
-    # L2
-    if hasattr(packet, 'eth'):
-        details['eth_src'] = getattr(packet.eth, 'src', None)
-        details['eth_dst'] = getattr(packet.eth, 'dst', None)
-        details['eth_type'] = getattr(packet.eth, 'type', None)
+    # L2 (필요 시)
+    # if hasattr(packet, 'eth'):
+    #     details['eth_src'] = getattr(packet.eth, 'src', None)
+    #     details['eth_dst'] = getattr(packet.eth, 'dst', None)
 
     # L3
     if hasattr(packet, 'ip'):
-        details['ip_version'] = getattr(packet.ip, 'version', None)
         details['ip_src'] = getattr(packet.ip, 'src', None)
         details['ip_dst'] = getattr(packet.ip, 'dst', None)
-        details['ip_proto'] = getattr(packet.ip, 'proto', None)
-        details['ip_ttl'] = getattr(packet.ip, 'ttl', None)
-        details['ip_len'] = getattr(packet.ip, 'len', None)
     elif hasattr(packet, 'ipv6'):
-        details['ip_version'] = 6
-        details['ipv6_src'] = getattr(packet.ipv6, 'src', None)
-        details['ipv6_dst'] = getattr(packet.ipv6, 'dst', None)
-        details['ipv6_nxt'] = getattr(packet.ipv6, 'nxt', None)
-        details['ipv6_hlim'] = getattr(packet.ipv6, 'hlim', None)
-        details['ipv6_plen'] = getattr(packet.ipv6, 'plen', None)
+        details['ip_src'] = getattr(packet.ipv6, 'src', None)
+        details['ip_dst'] = getattr(packet.ipv6, 'dst', None)
 
     # L4 / 기타
     if hasattr(packet, 'tcp'):
         t = packet.tcp
-        details['transport_protocol'] = 'TCP'
-        details['tcp_srcport'] = int(getattr(t, 'srcport', 0) or 0)
-        details['tcp_dstport'] = int(getattr(t, 'dstport', 0) or 0)
-        details['tcp_seq'] = getattr(t, 'seq', None)
-        details['tcp_ack'] = getattr(t, 'ack', None)
-        details['tcp_flags'] = str(getattr(t, 'flags', ''))
-        details['tcp_window_size'] = getattr(t, 'window_size', None)
-        details['tcp_payload_len'] = None
-        payload_hex = getattr(t, 'payload', None)
-        if payload_hex:
-            try:
-                payload_bytes = binascii.unhexlify(payload_hex.replace(':', ''))
-                details['tcp_payload_len'] = len(payload_bytes)
-            except binascii.Error as e:
-                logger.warning(f"Pkt {details.get('number', 'N/A')} TCP payload hex error: {e}. start={payload_hex[:30]}...")
-            except Exception as e:
-                logger.error(f"Pkt {details.get('number', 'N/A')} TCP payload unexpected error: {e}")
+        details['protocol'] = 'TCP'
+        details['src_port'] = int(getattr(t, 'srcport', 0) or 0)
+        details['dst_port'] = int(getattr(t, 'dstport', 0) or 0)
+        details['tcp_flags'] = str(getattr(t, 'flags', '')) # ⭐️ cti_agent가 사용할 'tcp_flags'
 
     elif hasattr(packet, 'udp'):
         u = packet.udp
-        details['transport_protocol'] = 'UDP'
-        details['udp_srcport'] = int(getattr(u, 'srcport', 0) or 0)
-        details['udp_dstport'] = int(getattr(u, 'dstport', 0) or 0)
-        details['udp_length'] = int(getattr(u, 'length', 0) or 0)
-        details['udp_payload_len'] = None
-        payload_hex = getattr(u, 'payload', None)
-        if payload_hex:
-            try:
-                payload_bytes = binascii.unhexlify(payload_hex.replace(':', ''))
-                details['udp_payload_len'] = len(payload_bytes)
-                if details['udp_length'] > 8 and details['udp_length'] - 8 != details['udp_payload_len']:
-                    logger.debug(
-                        f"Pkt {details.get('number','N/A')} UDP len mismatch: header={details['udp_length']}, "
-                        f"calc payload={details['udp_payload_len']}"
-                    )
-            except binascii.Error as e:
-                logger.warning(f"Pkt {details.get('number', 'N/A')} UDP payload hex error: {e}. start={payload_hex[:30]}...")
-            except Exception as e:
-                logger.error(f"Pkt {details.get('number', 'N/A')} UDP payload unexpected error: {e}")
-        elif details['udp_length'] > 8:
-            details['udp_payload_len'] = details['udp_length'] - 8
-        elif details['udp_length'] == 8:
-            details['udp_payload_len'] = 0
+        details['protocol'] = 'UDP'
+        details['src_port'] = int(getattr(u, 'srcport', 0) or 0)
+        details['dst_port'] = int(getattr(u, 'dstport', 0) or 0)
 
     elif hasattr(packet, 'icmp'):
-        i = packet.icmp
-        details['transport_protocol'] = 'ICMP'
-        details['icmp_type'] = getattr(i, 'type', None)
-        details['icmp_code'] = getattr(i, 'code', None)
-        if hasattr(i, 'seq'): details['icmp_seq'] = i.seq
-        if hasattr(i, 'id'): details['icmp_id'] = i.id
+        details['protocol'] = 'ICMP'
+        # ... (ICMP 상세 정보는 cti_agent.py가 현재 사용하지 않음)
 
     elif hasattr(packet, 'arp'):
         details['protocol'] = 'ARP'
         a = packet.arp
-        details['arp_opcode'] = getattr(a, 'opcode', None)
-        details['arp_src_hw_mac'] = getattr(a, 'src_hw_mac', None)
-        details['arp_src_proto_ipv4'] = getattr(a, 'src_proto_ipv4', None)
-        details['arp_dst_hw_mac'] = getattr(a, 'dst_hw_mac', None)
-        details['arp_dst_proto_ipv4'] = getattr(a, 'dst_proto_ipv4', None)
-
-    # DNS
-    if hasattr(packet, 'dns'):
-        d = packet.dns
-        details['dns_id'] = getattr(d, 'id', None)
-        if hasattr(d, 'flags'):
-            details['dns_flags_qr'] = getattr(d.flags, 'qr', None)
-            details['dns_flags_opcode'] = getattr(d.flags, 'opcode', None)
-        details['dns_qry_name'] = getattr(d, 'qry_name', None)
-        details['dns_qry_type'] = getattr(d, 'qry_type', None)
-        details['dns_resp_name'] = getattr(d, 'resp_name', None)
-        details['dns_resp_type'] = getattr(d, 'resp_type', None)
-        details['dns_resp_ttl'] = getattr(d, 'resp_ttl', None)
-        details['dns_resp_addr'] = getattr(d, 'a', None)
-        details['dns_resp_addr6'] = getattr(d, 'aaaa', None)
+        details['arp_op'] = getattr(a, 'opcode', None) # ⭐️ cti_agent가 사용할 'arp_op'
 
     return details
 
@@ -252,7 +186,20 @@ def packet_capture_callback(packet):
             return
         packet_details = extract_packet_details(packet)
         try:
-            packet_queue.put_nowait(packet_details)
+            # ⭐️ [수정] 큐에 넣을 때 개별 패킷을 분리된 로그 항목으로 처리
+            # (cti_agent는 개별 로그 항목을 기대함)
+            # log_to_bus 함수를 직접 호출하거나, 로깅 스레드 로직 변경 필요
+            # ⭐️ 여기서는 큐에 넣고 로깅 스레드가 *배치*로 기록하도록 유지
+            #    (cti_agent.py가 이 'network_traffic_batch' 타입을 처리하도록 수정이 필요함)
+            #    (임시방편: cti_agent.py가 처리할 수 있도록 개별 로그로 바로 기록)
+            
+            # ⭐️ [수정안] 큐를 사용하지 않고 바로 bus에 기록 (부하 증가 가능성 있음)
+            # ⭐️ cti_agent.py는 'data' 필드 안에 개별 패킷 정보가 있을 것으로 기대
+            log_to_bus("network_packet", packet_details) 
+
+            # [기존 로직: 큐 사용]
+            # packet_queue.put_nowait(packet_details) 
+            
         except queue.Full:
             logger.warning("Packet queue full. Dropping packet. Consider increasing buffer/interval.")
     except AttributeError as e:
@@ -316,7 +263,7 @@ def start_capture():
     logger.info(f"Starting network capture on interface: {effective_interface}")
     if BPF_FILTER:
         logger.info(f"Using BPF filter: {BPF_FILTER}")
-    logger.info(f"Packet buffer: {PACKET_BUFFER_SIZE}, Log interval: {LOGGING_INTERVAL}s")
+    # logger.info(f"Packet buffer: {PACKET_BUFFER_SIZE}, Log interval: {LOGGING_INTERVAL}s") # ⭐️ 큐 방식 대신 직접 로깅
     logger.info(f"Logging to: {BUS_LOG_PATH}")
 
     try:
@@ -326,11 +273,12 @@ def start_capture():
         logger.critical(f"Failed to create bus log directory '{bus_dir_path}': {dir_err}. Exiting.")
         return
 
-    if logging_thread is None or not logging_thread.is_alive():
-        logging_thread = threading.Thread(target=log_packets_from_queue, daemon=True)
-        logging_thread.start()
-    else:
-        logger.warning("Logging thread is already running.")
+    # ⭐️ [수정] 큐/로깅 스레드 방식 대신, 콜백에서 직접 로깅하므로 스레드 시작 부분 주석 처리
+    # if logging_thread is None or not logging_thread.is_alive():
+    #     logging_thread = threading.Thread(target=log_packets_from_queue, daemon=True)
+    #     logging_thread.start()
+    # else:
+    #     logger.warning("Logging thread is already running.")
 
     capture = None
     try:
@@ -348,13 +296,16 @@ def start_capture():
 
         logger.info("LiveCapture initialized. Starting sniffing loop...")
 
-        # 제너레이터 직접 순회
-        for pkt in capture.sniff_continuously():  # 무한
-            if stop_event.is_set():
-                break
-            packet_capture_callback(pkt)
-
-        logger.info("Packet sniffing loop terminated.")
+        # ⭐️ [수정] 콜백 함수를 apply_on_packets에 전달
+        # (sniff_continuously는 패킷을 반환받아 메인 스레드에서 처리하는 방식)
+        logger.info("Using 'apply_on_packets' for background capture callback...")
+        capture.apply_on_packets(packet_capture_callback, timeout=None) # timeout=None은 무한 대기
+        
+        # ⭐️ apply_on_packets가 백그라운드 스레드에서 실행되므로, 메인 스레드는 종료 신호를 대기해야 함
+        while not stop_event.is_set():
+            stop_event.wait(1.0) # 1초 간격으로 종료 신호 확인
+            
+        logger.info("Packet sniffing loop terminated by stop event.")
 
     except (PermissionError, OSError) as perm_err:
         logger.critical(
@@ -385,15 +336,16 @@ def stop_capture(capture):
         except Exception as close_err:
             logger.error(f"Error closing pyshark capture: {close_err}")
 
-    if logging_thread and logging_thread.is_alive():
-        logger.info("Waiting for logging thread to finish...")
-        logging_thread.join(timeout=LOGGING_INTERVAL + 2)
-        if logging_thread.is_alive():
-            logger.warning("Logging thread did not exit gracefully.")
-        else:
-            logger.info("Logging thread finished.")
-    else:
-        logger.info("Logging thread was not running or already finished.")
+    # ⭐️ [수정] 로깅 스레드 관련 부분 주석 처리
+    # if logging_thread and logging_thread.is_alive():
+    #     logger.info("Waiting for logging thread to finish...")
+    #     logging_thread.join(timeout=LOGGING_INTERVAL + 2)
+    #     if logging_thread.is_alive():
+    #         logger.warning("Logging thread did not exit gracefully.")
+    #     else:
+    #         logger.info("Logging thread finished.")
+    # else:
+    #     logger.info("Logging thread was not running or already finished.")
 
     logger.info("Network Traffic Monitor stopped.")
 

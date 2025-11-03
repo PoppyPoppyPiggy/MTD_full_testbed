@@ -1,6 +1,0 @@
-{
-  "IP_SUBNET": "10.0.1.",
-  "IP_RANGE": [10, 41],
-  "COMMON_PORTS": [22, 80, 443, 8080],
-  "INITIAL_ASSETS": 3
-}

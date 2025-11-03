@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 # 파일명: run_monitors.py
 # 설명: 여러 모니터 스크립트를 병렬로 실행하고 관리합니다. (PYTHONPATH 설정 추가)
+# ⭐️ 참고: 이 파일은 수정하지 않았지만, 수정된 모니터 스크립트들을 실행하는 역할을 합니다.
 
 import subprocess
 import signal
@@ -195,4 +196,3 @@ if __name__ == "__main__":
              terminate_all_monitors("final_cleanup")
 
     print("--- 다중 모니터 실행 관리자 종료 ---")
-

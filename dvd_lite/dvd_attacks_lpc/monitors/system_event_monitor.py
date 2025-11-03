@@ -16,9 +16,8 @@ logger = logging.getLogger("DockerEventMonitor")
 script_dir = pathlib.Path(__file__).parent.resolve()
 bus_dir_name = os.environ.get('BUS_DIR', '../bus')
 bus_dir_path = (script_dir / bus_dir_name).resolve()
-
-# [수정] 모든 로그를 단일 'bus.log' 파일로 통합합니다.
-BUS_LOG_FILENAME = 'bus.log'
+# ⭐️ [수정] cti_agent.py가 읽는 'bus_system_events.log'로 파일명 변경
+BUS_LOG_FILENAME = 'bus_system_events.log'
 BUS_LOG_PATH = bus_dir_path / BUS_LOG_FILENAME
 # --- 경로 설정 끝 ---
 
@@ -41,11 +40,13 @@ def log_to_bus(event_data):
     if not event_data:
         return
 
+    current_time_dt = datetime.now(timezone.utc)
+    current_time_unix = current_time_dt.timestamp()
+
     # event_data는 이미 dict 형태
     log_entry = {
-        # [수정] DataBuilder와 CTI Agent가 'ts' 필드를 사용할 수 있도록 POSIX 타임스탬프 추가
-        "timestamp": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
-        "ts": time.time(),
+        "timestamp": current_time_dt.isoformat().replace('+00:00', 'Z'),
+        "ts": current_time_unix, # ⭐️ ML 에이전트가 사용할 Unix timestamp 추가
         "source": "docker_event_monitor",
         "type": "docker_event",
         "data": event_data # 이벤트 데이터 직접 사용

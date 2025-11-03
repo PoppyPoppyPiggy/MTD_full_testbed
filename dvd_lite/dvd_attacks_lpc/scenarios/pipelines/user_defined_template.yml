@@ -1,8 +1,0 @@
-scenario_id: "user-freeform"
-stages:
-  - mode: seq
-    steps:
-      - { type: wait, seconds: 1 }
-      - { type: attack, module: "wifi_slow_scan", level: "med", duration_s: 5, params: { iface: "wlan0mon" } }
-      - { type: mtd, action: "mtd_port_shuffle" }
-      - { type: probe, kind: "dvd_status" }
