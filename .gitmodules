@@ -12,3 +12,6 @@
 [submodule "dvd_lite/dvd_attacks_lpc/mavlink"]
 	path = dvd_lite/dvd_attacks_lpc/mavlink
 	url = https://github.com/mavlink/mavlink.git
+[submodule "dvd_lite/dvd_attacks_lpc/rl"]
+	path = dvd_lite/dvd_attacks_lpc/rl
+	url = https://github.com/PoppyPoppyPiggy/MTD_RL
