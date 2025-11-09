@@ -1,71 +1,95 @@
-#!/bin/bash
-#
-# start_monitors_root.sh (v2 - Root & VEnv)
-#
-# [중요] 이 스크립트는 반드시 'sudo'로 실행해야 합니다. (e.g., sudo ./start_monitors_root.sh)
-# 1. 루트 권한인지 확인합니다.
-# 2. Python 가상 환경(mtd_env)을 활성화합니다.
-# 3. 'monitors/' 디렉토리의 모든 스크립트를 백그라운드로 실행합니다.
-#
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+import os, sys, time, signal, subprocess, argparse
+from datetime import datetime
+from pathlib import Path
 
-# --- 1. 루트 권한 확인 ---
-if [[ $EUID -ne 0 ]]; then
-   echo "❌ [오류] 이 스크립트는 반드시 루트 권한(sudo)으로 실행해야 합니다." 
-   echo "   (e.g., sudo ./start_monitors_root.sh)"
-   exit 1
-fi
+MON_DIR = Path(__file__).parent.resolve()
+LOG_DIR = MON_DIR / "logs" / datetime.now().strftime("%Y%m%d_%H%M%S")
+LOG_DIR.mkdir(parents=True, exist_ok=True)
 
-# --- 2. 환경 변수 설정 ---
-# 스크립트가 실행되는 현재 디렉토리 (dvd_lite/dvd_attacks_lpc)
-BASE_DIR=$(pwd)
-# 활성화할 가상 환경 경로 (사용자 로그 기준)
-VENV_PATH="$BASE_DIR/mtd_env/bin/activate"
+# 필요에 따라 인자/환경변수 넘겨주고 싶으면 아래에서 조정
+def build_scripts():
+    scripts = [
+        ("dvd_container_monitor.py", []),
+        ("network_traffic_monitor.py",  (["--iface", os.environ["NET_IFACE"]] if os.environ.get("NET_IFACE") else [])),
+        ("dvd_telemetry_monitor.py", []),
+        ("qos_monitor.py", []),
+        ("system_event_monitor.py", []),
+    ]
+    # 파일이 실제 존재하는 것만 실행 대상에 포함
+    return [(n, a) for (n, a) in scripts if (MON_DIR / n).exists()]
 
-MONITOR_DIR="monitors"
-LOG_DIR="logs/monitors"
+def start_proc(name, args):
+    out = open(LOG_DIR / f"{name}.out.log", "a", buffering=1)
+    err = open(LOG_DIR / f"{name}.err.log", "a", buffering=1)
+    cmd = [sys.executable, str(MON_DIR / name)] + args
+    env = os.environ.copy()
+    p = subprocess.Popen(cmd, cwd=str(MON_DIR), stdout=out, stderr=err, env=env)
+    (LOG_DIR / f"{name}.pid").write_text(str(p.pid))
+    print(f"[run] {name} (pid={p.pid})  args={args}")
+    return p, out, err
 
-# --- 3. 가상 환경 활성화 ---
-if [ ! -f "$VENV_PATH" ]; then
-    echo "❌ [오류] Python 가상 환경을 찾을 수 없습니다: $VENV_PATH"
-    exit 1
-fi
-echo "[*] Python 가상 환경($VENV_PATH)을 활성화합니다..."
-source "$VENV_PATH"
+def kill_proc(p, name, timeout=5):
+    if p.poll() is None:
+        p.terminate()
+        try:
+            p.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            print(f"[force-kill] {name} (pid={p.pid})")
+            p.kill()
 
-# 4. 로그 디렉토리 생성
-mkdir -p $LOG_DIR
-echo "[*] 모니터 로그는 $LOG_DIR 디렉토리에 저장됩니다."
+def main():
+    parser = argparse.ArgumentParser(description="Run all monitors concurrently")
+    parser.add_argument("--no-restart", action="store_true", help="프로세스 종료 시 재시작하지 않음")
+    parser.add_argument("--sleep", type=float, default=2.0, help="헬스체크 주기(초)")
+    args = parser.parse_args()
 
-# 5. 실행할 모니터 목록 (ls 결과 기준)
-MONITORS=(
-    "container_monitor.py"
-    "dvd_monitor.py"
-    "dvd_telemetry_monitor.py"
-    "network_traffic_monitor.py"
-    "qos_monitor.py"
-    "system_event_monitor.py"
-)
+    targets = build_scripts()
+    if not targets:
+        print("실행할 모니터 스크립트를 찾지 못했습니다.")
+        sys.exit(1)
 
-# 6. 이전 모니터 프로세스 종료
-echo "[*] 이전 모니터 프로세스를 종료합니다..."
-# pkill -f 를 사용해야 'python3 monitors/...' 경로 전체로 정확히 종료 가능
-pkill -f "python3 $MONITOR_DIR/"
-sleep 1
+    procs = {}  # name -> (Popen, out_f, err_f)
+    stopping = False
 
-# 7. 모든 모니터를 백그라운드에서 실행
-echo "[*] 모든 모니터를 시작합니다..."
-for monitor in "${MONITORS[@]}"; do
-    log_name=$(basename "$monitor" .py)
-    
-    # [중요] python3가 아닌 'python'을 사용할 경우, venv의 python을 사용하도록 수정
-    # (일반적으로 venv 활성화 시 'python3'는 venv의 것을 가리킴)
-    python3 "$MONITOR_DIR/$monitor" > "$LOG_DIR/$log_name.log" 2>&1 &
-    
-    echo "  -> [PID $!] $monitor 시작됨."
-done
+    def handle_sig(sig, frame):
+        nonlocal stopping
+        if not stopping:
+            print("\n[shutdown] stopping all monitors...")
+            stopping = True
 
-echo "------------------------------------------------"
-echo "✅ 모든 모니터가 루트 권한으로 백그라운드에서 실행 중입니다."
-echo "   - 실행 확인: 'pgrep -lf monitors'"
-echo "   - 실시간 로그 확인 (권장): 'tail -f $LOG_DIR/network_traffic_monitor.log'"
-echo "   - 전체 종료: 'sudo ./stop_monitors_root.sh' 실행"
+    signal.signal(signal.SIGINT, handle_sig)
+    signal.signal(signal.SIGTERM, handle_sig)
+
+    # 최초 기동
+    for name, a in targets:
+        procs[name] = start_proc(name, a)
+
+    # 감시 루프
+    while not stopping:
+        time.sleep(args.sleep)
+        for name in list(procs.keys()):
+            p, out_f, err_f = procs[name]
+            rc = p.poll()
+            if rc is not None:
+                out_f.flush(); err_f.flush()
+                out_f.close(); err_f.close()
+                print(f"[exit] {name} rc={rc}")
+                if args.no_restart:
+                    del procs[name]
+                else:
+                    # 재시작
+                    procs[name] = start_proc(name, dict(targets)[name])
+
+        if not procs:  # 모두 종료된 경우
+            break
+
+    # 종료 시그널 수신 → 모두 정리
+    for name, (p, out_f, err_f) in procs.items():
+        kill_proc(p, name)
+        out_f.close(); err_f.close()
+    print("[done] all monitors stopped.")
+
+if __name__ == "__main__":
+    main()
