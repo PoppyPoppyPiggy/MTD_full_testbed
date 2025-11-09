@@ -9,3 +9,6 @@
     path = ardupilot
     url = https://github.com/ArduPilot/ardupilot.git
     ignore = dirty
+[submodule "dvd_lite/dvd_attacks_lpc/mavlink"]
+	path = dvd_lite/dvd_attacks_lpc/mavlink
+	url = https://github.com/mavlink/mavlink.git
