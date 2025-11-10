@@ -1,30 +1,35 @@
-# 모드 선택:
-# - nodeport: 외부 → 호스트:PUBLIC_PORT → DNAT으로 백엔드 IP:PORT로 분배
-# - flatlan : 도커 브리지 내부(IP 직접 접근) 트래픽을 DNAT/REDIRECT
+# MTD 작동 모드 (iptables_mtd_controller.py가 참조)
 mode: nodeport
-
 protocol: udp
-public_port: 14550             # nodeport 모드에서 호스트가 노출하는 포트
-bridge_if: br-mtdxxx           # flatlan 모드면 도커 브리지 인터페이스명 지정
+public_port: 14550                # 호스트가 노출하는 포트
+bridge_if: br-mtdxxx                # (flatlan 모드일 경우)
 
-# 실서비스(백엔드) 후보 IP:PORT (도커 네트워크 상 컨테이너 IP)
+# --- [중요] RL Action Space (행동 공간) 정의 ---
+# 4개의 실제 서비스 + 1개의 디코이
+
+# 실제 서비스(백엔드) 후보 IP:PORT (도커 컨테이너 IP)
+# (Action 0)
 real_targets:
-  - "10.13.0.2:14550"
-  - "10.13.0.3:14550"
-  - "10.13.0.4:14550"
-  - "10.13.0.5:14550"
+  - "10.13.0.2:14550" 
+  - "10.13.0.3:14550" # (Action 1)
+  - "10.13.0.4:14550" # (Action 2)
+  - "10.13.0.5:14550" # (Action 3)
 
 # 디코이(허니) 목적지
+# (Action 4)
 decoy_target: "10.13.0.6:14550"
 
+# (Action 5: "Pass"는 컨트롤러에 의해 내부적으로 처리됨)
+
+# --- 컨트롤러 설정 ---
 # 스위치 시 기존 연결을 끊을지 (conntrack drop)
 conntrack_drop_on_switch: true
 
-# RL 출력 JSON 경로(deception_manager와 동일하게 맞춤)
-rl_output_path: "dvd_lite/dvd_attacks_lpc/ml/output/mtd_policy_params.json"
-
 # 상태 파일(현재 활성 백엔드 기록)
-state_file: "dvd_lite/dvd_attacks_lpc/mtd/shared_state/iptables_mtd_state.json"
+state_file: "mtd/shared_state/mtd_state.json"
 
 # 로그 소스명(bus.log에 찍힐 source)
-bus_source: "iptables_mtd"
+bus_source: "iptables_mtd_controller"
+
+# iptables NAT 체인 이름
+iptables_chain: "MTD_SERVICE_CHAIN"

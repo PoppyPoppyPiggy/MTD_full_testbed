@@ -1,132 +1,96 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-import os, sys, json, time, yaml, random, subprocess, pathlib, datetime as dt
-from typing import Dict, Any, List, Tuple
+"""
+MTD Controller (The "Hands")
+- 'Brain'(rl_driven_deception_manager)으로부터 Action ID (0~6)를 받습니다.
+- 'Rulebook'(iptables_mtd.yaml)을 참조하여,
+- 실제 Docker 네트워크에 iptables/nft 셸 명령어를 실행합니다.
+"""
 
-BASE = pathlib.Path(__file__).resolve().parents[1]
-CFG = yaml.safe_load(open(BASE / "configs" / "iptables_mtd.yaml"))
-RL_JSON = BASE.parent / "ml" / "output" / "mtd_policy_params.json"  # 안전장치
-RL_JSON = pathlib.Path(CFG.get("rl_output_path", RL_JSON))
-STATE_FILE = pathlib.Path(CFG.get("state_file"))
-BUS_SOURCE = CFG.get("bus_source", "iptables_mtd")
-MODE = CFG.get("mode", "nodeport")
-PROTO = CFG.get("protocol", "udp")
-PUB_PORT = int(CFG.get("public_port", 14550))
-BR_IF = CFG.get("bridge_if", "")
+import yaml
+import subprocess
+import time
+import sys
 
-REAL_TARGETS: List[str] = list(CFG["real_targets"])
-DECOY_TARGET: str = CFG["decoy_target"]
-CONNTRACK_KICK = bool(CFG.get("conntrack_drop_on_switch", True))
-
-# --- 버스 로깅 (없어도 stdout으로 fallback)
-try:
-    sys.path.insert(0, str(BASE.parent))
-    from bus.logger import log_bus_event
-except Exception:
-    def log_bus_event(t, d, source_override=BUS_SOURCE):
-        rec = {"ts": time.time(), "source": source_override, "type": t, "data": d}
-        print(json.dumps(rec, ensure_ascii=False))
-
-def sh(*args, **kw):
-    kw.setdefault("check", True)
-    return subprocess.run(args, **kw)
-
-def _write_state(active: str):
-    STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
-    STATE_FILE.write_text(json.dumps({"active": active, "ts": time.time()}, indent=2))
-
-def _read_rl() -> Dict[str, float]:
-    # RL이 주는 정책값 (없으면 기본)
-    if RL_JSON.exists():
+class IPTablesMTDController:
+    def __init__(self, config_path='mtd/configs/iptables_mtd.yaml'):
+        print(f"[Hands] MTD 컨트롤러 초기화. 규칙서 로드: {config_path}")
         try:
-            d = json.loads(RL_JSON.read_text())
-            return {
-                "ip_cd": float(d.get("ip_cd_mean", 30.0)),
-                "decoy_ratio": float(d.get("decoy_ratio_mean", 0.1)),
-                "bl_level": float(d.get("bl_level_mean", 1.0)),
+            with open(config_path, 'r') as f:
+                self.config = yaml.safe_load(f)
+                
+            # [중요] 시뮬레이터의 7D Action ID (0~6)와
+            #        Rulebook의 mtd_rl_actions (id: 0~6)를 매핑합니다.
+            self.action_map = {
+                action['id']: action 
+                for action in self.config.get('mtd_rl_actions', [])
             }
+            
+            if len(self.action_map) != 7:
+                print(f"Warning: mtd_rl_actions 개수가 7개가 아닙니다 ({len(self.action_map)}개). 시뮬레이터와 호환되지 않을 수 있습니다.")
+                
+        except FileNotFoundError:
+            print(f"Error: MTD 규칙서({config_path})를 찾을 수 없습니다!", file=sys.stderr)
+            sys.exit(1)
         except Exception as e:
-            log_bus_event("mtd_warning", {"msg":"RL JSON parse fail", "err": str(e)})
-    return {"ip_cd": 30.0, "decoy_ratio": 0.1, "bl_level": 1.0}
+            print(f"Error: MTD 규칙서 로드 실패: {e}", file=sys.stderr)
+            sys.exit(1)
 
-def _pick_backend(prev: str) -> str:
-    candidates = [t for t in REAL_TARGETS if t != prev] or REAL_TARGETS
-    return random.choice(candidates)
+    def execute_mtd_action_by_id(self, action_id: int):
+        """[핵심] 'Brain'으로부터 Action ID를 받아 실제 MTD를 실행"""
+        
+        action = self.action_map.get(action_id)
+        
+        if not action:
+            print(f"[Hands] Error: 알 수 없는 Action ID {action_id} 수신.", file=sys.stderr)
+            return
 
-def init_tables():
-    env = os.environ.copy()
-    env.update({
-        "BACKEND": os.environ.get("BACKEND", ""),   # auto
-        "MODE": MODE,
-        "PROTO": PROTO,
-        "PUB_PORT": str(PUB_PORT),
-        "BR_IF": BR_IF,
-    })
-    sh(str(BASE / "scripts" / "mtd_nat.sh"), "init", env=env)
-    log_bus_event("mtd_init", {"mode": MODE, "proto": PROTO, "port": PUB_PORT, "bridge": BR_IF})
+        action_name = action.get('name', 'unknown')
+        
+        # 1. 'Pass' 액션 (아무것도 안 함)
+        if action_name == 'none':
+            print(f"[Hands] Action: Pass (ID: {action_id}). 아무것도 실행하지 않음.")
+            # (중요) 'Eyes'(mtd_state_reader)에게 현재 파라미터가 변경되지 않았음을 알려야 함
+            # (예: mtd/shared_state/mtd_state.json 파일 업데이트)
+            return
 
-def swap_to(new_ipport: str, old_ipport: str = ""):
-    env = os.environ.copy()
-    env.update({
-        "CONNTRACK_KICK": "1" if CONNTRACK_KICK else "0",
-        "PROTO": PROTO,
-        "PUB_PORT": str(PUB_PORT),
-    })
-    args = [str(BASE / "scripts" / "mtd_nat.sh"), "swap", new_ipport]
-    if old_ipport: args.append(old_ipport)
-    sh(*args, env=env)
-    _write_state(new_ipport)
-    log_bus_event("mtd_switch", {
-        "from": old_ipport or None, "to": new_ipport,
-        "mode": MODE, "proto": PROTO, "port": PUB_PORT
-    })
+        print(f"[Hands] Action: {action_name} (ID: {action_id}) 실행...")
 
-def main():
-    init_tables()
+        # 2. 'Rulebook'(YAML)에 정의된 실제 MTD 실행
+        # (예시: 'ip_cd_up' (id=0) 또는 'decoy_up' (id=2))
+        
+        # TODO: 여기에 실제 MTD 실행 로직이 들어가야 합니다.
+        # 이 로직은 'Rulebook'(YAML)의 'target_script' 또는 'command'를 참조하여
+        # mtd/scripts/mtd_service_swap.sh 등을 subprocess로 실행해야 합니다.
+        
+        # --- (설계 예시 Stub) ---
+        if action_name == 'ip_cd_up':
+            self._run_shell_command("mtd/scripts/set_ip_cd.sh fast")
+            # (중요) 'Eyes'(mtd_state_reader)가 참조할 수 있도록 
+            # MOCK_CURRENT_PARAMS["ip_cd"] 값을 업데이트해야 함
+            
+        elif action_name == 'ip_cd_down':
+            self._run_shell_command("mtd/scripts/set_ip_cd.sh slow")
+            
+        elif action_name == 'decoy_up':
+            self._run_shell_command("mtd/scripts/set_decoy_ratio.sh 0.3") # 예시 값
+            
+        elif action_name == 'decoy_down':
+            self._run_shell_command("mtd/scripts/set_decoy_ratio.sh 0.1") # 예시 값
+            
+        elif action_name == 'bl_up':
+            self._run_shell_command("mtd/scripts/set_bl_level.sh 3") # 예시 값
+            
+        elif action_name == 'bl_down':
+            self._run_shell_command("mtd/scripts/set_bl_level.sh 1") # 예시 값
+        # --- (설계 예시 Stub 끝) ---
 
-    # 최초 활성 선정
-    active = None
-    if STATE_FILE.exists():
+    def _run_shell_command(self, command_str: str):
+        """(내부 함수) 셸 명령어를 실행 (예: mtd/scripts/...)"""
+        print(f"    -> Executing: {command_str}")
         try:
-            active = json.loads(STATE_FILE.read_text()).get("active")
-        except: pass
-    if not active:
-        active = _pick_backend(prev="")
-        swap_to(active, "")
-
-    last_switch = time.time()
-    while True:
-        try:
-            pol = _read_rl()
-            ip_cd = max(5.0, min(60.0, pol["ip_cd"]))
-            decoy_ratio = max(0.0, min(0.5, pol["decoy_ratio"]))
-
-            now = time.time()
-            # 1) 주기적 스위치
-            if now - last_switch >= ip_cd:
-                old = active
-                # decoy 전개(확률) vs 정상 백엔드 교체
-                if random.random() < decoy_ratio:
-                    # 디코이를 임시 활성으로 걸어 공격자 유도
-                    new = DECOY_TARGET
-                else:
-                    new = _pick_backend(prev=old)
-                swap_to(new, old)
-                active = new
-                last_switch = now
-
-            # 2) (선택) 공격자 블랙리스트(bl_level)에 따라 추가 조치 가능 지점
-            #    - 여기서는 예시로 로그만 남김. 실제로는 ipset:blocked_src + DOCKER-USER 체인에 DROP 등 수행.
-            log_bus_event("mtd_policy_tick", {
-                "ip_cd": ip_cd, "decoy_ratio": decoy_ratio, "bl_level": pol["bl_level"],
-                "active": active
-            })
-            time.sleep(1.0)
-        except KeyboardInterrupt:
-            break
+            # (실제 배포 시)
+            # subprocess.run(command_str.split(), check=True, capture_output=True, text=True)
+            pass # (현재는 stub이므로 통과)
         except Exception as e:
-            log_bus_event("mtd_error", {"msg":"controller_loop", "err": str(e)})
-            time.sleep(2.0)
-
-if __name__ == "__main__":
-    main()
+            print(f"    -> [Hands] Error: 셸 명령어 실행 실패: {e}", file=sys.stderr)
