@@ -1,14 +1,23 @@
-# mtd/configs/iptables_mtd.yaml
 # IPTablesMTDController 설정 파일
 
 # --- MTD 작동 모드 / 공개 포트 설정 ---
-mode: nodeport                 # NodePort 모드
-protocol: udp                  # 트래픽 프로토콜 (udp/tcp)
-public_host_ip: "127.0.0.1"    # 0.0.0.0 또는 127.0.0.1 중 선택
-public_port: 14550             # 공개(바인딩) 포트
+mode: nodeport
+protocol: udp
+public_host_ip: "127.0.0.1"
+public_port: 14550
 
 # --- iptables NAT 체인 이름 ---
 iptables_chain: "MTD_SERVICE_CHAIN"
+
+# --- [신규 추가] MTD 상태 리더(Eyes)를 위한 실제 타겟 목록 ---
+# L4 모델(8D State)은 6개의 Real Target 슬롯을 가짐
+real_targets:
+  - "10.13.0.2:14550"  # (Real 1)
+  - "10.13.0.3:14550"  # (Real 2)
+  - "10.13.0.4:14550"  # (Real 3)
+  - "10.13.0.5:14550"  # (Real 4)
+  - "10.13.0.254:14550" # (Real 5 - Placeholder)
+  - "10.13.0.253:14550" # (Real 6 - Placeholder)
 
 # --- RL Action Space (7-Action) ---
 # 컨트롤러는 아래 목록을 읽어 action_map을 생성합니다.
@@ -16,27 +25,27 @@ mtd_rl_actions:
   - id: 0
     name: "Redirect_Real_1"
     type: "DNAT"
-    target: "10.13.0.2:14550"
+    target: "10.13.0.2:14550" # real_targets[0]와 일치
 
   - id: 1
     name: "Redirect_Real_2"
     type: "DNAT"
-    target: "10.13.0.3:14550"
+    target: "10.13.0.3:14550" # real_targets[1]와 일치
 
   - id: 2
     name: "Redirect_Real_3"
     type: "DNAT"
-    target: "10.13.0.4:14550"
+    target: "10.13.0.4:14550" # real_targets[2]와 일치
 
   - id: 3
     name: "Redirect_Real_4"
     type: "DNAT"
-    target: "10.13.0.5:14550"
+    target: "10.13.0.5:14550" # real_targets[3]와 일치
 
   - id: 4
     name: "Redirect_Decoy_1"
     type: "DNAT"
-    target: "10.13.0.6:14550"
+    target: "10.13.0.6:14550" # Decoy
 
   - id: 5
     name: "Pass"
@@ -47,6 +56,6 @@ mtd_rl_actions:
     type: "Drop"               # public_port로 유입되는 트래픽 DROP
 
 # --- 컨트롤러 동작 옵션 ---
-conntrack_drop_on_switch: true               # 스위치 시 기존 연결 conntrack 제거
-state_file: "mtd/shared_state/mtd_state.json"  # 현재 활성 백엔드 기록 파일
-bus_source: "iptables_mtd_controller"        # bus.log에 찍힐 source명
+conntrack_drop_on_switch: true
+state_file: "mtd/shared_state/mtd_state.json" # [중요] 컨트롤러가 쓰는 파일 (Eyes가 읽음)
+bus_source: "iptables_mtd_controller"

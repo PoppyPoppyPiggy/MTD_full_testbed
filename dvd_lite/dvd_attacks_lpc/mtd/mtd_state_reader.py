@@ -1,151 +1,165 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-MTD Controller (The "Hands") - v2 (Full Implementation)
-- 'Brain'(rl_driven_deception_manager)으로부터 Action ID (0~6)를 받습니다.
-- 'Rulebook'(iptables_mtd.yaml)을 참조하여,
-- 실제 Docker 네트워크에 iptables 셸 명령어를 실행합니다.
+MTD State Reader (The "Eyes") - 완성본 (YAML 기반)
+- [수정] mtd_state.json (Hands가 쓴 파일)을 읽어 현재 활성 타겟을 파악합니다.
+- [수정] bus.log (모니터가 쓴 파일)을 읽어 실시간 위협 알림을 파악합니다.
+- [수정] Colab 시뮬레이터(6D)와 달리, 테스트베드 매니저(8D)에 맞는 상태 벡터를 생성합니다.
 """
 
-import yaml
-import subprocess
+import numpy as np
 import time
-import sys
+import json
 import os
+import sys
+import yaml # YAML 설정을 읽기 위해 추가
 
-class IPTablesMTDController:
-    def __init__(self, config_path='mtd/configs/iptables_mtd.yaml'):
-        print(f"[Hands] MTD 컨트롤러 초기화. 규칙서 로드: {config_path}")
-        
-        # 1. Sudo 권한 확인 (iptables는 root 권한 필요)
-        if os.geteuid() != 0:
-            print("[Hands] Error: iptables를 제어하려면 root 권한이 필요합니다.", file=sys.stderr)
-            print("          'sudo python3 mtd/rl_driven_deception_manager.py ...'로 실행하세요.", file=sys.stderr)
-            sys.exit(1)
-            
+# --- 경로 설정 ---
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+STATE_FILE_PATH = os.path.join(BASE_DIR, 'shared_state', 'mtd_state.json')
+BUS_LOG_PATH = os.path.join(BASE_DIR, '..', 'bus', 'bus.log')
+# [수정] config_path는 manager가 인자로 전달해주는 것을 기본으로 함
+# CONFIG_PATH = os.path.join(BASE_DIR, 'configs', 'iptables_mtd.yaml')
+
+# [수정] 매니저가 예상하는 차원 (8D State, 7D Action)
+TESTBED_STATE_DIM = 8
+TESTBED_ACTION_DIM = 7
+
+class MTDStateReader:
+    def __init__(self, config_path): # 기본값 제거, 매니저가 전달하는 경로 사용
+        print(f"[Eyes] MTD 상태 리더 초기화. 규칙서 로드: {config_path}")
         try:
-            # 2. 설정 파일 로드
             with open(config_path, 'r') as f:
-                self.config = yaml.safe_load(f)
+                config = yaml.safe_load(f)
             
-            # 3. 주요 설정값 저장
-            self.chain_name = self.config.get('iptables_chain', 'MTD_SERVICE_CHAIN')
-            self.public_port = self.config.get('public_port', 14550)
-            self.protocol = self.config.get('protocol', 'udp')
-            self.public_ip = self.config.get('public_host_ip', '127.0.0.1')
-            self.conntrack_drop = self.config.get('conntrack_drop_on_switch', True)
+            # [중요] YAML 파일에서 'real_targets' 리스트를 읽어옴
+            self.real_targets = config.get('real_targets', [])
+            
+            # [중요] 시뮬레이터와 State/Action 차원 일치 확인
+            # (real 6개 + decoy 1개 + alert 1개 = 8D)
+            self.obs_dim = len(self.real_targets) + 1 + 1 
+            
+            # [수정] 경고 로직을 8D 기준으로 변경
+            if self.obs_dim != TESTBED_STATE_DIM:
+                print(f"Warning: 매니저 예상({TESTBED_STATE_DIM}D)과 차원 불일치! (State: {self.obs_dim}D)")
+                print(f"         'real_targets'가 {TESTBED_STATE_DIM - 2}개({len(self.real_targets)}개)인지 {config_path}에서 확인하세요.")
+            else:
+                 print(f"[Eyes] {len(self.real_targets)}개의 Real Targets 로드. {self.obs_dim}D 상태 벡터 사용.")
 
-            # 4. Action ID (0~6)와 YAML의 'mtd_rl_actions' 매핑
-            self.action_map = {
-                action['id']: action 
-                for action in self.config.get('mtd_rl_actions', [])
-            }
-            
-            if len(self.action_map) != 7:
-                print(f"Warning: mtd_rl_actions 개수가 7개가 아닙니다 ({len(self.action_map)}개).")
-                if len(self.action_map) == 0:
-                     print("     [!] YAML 파일에 'mtd_rl_actions' 리스트가 정의되지 않았거나 파싱에 실패했습니다.")
-            
-            # 5. iptables 체인 초기화
-            self.initialize_chain()
-
-        except FileNotFoundError:
-            print(f"Error: MTD 규칙서({config_path})를 찾을 수 없습니다!", file=sys.stderr)
-            sys.exit(1)
         except Exception as e:
-            print(f"Error: MTD 규칙서 로드 실패: {e}", file=sys.stderr)
+            print(f"[Eyes] Error: MTD 규칙서({config_path}) 로드 실패: {e}", file=sys.stderr)
             sys.exit(1)
 
-    def _run_shell_command(self, command: str, suppress_errors=False):
-        """(내부 함수) 셸 명령어를 실행 (예: iptables ...), 성공 시 True 반환"""
-        # print(f"    -> Executing: {command}") # 디버깅 시 주석 해제
+    def _read_current_mtd_state(self) -> dict:
+        """mtd_state.json 파일에서 현재 MTD 상태를 읽어옴"""
         try:
-            subprocess.run(command, shell=True, check=True, capture_output=True, text=True)
-            return True
-        except subprocess.CalledProcessError as e:
-            if not suppress_errors:
-                print(f"    -> [Hands] Error: 셸 명령어 실행 실패: {e.stderr}", file=sys.stderr)
-            return False
+            with open(STATE_FILE_PATH, 'r') as f:
+                return json.load(f)
+        except Exception as e:
+            # print(f"[Eyes] Error: {STATE_FILE_PATH} 읽기 실패, 기본값 반환: {e}", file=sys.stderr) # 너무 많은 로그 방지
+            return {"active_target": "", "decoy_active": False}
 
-    def initialize_chain(self):
-        """MTD를 위한 iptables NAT 체인을 생성하고 PREROUTING에 연결합니다."""
-        print(f"[Hands] iptables NAT 체인 '{self.chain_name}' 초기화 중...")
+    def _read_recent_alerts(self, log_file=BUS_LOG_PATH, window_sec=10) -> float:
+        """bus.log 파일에서 최근 'window_sec'초간의 알림을 집계 (단일 알림 플래그 반환)"""
+        alert_detected = 0.0
+        current_time = time.time()
+        cutoff_time = current_time - window_sec
+
+        if not os.path.exists(log_file):
+            return 0.0
+
+        try:
+            with open(log_file, 'r', encoding='utf-8') as f:
+                lines = f.readlines()
+                for line in reversed(lines):
+                    if not line.strip(): continue
+                    try:
+                        log_entry = json.loads(line)
+                        log_time = log_entry.get('ts', 0)
+                        
+                        if log_time < cutoff_time:
+                            break 
+                        
+                        log_type = log_entry.get('type', '')
+                        if 'detected' in log_type or 'alert' in log_type:
+                            alert_detected = 1.0
+                            break
+                            
+                    except json.JSONDecodeError:
+                        continue 
+        except Exception as e:
+            print(f"[Eyes] Error: {log_file} 파싱 실패: {e}", file=sys.stderr)
+
+        return alert_detected
+
+    def get_rl_state(self) -> np.ndarray:
+        """
+        MTD RL 에이전트를 위한 8D 상태 벡터(State)를 반환합니다.
+        (rl_driven_deception_manager.py가 8D를 예상)
+        [구성] Real Targets (6) + Decoy (1) + Alert (1)
+        """
+        # [수정] self.obs_dim (YAML 기반) 또는 8D 중 작은 값으로 초기화 (방어 코드)
+        # YAML이 6개가 아니어도 8D 벡터는 생성되어야 함
+        state = np.zeros(TESTBED_STATE_DIM, dtype=np.float32) 
         
-        # 1. MTD 체인 생성 (이미 존재하면 -N은 실패하지만 괜찮음)
-        self._run_shell_command(f"iptables -t nat -N {self.chain_name}", suppress_errors=True)
+        # 1. 현재 MTD 상태 읽기 (컨트롤러가 쓴 파일)
+        current_state_json = self._read_current_mtd_state()
+        active_target = current_state_json.get('active_target') # 예: "10.13.0.2:14550"
+        decoy_active = current_state_json.get('decoy_active', False)
+
+        # 2. State [0-5]: One-hot (Active Real Target)
+        # [수정] real_targets 리스트가 비어있지 않은지 확인
+        if not decoy_active and active_target and self.real_targets:
+            try:
+                # YAML에 정의된 real_targets 리스트에서 현재 active_target의 인덱스를 찾음
+                idx = self.real_targets.index(active_target)
+                if idx < (TESTBED_STATE_DIM - 2): # 6개 인덱스(0-5) 내에 있는지 확인
+                    state[idx] = 1.0
+            except ValueError:
+                pass # active_target이 real_targets 목록에 없음 (정상, Decoy일 수 있음)
+            except Exception as e:
+                print(f"[Eyes] Error: real_targets 인덱싱 오류: {e}")
+
+        # 3. State [6]: Decoy Active (Boolean)
+        if decoy_active:
+            state[TESTBED_STATE_DIM - 2] = 1.0 # (인덱스 6)
+
+        # 4. State [7]: Threat Alert (Boolean)
+        state[TESTBED_STATE_DIM - 1] = self._read_recent_alerts(window_sec=10) # (인덱스 7)
         
-        # 2. MTD 체인 비우기 (기존 규칙 제거)
-        self._run_shell_command(f"iptables -t nat -F {self.chain_name}")
+        # print(f"[Eyes] State Read: {state}") # (디버그 시 주석 해제)
+        return state
 
-        # 3. PREROUTING -> MTD 체인으로 트래픽 점프 규칙 설정
-        # 대상 IP가 0.0.0.0이면 모든 IP를 의미하므로 -d 플래그 생략
-        ip_match = f"-d {self.public_ip}" if self.public_ip != "0.0.0.0" else ""
-        
-        jump_rule = f"iptables -t nat -A PREROUTING {ip_match} -p {self.protocol} --dport {self.public_port} -j {self.chain_name}"
-        check_rule = jump_rule.replace("-A", "-C")
+# --- 전역 인스턴스 ---
+# rl_driven_deception_manager.py가 쉽게 import하여 사용할 수 있도록
+# 전역 인스턴스를 생성합니다.
+# [수정] 매니저가 경로를 지정하여 직접 생성하므로 전역 인스턴스 불필요
+# try:
+#     GlobalStateReader = MTDStateReader()
+# except Exception:
+#     print("[Eyes] Error: MTDStateReader 전역 인스턴스 생성 실패.", file=sys.stderr)
+#     GlobalStateReader = None
 
-        # 4. 점프 규칙이 이미 있는지 확인하고, 없으면 추가
-        if not self._run_shell_command(check_rule, suppress_errors=True):
-            print(f"[Hands] PREROUTING에 MTD 점프 규칙 추가...")
-            if not self._run_shell_command(jump_rule):
-                print(f"[Hands] Error: PREROUTING 점프 규칙 설정 실패!", file=sys.stderr)
-                sys.exit(1)
-        
-        print(f"[Hands] iptables 체인 초기화 완료.")
+# def get_rl_state() -> np.ndarray:
+#     """
+#     (Brain을 위한 헬퍼 함수)
+#     전역 인스턴스를 사용하여 8D 상태 벡터를 쉽게 가져옵니다.
+#     """
+#     if GlobalStateReader:
+#         return GlobalStateReader.get_rl_state()
+#     # 비상시, 8D 0벡터 반환
+#     return np.zeros(TESTBED_STATE_DIM, dtype=np.float32) 
 
-    def execute_mtd_action_by_id(self, action_id: int):
-        """[핵심] 'Brain'으로부터 Action ID를 받아 실제 MTD를 실행"""
-        
-        action = self.action_map.get(action_id)
-        
-        if not action:
-            print(f"[Hands] Error: 알 수 없는 Action ID {action_id} 수신.", file=sys.stderr)
-            return False
-
-        action_name = action.get('name', 'unknown')
-        action_type = action.get('type', 'Pass')
-        
-        # 1. 기존 MTD 규칙 제거 (체인 비우기)
-        if not self._run_shell_command(f"iptables -t nat -F {self.chain_name}"):
-            print(f"[Hands] Error: MTD 체인 비우기 실패.", file=sys.stderr)
-            return False
-
-        # 2. 새 MTD 규칙 적용
-        rule_applied = False
-        if action_type == "DNAT":
-            target = action.get('target')
-            if not target:
-                print(f"[Hands] Error: Action {action_id}에 'target'이 없습니다.", file=sys.stderr)
-                return False
-            
-            print(f"[Hands] Action: {action_name} (ID: {action_id}) 실행... -> {target}")
-            cmd = f"iptables -t nat -A {self.chain_name} -j DNAT --to-destination {target}"
-            rule_applied = self._run_shell_command(cmd)
-
-        elif action_type == "Drop":
-            print(f"[Hands] Action: {action_name} (ID: {action_id}) 실행... -> DROP")
-            cmd = f"iptables -t nat -A {self.chain_name} -j DROP"
-            rule_applied = self._run_shell_command(cmd)
-
-        elif action_type == "Pass":
-            print(f"[Hands] Action: {action_name} (ID: {action_id}) 실행... -> Pass (규칙 없음)")
-            # 체인을 비웠으므로 아무 규칙도 추가하지 않으면 자동으로 Pass (PREROUTING의 다음 규칙으로 넘어감)
-            rule_applied = True
-        
-        else:
-            print(f"[Hands] Error: 알 수 없는 Action Type '{action_type}' (ID: {action_id})", file=sys.stderr)
-            return False
-
-        # 3. (선택적) 기존 연결 제거 (conntrack)
-        if rule_applied and self.conntrack_drop:
-            # UDP 연결은 conntrack 제거가 덜 중요할 수 있지만, TCP의 경우 필수적입니다.
-            ip_match = f"-d {self.public_ip}" if self.public_ip != "0.0.0.0" else ""
-            self._run_shell_command(f"conntrack -D -p {self.protocol} --dport {self.public_port} {ip_match}", suppress_errors=True)
-
-        return rule_applied
-
-    def reset_to_default(self):
-        """MTD 규칙을 기본값(모두 차단 또는 모두 비우기)으로 초기화합니다."""
-        print("[Hands] MTD 구성을 기본값(Block)으로 재설정...")
-        # 안전한 기본값은 ID 6 (Block_Traffic)을 실행하는 것입니다.
-        self.execute_mtd_action_by_id(6)
+if __name__ == "__main__":
+    print("--- MTD State Reader (Eyes) 테스트 ---")
+    # 테스트 시에는 YAML 경로를 하드코딩해야 함
+    try:
+        TEST_CONFIG_PATH = os.path.join(BASE_DIR, 'configs', 'iptables_mtd.yaml')
+        reader = MTDStateReader(config_path=TEST_CONFIG_PATH)
+        state_vector = reader.get_rl_state()
+        print(f"반환된 State Vector (Dim: {len(state_vector)}):")
+        print(state_vector)
+        print("\n테스트 성공.")
+    except Exception as e:
+        print(f"\n테스트 실패: {e}")
+        print("iptables_mtd.yaml 파일이 있는지, 'real_targets' 키가 있는지 확인하세요.")

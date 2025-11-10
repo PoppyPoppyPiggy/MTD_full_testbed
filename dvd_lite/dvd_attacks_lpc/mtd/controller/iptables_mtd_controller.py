@@ -5,6 +5,8 @@ MTD Controller (The "Hands") - v2 (Full Implementation)
 - 'Brain'(rl_driven_deception_manager)으로부터 Action ID (0~6)를 받습니다.
 - 'Rulebook'(iptables_mtd.yaml)을 참조하여,
 - 실제 Docker 네트워크에 iptables 셸 명령어를 실행합니다.
+- [수정] mtd_state.json 파일에 현재 상태를 기록합니다. (Eyes가 읽음)
+- [수정] Brain이 참조할 수 있도록 현재 상태를 속성(current_target_str)에 저장합니다.
 """
 
 import yaml
@@ -12,6 +14,7 @@ import subprocess
 import time
 import sys
 import os
+import json # [신규 추가] mtd_state.json 작성을 위해 import
 
 class IPTablesMTDController:
     def __init__(self, config_path='mtd/configs/iptables_mtd.yaml'):
@@ -35,6 +38,14 @@ class IPTablesMTDController:
             self.public_ip = self.config.get('public_host_ip', '127.0.0.1')
             self.conntrack_drop = self.config.get('conntrack_drop_on_switch', True)
 
+            # [신규] 3-1. Eyes가 읽을 mtd_state.json 파일 경로
+            self.state_file_path = self.config.get('state_file')
+            if not self.state_file_path:
+                 print("[Hands] Warning: YAML에 'state_file'이 정의되지 않았습니다.", file=sys.stderr)
+
+            # [신규] 3-2. Decoy 식별 키워드 (YAML의 'name' 필드 기준)
+            self.decoy_keyword = "DECOY" # "Redirect_Decoy_1"과 매칭 위함
+
             # 4. Action ID (0~6)와 YAML의 'mtd_rl_actions' 매핑
             self.action_map = {
                 action['id']: action 
@@ -48,6 +59,15 @@ class IPTablesMTDController:
             
             # 5. iptables 체인 초기화
             self.initialize_chain()
+            
+            # [신규] 6. 현재 MTD 상태를 기억하기 위한 변수 초기화 (Brain이 이 속성을 참조함)
+            self.current_target_str = "None (Initialized)"
+            self.current_target_is_decoy = False
+            self.current_action_id = -1
+            self.current_action_name = "None"
+            
+            # [신규] 7. 시작 시 mtd_state.json 파일 초기화
+            self._update_state_file()
 
         except FileNotFoundError:
             print(f"Error: MTD 규칙서({config_path})를 찾을 수 없습니다!", file=sys.stderr)
@@ -78,9 +98,7 @@ class IPTablesMTDController:
         self._run_shell_command(f"iptables -t nat -F {self.chain_name}")
 
         # 3. PREROUTING -> MTD 체인으로 트래픽 점프 규칙 설정
-        # 대상 IP가 0.0.0.0이면 모든 IP를 의미하므로 -d 플래그 생략
         ip_match = f"-d {self.public_ip}" if self.public_ip != "0.0.0.0" else ""
-        
         jump_rule = f"iptables -t nat -A PREROUTING {ip_match} -p {self.protocol} --dport {self.public_port} -j {self.chain_name}"
         check_rule = jump_rule.replace("-A", "-C")
 
@@ -92,6 +110,31 @@ class IPTablesMTDController:
                 sys.exit(1)
         
         print(f"[Hands] iptables 체인 초기화 완료.")
+
+    # [신규 추가]
+    def _update_state_file(self):
+        """(내부 함수) 현재 MTD 상태를 mtd_state.json 파일에 기록 (Eyes가 읽을 수 있도록)"""
+        if not self.state_file_path:
+            # YAML에 state_file이 정의되지 않으면 스킵
+            return
+
+        state_data = {
+            "timestamp": time.time(),
+            "action_id": self.current_action_id,
+            "action_name": self.current_action_name,
+            "active_target": self.current_target_str, # 예: "10.13.0.6:14550" 또는 "Pass"
+            "decoy_active": self.current_target_is_decoy
+        }
+        
+        try:
+            # shared_state 디렉토리가 없을 경우 생성
+            os.makedirs(os.path.dirname(self.state_file_path), exist_ok=True)
+            
+            with open(self.state_file_path, 'w') as f:
+                json.dump(state_data, f, indent=4)
+        except Exception as e:
+            print(f"[Hands] Error: mtd_state.json 파일 쓰기 실패: {e}", file=sys.stderr)
+
 
     def execute_mtd_action_by_id(self, action_id: int):
         """[핵심] 'Brain'으로부터 Action ID를 받아 실제 MTD를 실행"""
@@ -105,6 +148,10 @@ class IPTablesMTDController:
         action_name = action.get('name', 'unknown')
         action_type = action.get('type', 'Pass')
         
+        # [신규] 속성 저장을 위해 기본값 설정
+        target_str = "N/A"
+        is_decoy = False
+
         # 1. 기존 MTD 규칙 제거 (체인 비우기)
         if not self._run_shell_command(f"iptables -t nat -F {self.chain_name}"):
             print(f"[Hands] Error: MTD 체인 비우기 실패.", file=sys.stderr)
@@ -122,15 +169,27 @@ class IPTablesMTDController:
             cmd = f"iptables -t nat -A {self.chain_name} -j DNAT --to-destination {target}"
             rule_applied = self._run_shell_command(cmd)
 
+            # [신규] MTD 상태 속성 업데이트
+            target_str = target
+            is_decoy = self.decoy_keyword.upper() in action_name.upper()
+
         elif action_type == "Drop":
             print(f"[Hands] Action: {action_name} (ID: {action_id}) 실행... -> DROP")
             cmd = f"iptables -t nat -A {self.chain_name} -j DROP"
             rule_applied = self._run_shell_command(cmd)
 
+            # [신규] MTD 상태 속성 업데이트
+            target_str = "DROP"
+            is_decoy = False
+
         elif action_type == "Pass":
             print(f"[Hands] Action: {action_name} (ID: {action_id}) 실행... -> Pass (규칙 없음)")
-            # 체인을 비웠으므로 아무 규칙도 추가하지 않으면 자동으로 Pass (PREROUTING의 다음 규칙으로 넘어감)
+            # 체인을 비웠으므로 아무 규칙도 추가하지 않으면 자동으로 Pass
             rule_applied = True
+
+            # [신규] MTD 상태 속성 업데이트 (Pass는 MTD가 비활성화된 상태)
+            target_str = "Pass"
+            is_decoy = False
         
         else:
             print(f"[Hands] Error: 알 수 없는 Action Type '{action_type}' (ID: {action_id})", file=sys.stderr)
@@ -138,9 +197,18 @@ class IPTablesMTDController:
 
         # 3. (선택적) 기존 연결 제거 (conntrack)
         if rule_applied and self.conntrack_drop:
-            # UDP 연결은 conntrack 제거가 덜 중요할 수 있지만, TCP의 경우 필수적입니다.
             ip_match = f"-d {self.public_ip}" if self.public_ip != "0.0.0.0" else ""
             self._run_shell_command(f"conntrack -D -p {self.protocol} --dport {self.public_port} {ip_match}", suppress_errors=True)
+
+        # [신규] 4. MTD 상태를 클래스 속성으로 저장 (Brain이 참조할 수 있도록)
+        if rule_applied:
+            self.current_target_str = target_str
+            self.current_target_is_decoy = is_decoy
+            self.current_action_id = action_id
+            self.current_action_name = action_name
+            
+            # [신규] 5. MTD 상태를 JSON 파일에 기록 (Eyes가 읽을 수 있도록)
+            self._update_state_file()
 
         return rule_applied
 

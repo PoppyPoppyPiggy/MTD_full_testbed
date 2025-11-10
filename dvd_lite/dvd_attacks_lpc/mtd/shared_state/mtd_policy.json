@@ -1,24 +1,19 @@
 {
-    "shuffle_interval_s": 15,
-    "timing_strategy": "random",
-    "timing_range_s": [10, 25],
-    "decoy_pool": [
-      "10.13.0.3:14550",
-      "10.13.0.100:14550"
-    ],
-    "port_pool": [
-      14550,
-      14551,
-      14552,
-      14553
-    ],
-    "impair_prob": 0.0,
-    "impair_profile": {
-      "delay_ms": [10, 50],
-      "jitter_ms": [5, 20],
-      "loss_pct": [0.1, 1.0],
-      "duration_s": [5, 15]
-    }
-  }
-
-
+  "mtd_policy_id": 5,
+  "current_state_vector": [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0
+  ],
+  "mtd_config": {
+    "public_entrypoint": "127.0.0.1:14550",
+    "redirect_target": "Pass",
+    "is_decoy": false
+  },
+  "timestamp": "2025-11-10T05:47:03.354738"
+}

@@ -16,34 +16,40 @@ class RLExportHook:
             state_file_path (str): MTD 상태를 쓸 JSON 파일 경로.
             policy_file_path (str): 선택된 MTD 정책을 쓸 JSON 파일 경로.
         """
-        self.state_file = pathlib.Path(state_file_path)
+        # [수정] state_file_path가 None일 수 있으므로(Manager의 DUMMY_FILE),
+        # None이 아닐 경우에만 Path 객체 생성
+        if state_file_path:
+            self.state_file = pathlib.Path(state_file_path)
+            self.state_file.parent.mkdir(parents=True, exist_ok=True)
+        else:
+            self.state_file = None
+
         self.policy_file = pathlib.Path(policy_file_path)
-        
-        # 파일이 위치할 디렉토리가 존재하지 않으면 생성합니다.
-        self.state_file.parent.mkdir(parents=True, exist_ok=True)
         self.policy_file.parent.mkdir(parents=True, exist_ok=True)
 
-    def export_state_and_policy(self, state_data: dict, action_id: int):
+    def export_state_and_policy(self, state_data: dict, policy_data: dict):
         """
         현재 MTD 상태와 선택된 행동(정책 ID)을 파일에 씁니다.
 
+        [수정] action_id: int 대신 policy_data: dict 를 받도록 변경
+
         Args:
-            state_data (dict): MTDStateReader에서 받은 현재 상태 사전.
-            action_id (int): RL 에이전트가 선택한 행동 ID.
+            state_data (dict): MTDStateReader에서 받은 현재 상태 사전. (None일 수 있음)
+            policy_data (dict): RLDrivenDeceptionManager가 생성한 정책 사전.
         """
         try:
-            # 1. MTD 상태 내보내기
-            # state_data에 타임스탬프 추가
-            state_data_with_timestamp = state_data.copy()
-            state_data_with_timestamp['timestamp'] = datetime.utcnow().isoformat()
-            self.state_file.write_text(json.dumps(state_data_with_timestamp, indent=2))
+            # 1. MTD 상태 내보내기 (state_data가 None이 아니고, state_file이 설정되었을 때만)
+            if state_data is not None and self.state_file is not None:
+                state_data_with_timestamp = state_data.copy()
+                state_data_with_timestamp['timestamp'] = datetime.utcnow().isoformat()
+                self.state_file.write_text(json.dumps(state_data_with_timestamp, indent=2))
 
             # 2. MTD 정책(행동) 내보내기
-            policy_data = {
-                "policy_id": action_id,
-                "timestamp": datetime.utcnow().isoformat()
-            }
-            self.policy_file.write_text(json.dumps(policy_data, indent=2))
+            # [수정] policy_data를 직접 만들지 않고, Manager로부터 받은 dict를 사용
+            policy_data_with_timestamp = policy_data.copy()
+            policy_data_with_timestamp["timestamp"] = datetime.utcnow().isoformat()
+            
+            self.policy_file.write_text(json.dumps(policy_data_with_timestamp, indent=2))
             
         except IOError as e:
             print(f"오류: 상태 또는 정책 파일 쓰기 실패: {e}")

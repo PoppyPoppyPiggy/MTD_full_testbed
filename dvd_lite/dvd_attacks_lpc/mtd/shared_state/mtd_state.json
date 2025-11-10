@@ -1,8 +1,7 @@
 {
-  "timestamp": 1761251415.0458417,
-  "current_target": "10.13.0.2:14550",
-  "available_targets": [
-    "10.13.0.2:14550"
-  ],
-  "decoy_target": "10.13.0.100:14550"
+    "timestamp": 1762753623.3543627,
+    "action_id": 5,
+    "action_name": "Pass",
+    "active_target": "Pass",
+    "decoy_active": false
 }
