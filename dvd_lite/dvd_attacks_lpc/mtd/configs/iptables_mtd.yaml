@@ -1,35 +1,52 @@
-# MTD 작동 모드 (iptables_mtd_controller.py가 참조)
-mode: nodeport
-protocol: udp
-public_port: 14550                # 호스트가 노출하는 포트
-bridge_if: br-mtdxxx                # (flatlan 모드일 경우)
+# mtd/configs/iptables_mtd.yaml
+# IPTablesMTDController 설정 파일
 
-# --- [중요] RL Action Space (행동 공간) 정의 ---
-# 4개의 실제 서비스 + 1개의 디코이
+# --- MTD 작동 모드 / 공개 포트 설정 ---
+mode: nodeport                 # NodePort 모드
+protocol: udp                  # 트래픽 프로토콜 (udp/tcp)
+public_host_ip: "127.0.0.1"    # 0.0.0.0 또는 127.0.0.1 중 선택
+public_port: 14550             # 공개(바인딩) 포트
 
-# 실제 서비스(백엔드) 후보 IP:PORT (도커 컨테이너 IP)
-# (Action 0)
-real_targets:
-  - "10.13.0.2:14550" 
-  - "10.13.0.3:14550" # (Action 1)
-  - "10.13.0.4:14550" # (Action 2)
-  - "10.13.0.5:14550" # (Action 3)
-
-# 디코이(허니) 목적지
-# (Action 4)
-decoy_target: "10.13.0.6:14550"
-
-# (Action 5: "Pass"는 컨트롤러에 의해 내부적으로 처리됨)
-
-# --- 컨트롤러 설정 ---
-# 스위치 시 기존 연결을 끊을지 (conntrack drop)
-conntrack_drop_on_switch: true
-
-# 상태 파일(현재 활성 백엔드 기록)
-state_file: "mtd/shared_state/mtd_state.json"
-
-# 로그 소스명(bus.log에 찍힐 source)
-bus_source: "iptables_mtd_controller"
-
-# iptables NAT 체인 이름
+# --- iptables NAT 체인 이름 ---
 iptables_chain: "MTD_SERVICE_CHAIN"
+
+# --- RL Action Space (7-Action) ---
+# 컨트롤러는 아래 목록을 읽어 action_map을 생성합니다.
+mtd_rl_actions:
+  - id: 0
+    name: "Redirect_Real_1"
+    type: "DNAT"
+    target: "10.13.0.2:14550"
+
+  - id: 1
+    name: "Redirect_Real_2"
+    type: "DNAT"
+    target: "10.13.0.3:14550"
+
+  - id: 2
+    name: "Redirect_Real_3"
+    type: "DNAT"
+    target: "10.13.0.4:14550"
+
+  - id: 3
+    name: "Redirect_Real_4"
+    type: "DNAT"
+    target: "10.13.0.5:14550"
+
+  - id: 4
+    name: "Redirect_Decoy_1"
+    type: "DNAT"
+    target: "10.13.0.6:14550"
+
+  - id: 5
+    name: "Pass"
+    type: "Pass"               # 현재 규칙 유지
+
+  - id: 6
+    name: "Block_Traffic"
+    type: "Drop"               # public_port로 유입되는 트래픽 DROP
+
+# --- 컨트롤러 동작 옵션 ---
+conntrack_drop_on_switch: true               # 스위치 시 기존 연결 conntrack 제거
+state_file: "mtd/shared_state/mtd_state.json"  # 현재 활성 백엔드 기록 파일
+bus_source: "iptables_mtd_controller"        # bus.log에 찍힐 source명
