@@ -1,61 +1,89 @@
-# IPTablesMTDController 설정 파일
+# mtd/configs/iptables_mtd.yaml
+#
+# PPO (8D State / 7D Action) 모델과 docker-compose.yml 환경을 위한 MTD 규칙서
+# - 8D State = 6 Real Targets (R1-R6) + 1 Decoy + 1 Alert
+# - 7D Action = DNAT to R1-R6 (ID 0-5), DNAT to Decoy (ID 6)
 
-# --- MTD 작동 모드 / 공개 포트 설정 ---
-mode: nodeport
-protocol: udp
-public_host_ip: "127.0.0.1"
+# --- 1. MTD 컨트롤러 ('손') 설정 ---
+
+# 공격자가 접근하는 가상의 공용 IP 및 포트
+# docker-compose.yml 호스트 머신의 IP 또는 0.0.0.0 (모든 인터페이스)
+public_host_ip: "0.0.0.0" 
 public_port: 14550
+protocol: "udp"
 
-# --- iptables NAT 체인 이름 ---
-iptables_chain: "MTD_SERVICE_CHAIN"
+# MTD 규칙이 적용될 iptables NAT 체인 이름
+iptables_chain: "MTD_RL_CHAIN"
 
-# --- [신규 추가] MTD 상태 리더(Eyes)를 위한 실제 타겟 목록 ---
-# L4 모델(8D State)은 6개의 Real Target 슬롯을 가짐
+# MTD 전환 시 기존 UDP 연결(conntrack)을 강제로 끊을지 여부
+conntrack_drop_on_switch: true
+
+# '손'이 현재 MTD 상태를 기록할 파일 경로 ('눈'이 이 파일을 읽음)
+# docker-compose.yml의 볼륨 매핑과 일치해야 함 (/shared/mtd_state.json)
+state_file: "/shared/mtd_state.json" 
+
+# '손'이 Decoy 액션을 식별하기 위한 키워드 (mtd_rl_actions의 'name' 필드)
+decoy_keyword: "DECOY"
+
+
+# --- 2. MTD 상태 리더 ('눈') 설정 ---
+
+# [중요] PPO 모델의 8D State (인덱스 0-5)에 매핑될 6개의 '실제 타겟' 리스트
+# mtd_state_reader.py가 이 리스트를 참조하여 8D 상태 벡터를 생성합니다.
+# docker-compose.yml의 IP (10.13.0.2 ~ 10.13.0.5)를 기반으로 6개 타겟 구성
 real_targets:
-  - "10.13.0.2:14550"  # (Real 1)
-  - "10.13.0.3:14550"  # (Real 2)
-  - "10.13.0.4:14550"  # (Real 3)
-  - "10.13.0.5:14550"  # (Real 4)
-  - "10.13.0.254:14550" # (Real 5 - Placeholder)
-  - "10.13.0.253:14550" # (Real 6 - Placeholder)
+  - "10.13.0.2:14550" # (R1) flight-controller-lite (기본)
+  - "10.13.0.3:14550" # (R2) companion-computer-lite (가상 포트)
+  - "10.13.0.4:14550" # (R3) ground-control-station-lite (가상 포트)
+  - "10.13.0.5:14550" # (R4) simulator-lite (가상 포트)
+  - "10.13.0.2:14551" # (R5) flight-controller-lite (대체 포트)
+  - "10.13.0.3:14551" # (R6) companion-computer-lite (대체 포트)
 
-# --- RL Action Space (7-Action) ---
-# 컨트롤러는 아래 목록을 읽어 action_map을 생성합니다.
+
+# --- 3. MTD RL 행동 ('두뇌'->'손') 매핑 ---
+
+# [중요] PPO 모델의 7D Action (ID 0-6)에 매핑될 7개의 MTD 행동 리스트
+# rl_driven_deception_manager.py가 ID(0-6)를 '손'에게 전달하면,
+# '손'이 이 리스트를 참조하여 실제 iptables 명령을 실행합니다.
 mtd_rl_actions:
+  # Action ID: 0 (DNAT to Real Target 1)
   - id: 0
-    name: "Redirect_Real_1"
+    name: "Redirect_Real_1_FC_Main"
     type: "DNAT"
     target: "10.13.0.2:14550" # real_targets[0]와 일치
 
+  # Action ID: 1 (DNAT to Real Target 2)
   - id: 1
-    name: "Redirect_Real_2"
+    name: "Redirect_Real_2_CC_Main"
     type: "DNAT"
     target: "10.13.0.3:14550" # real_targets[1]와 일치
-
+    
+  # Action ID: 2 (DNAT to Real Target 3)
   - id: 2
-    name: "Redirect_Real_3"
+    name: "Redirect_Real_3_GCS_Main"
     type: "DNAT"
     target: "10.13.0.4:14550" # real_targets[2]와 일치
 
+  # Action ID: 3 (DNAT to Real Target 4)
   - id: 3
-    name: "Redirect_Real_4"
+    name: "Redirect_Real_4_SIM_Main"
     type: "DNAT"
     target: "10.13.0.5:14550" # real_targets[3]와 일치
-
+    
+  # Action ID: 4 (DNAT to Real Target 5)
   - id: 4
-    name: "Redirect_Decoy_1"
+    name: "Redirect_Real_5_FC_Alt"
     type: "DNAT"
-    target: "10.13.0.6:14550" # Decoy
-
+    target: "10.13.0.2:14551" # real_targets[4]와 일치
+    
+  # Action ID: 5 (DNAT to Real Target 6)
   - id: 5
-    name: "Pass"
-    type: "Pass"               # 현재 규칙 유지
+    name: "Redirect_Real_6_CC_Alt"
+    type: "DNAT"
+    target: "10.13.0.3:14551" # real_targets[5]와 일치
 
+  # Action ID: 6 (DNAT to Decoy Target 1)
   - id: 6
-    name: "Block_Traffic"
-    type: "Drop"               # public_port로 유입되는 트래픽 DROP
-
-# --- 컨트롤러 동작 옵션 ---
-conntrack_drop_on_switch: true
-state_file: "mtd/shared_state/mtd_state.json" # [중요] 컨트롤러가 쓰는 파일 (Eyes가 읽음)
-bus_source: "iptables_mtd_controller"
+    name: "Redirect_DECOY_1" # 'DECOY' 키워드가 '손'에 의해 인식됨
+    type: "DNAT"
+    target: "10.13.0.6:14550" # docker-compose-lite.yml의 'decoy-gateway'

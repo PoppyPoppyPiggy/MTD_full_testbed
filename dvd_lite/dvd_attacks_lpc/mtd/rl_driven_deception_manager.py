@@ -23,8 +23,6 @@ from mtd.adapters.rl_export_hook import RLExportHook
 # 에이전트의 상태 및 정책 공유 디렉터리
 STATE_DIR = "mtd/shared_state"
 POLICY_FILE = os.path.join(STATE_DIR, "mtd_policy.json") # RL 에이전트(Seeker)가 읽어갈 정책 파일
-# [수정] RLExportHook가 None을 허용하도록 수정되었으므로, 더미 파일 대신 None 전달
-# DUMMY_STATE_FILE = os.path.join(STATE_DIR, "mtd_state_dummy.json")
 
 # 강화학습(RL) 정책을 위한 설정
 DEFAULT_POLICY_PATH = "mtd/shared_state/defender_policy_L4.pth"

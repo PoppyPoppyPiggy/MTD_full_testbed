@@ -16,7 +16,7 @@ class RLExportHook:
             state_file_path (str): MTD 상태를 쓸 JSON 파일 경로.
             policy_file_path (str): 선택된 MTD 정책을 쓸 JSON 파일 경로.
         """
-        # [수정] state_file_path가 None일 수 있으므로(Manager의 DUMMY_FILE),
+        # [수정] state_file_path가 None일 수 있으므로(Manager가 None 전달),
         # None이 아닐 경우에만 Path 객체 생성
         if state_file_path:
             self.state_file = pathlib.Path(state_file_path)
@@ -57,8 +57,6 @@ class RLExportHook:
             print(f"오류: 내보내기 중 예기치 않은 오류 발생: {e}")
 
 # --- 사용자가 제공한 기존 함수 ---
-# 이 함수는 RLDrivenDeceptionManager에서는 사용되지 않지만,
-# 다른 모듈에서 사용할 수 있으므로 파일에 그대로 둡니다.
 def export_rl_policy_means(out_path: str, metrics: dict):
     p = pathlib.Path(out_path)
     p.parent.mkdir(parents=True, exist_ok=True)
