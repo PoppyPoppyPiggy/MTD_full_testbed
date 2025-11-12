@@ -1,0 +1,38 @@
+{
+  "os": "Linux-6.12.38+kali-amd64-x86_64-with-glibc2.41",
+  "python": "CPython 3.13.7",
+  "startedAt": "2025-11-12T07:53:24.393074Z",
+  "args": [
+    "--policy",
+    "rl/ver_02/L0_Seeker/defender_policy_L0.pth",
+    "--config",
+    "mtd/configs/iptables_mtd.yaml",
+    "--interval",
+    "15",
+    "--wandb_project",
+    "mtd_testbed_live"
+  ],
+  "program": "/home/kali/MTD_full_testbed/dvd_lite/dvd_attacks_lpc/mtd/rl_driven_deception_manager.py",
+  "codePath": "dvd_lite/dvd_attacks_lpc/mtd/rl_driven_deception_manager.py",
+  "codePathLocal": "mtd/rl_driven_deception_manager.py",
+  "git": {
+    "remote": "https://github.com/PoppyPoppyPiggy/MTD_full_testbed",
+    "commit": "c05fcc2708a155eb1b71ff9c6c3128db4be80a21"
+  },
+  "email": "emforhsqhf29@gmail.com",
+  "root": "/home/kali/MTD_full_testbed/dvd_lite/dvd_attacks_lpc",
+  "host": "kali",
+  "executable": "/home/kali/MTD_full_testbed/dvd_lite/dvd_attacks_lpc/mtd_env/bin/python3",
+  "cpu_count": 4,
+  "cpu_count_logical": 4,
+  "disk": {
+    "/": {
+      "total": "147469127680",
+      "used": "84227047424"
+    }
+  },
+  "memory": {
+    "total": "31390842880"
+  },
+  "writerId": "ahm9m13158ccthooxps4v5bdhm3bgcn8"
+}

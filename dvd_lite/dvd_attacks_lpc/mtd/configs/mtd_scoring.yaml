@@ -1,15 +1,34 @@
-# MTD 성능 점수 계산 가중치 설정
-# 각 지표의 중요도에 따라 값을 조절합니다.
+# mtd/configs/mtd_scoring.yaml
+# MTD 스코어링 매니저(mtd_scoring.py)를 위한 설정 파일
+# PPT (image_5502e4.png) 기반
 
-# 방어 성공률 ( 높을수록 좋음 )
-r_succ_weight: 5.0
+# --- 1. 스코어링 가중치 (Weights) ---
+# S_MTD = (w1 * S_D) + (w2 * R_A) - (w3 * C_M)
+weights:
+  w_deception_success: 0.5  # (w1) S_D: 기만 성공률 가중치
+  w_attack_resilience: 0.3  # (w2) R_A: 공격 탄력성 가중치
+  w_mtd_cost: 0.2           # (w3) C_M: MTD 비용 가중치
 
-# 평균 방어 비용 ( 낮을수록 좋음 - 음수 가중치 사용 )
-c_def_weight: -1.0
+# --- 2. QoS 기준선 (Baseline) ---
+# MTD 비용(C_M) 계산에 사용: C_M = (P_N - P_O) / P_O
+baseline_qos:
+  # P_O (Performance Original): MTD가 적용되지 않았을 때의 평균 성능
+  latency_ms: 50.0          # 기준 지연 시간 (ms)
+  packet_loss_percent: 0.1  # 기준 패킷 손실률 (%)
+  
+# --- 3. MTD 비용 하위 가중치 (Cost Metric Weights) ---
+# C_M = (w_latency * Cost_Latency) + (w_packet_loss * Cost_Packet_Loss)
+cost_metric_weights:
+  w_latency: 0.7            # 비용 계산 시 Latency 저하가 차지하는 비중
+  w_packet_loss: 0.3        # 비용 계산 시 Packet Loss 증가가 차지하는 비중
 
-# MTD 다양성 ( 높을수록 좋음 )
-d_bits_weight: 0.5
+# --- 4. 스코어링 실행 설정 ---
+scoring_interval: 5 # 스코어링 매니저가 점수를 계산하고 W&B에 로깅하는 주기 (초)
 
-# 향후 추가될 수 있는 지표 가중치 (예시)
-# wasted_scan_rate_weight: 0.2
-# r_known_penalty_weight: -0.5
+# --- 5. 공유 파일 경로 ---
+# mtd_scoring.py가 이 설정값을 읽어 파일 경로를 구성합니다.
+# (기준 디렉토리: mtd/shared_state)
+shared_files:
+  action_state: "mtd_action_state.json"
+  cti_assessment: "cti_threat_assessment.json"
+  system_health: "dvd_system_health.json"

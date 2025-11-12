@@ -18,10 +18,6 @@ iptables_chain: "MTD_RL_CHAIN"
 # MTD 전환 시 기존 UDP 연결(conntrack)을 강제로 끊을지 여부
 conntrack_drop_on_switch: true
 
-# '손'이 현재 MTD 상태를 기록할 파일 경로 ('눈'이 이 파일을 읽음)
-# docker-compose.yml의 볼륨 매핑과 일치해야 함 (/shared/mtd_state.json)
-state_file: "/shared/mtd_state.json" 
-
 # '손'이 Decoy 액션을 식별하기 위한 키워드 (mtd_rl_actions의 'name' 필드)
 decoy_keyword: "DECOY"
 
@@ -87,3 +83,11 @@ mtd_rl_actions:
     name: "Redirect_DECOY_1" # 'DECOY' 키워드가 '손'에 의해 인식됨
     type: "DNAT"
     target: "10.13.0.6:14550" # docker-compose-lite.yml의 'decoy-gateway'
+
+
+# --- 4. 공유 파일 경로 (Scorer, State Reader 공통) ---
+# mtd/shared_state 디렉토리 하위의 파일 이름
+shared_files:
+  action_state: "mtd_action_state.json"
+  cti_assessment: "cti_threat_assessment.json"
+  system_health: "dvd_system_health.json"

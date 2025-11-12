@@ -1,0 +1,75 @@
+{
+    "last_update_timestamp": 1762951523.9137654,
+    "controller_status": "RESETTING",
+    "public_entrypoint": "0.0.0.0:14550",
+    "current_action": {
+        "action_id": -1,
+        "action_name": "Reset",
+        "active_target": "Pass",
+        "is_decoy": false
+    },
+    "last_applied_rule": "iptables -t nat -F MTD_RL_CHAIN",
+    "conntrack_cleared": false,
+    "action_history": [
+        {
+            "id": 3,
+            "name": "Redirect_Real_4_SIM_Main",
+            "target": "10.13.0.5:14550",
+            "time": 1762951520.3219314
+        },
+        {
+            "id": 3,
+            "name": "Redirect_Real_4_SIM_Main",
+            "target": "10.13.0.5:14550",
+            "time": 1762951505.273852
+        },
+        {
+            "id": 3,
+            "name": "Redirect_Real_4_SIM_Main",
+            "target": "10.13.0.5:14550",
+            "time": 1762951490.2502928
+        },
+        {
+            "id": 3,
+            "name": "Redirect_Real_4_SIM_Main",
+            "target": "10.13.0.5:14550",
+            "time": 1762951475.2299418
+        },
+        {
+            "id": 3,
+            "name": "Redirect_Real_4_SIM_Main",
+            "target": "10.13.0.5:14550",
+            "time": 1762951460.1950839
+        },
+        {
+            "id": 3,
+            "name": "Redirect_Real_4_SIM_Main",
+            "target": "10.13.0.5:14550",
+            "time": 1762951445.1662009
+        },
+        {
+            "id": 3,
+            "name": "Redirect_Real_4_SIM_Main",
+            "target": "10.13.0.5:14550",
+            "time": 1762951430.1420033
+        },
+        {
+            "id": 3,
+            "name": "Redirect_Real_4_SIM_Main",
+            "target": "10.13.0.5:14550",
+            "time": 1762951415.1182427
+        },
+        {
+            "id": 3,
+            "name": "Redirect_Real_4_SIM_Main",
+            "target": "10.13.0.5:14550",
+            "time": 1762951400.0935338
+        },
+        {
+            "id": 3,
+            "name": "Redirect_Real_4_SIM_Main",
+            "target": "10.13.0.5:14550",
+            "time": 1762951385.069664
+        }
+    ]
+}

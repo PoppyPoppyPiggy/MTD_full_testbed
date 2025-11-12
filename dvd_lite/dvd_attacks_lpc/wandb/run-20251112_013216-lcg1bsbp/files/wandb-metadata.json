@@ -1,0 +1,36 @@
+{
+  "os": "Linux-6.12.38+kali-amd64-x86_64-with-glibc2.41",
+  "python": "CPython 3.13.7",
+  "startedAt": "2025-11-12T06:32:16.911199Z",
+  "args": [
+    "--config",
+    "mtd/configs/mtd_scoring.yaml",
+    "--project",
+    "mtd_testbed_live",
+    "--group",
+    "vs_L0_Seeker"
+  ],
+  "program": "/home/kali/MTD_full_testbed/dvd_lite/dvd_attacks_lpc/mtd/mtd_scoring.py",
+  "codePath": "dvd_lite/dvd_attacks_lpc/mtd/mtd_scoring.py",
+  "codePathLocal": "mtd/mtd_scoring.py",
+  "git": {
+    "remote": "https://github.com/PoppyPoppyPiggy/MTD_full_testbed",
+    "commit": "c05fcc2708a155eb1b71ff9c6c3128db4be80a21"
+  },
+  "email": "emforhsqhf29@gmail.com",
+  "root": "/home/kali/MTD_full_testbed/dvd_lite/dvd_attacks_lpc",
+  "host": "kali",
+  "executable": "/home/kali/MTD_full_testbed/dvd_lite/dvd_attacks_lpc/mtd_env/bin/python3",
+  "cpu_count": 4,
+  "cpu_count_logical": 4,
+  "disk": {
+    "/": {
+      "total": "147469127680",
+      "used": "85675614208"
+    }
+  },
+  "memory": {
+    "total": "31390842880"
+  },
+  "writerId": "c61omde577bkbincl0afq7mr23ojuu8y"
+}
