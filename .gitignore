@@ -151,3 +151,6 @@ dmypy.json
 
 ns-3.45/
 Damn-Vulnerable-Drone/
+wandb/
+
+.pth

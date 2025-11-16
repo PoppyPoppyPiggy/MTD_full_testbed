@@ -7,8 +7,12 @@
 - `rl_environment_v05`에서 시뮬레이션 환경을 가져옵니다.
 - `rl_model_v05`에서 정책/가치 신경망을 정의합니다.
 - `rl_config_v05`에서 상태/행동 공간 크기를 정의합니다.
-- PPO 학습 루프를 실행하고 `wandb`에 로그를 기록합니다.
+- PPO 학습 루프를 실행하고 `wandb`(TensorBoard sync)에 로그를 기록합니다.
 - 학습 완료 후 `rl_export_policy_v05`를 호출하여 모델을 저장합니다.
+
+[MTD지표 통합]
+- 각 에피소드마다 S_D, R_A, C_M, S_MTD, N_R, N_A, T_A, T_D 계산
+- TensorBoard + wandb 에 동일 키로 로깅
 
 [옵션 B] TensorBoard 이벤트 파일 기반으로 wandb 연동
 - wandb.tensorboard.patch(root_logdir=...) 를 SummaryWriter 생성 전에 호출
@@ -38,6 +42,13 @@ try:
 except ImportError:
     wandb = None
     print("Warning: 'wandb' a-py (pip install wandb)가 설치되지 않았습니다. --disable-wandb 플래그가 강제 활성화됩니다.")
+
+# ----- [MTD 스코어 가중치] v02와 동일 -----
+W_S_D = 0.5  # Deception success
+W_R_A = 0.3  # Attack resilience
+W_C_M = 0.2  # MTD cost
+R_MAX = 10.0 # R_A 상한
+# ----------------------------------------
 
 
 def parse_args():
@@ -108,7 +119,7 @@ class PPOAgent:
         self.value_net.eval()
         with torch.no_grad():
             # 이전 에피소드 종료 시 가치(value)를 0으로 마스킹 (GAE 계산 시 중요)
-            last_values = self.value_net(obs) * done_mask
+            _ = self.value_net(obs) * done_mask  # last_values (사용은 안 하지만 형태 유지)
             
             # 행동 결정 (Stochastic)
             dist = self.policy_net(obs)
@@ -117,7 +128,8 @@ class PPOAgent:
             
         self.policy_net.train()
         self.value_net.train()
-        return action, logprob, last_values
+        return action, logprob, self.value_net(obs)
+
 
     def update(self, advantages, returns, b_obs, b_logprobs, b_actions):
         """ PPO 정책 및 가치 네트워크 업데이트 """
@@ -198,9 +210,8 @@ def main():
     tb_logdir = os.path.join("runs", run_name)
     os.makedirs(tb_logdir, exist_ok=True)
 
-    # --- [중요] wandb + TensorBoard 연동 (SummaryWriter보다 먼저) ---
+    # --- wandb + TensorBoard 연동 (SummaryWriter보다 먼저) ---
     if (wandb is not None) and (not cfg.disable_wandb):
-        # TensorBoard 이벤트 파일 위치를 wandb에 명시적으로 알려줌
         wandb.tensorboard.patch(root_logdir=tb_logdir, pytorch=True)
         wandb.init(
             project=cfg.wandb_project,
@@ -215,7 +226,7 @@ def main():
         print("Wandb 로깅 비활성화.")
     # -------------------------------------------------------------
 
-    # 이제 SummaryWriter 생성 (wandb.patch / init 이후)
+    # 이제 SummaryWriter 생성
     writer = SummaryWriter(tb_logdir)
     writer.add_text(
         "hyperparameters",
@@ -241,8 +252,27 @@ def main():
     # 에피소드 보상/길이 추적
     ep_rewards = []
     ep_lengths = []
+
+    # 현재 에피소드용 누적 변수
     current_ep_reward = 0.0
     current_ep_length = 0
+
+    current_ep_total_attack_steps = 0
+    current_ep_steps_on_decoy_while_attacked = 0
+    current_ep_successful_attacks_N_A = 0
+    current_ep_reconfigurations_N_R = 0
+    current_ep_total_cost = 0.0
+
+    # 로그 윈도우용 MTD 지표 누적
+    window_episodes = 0
+    log_avg_S_MTD = 0.0
+    log_avg_S_D = 0.0
+    log_avg_R_A = 0.0
+    log_avg_C_M = 0.0
+    log_total_N_R = 0.0
+    log_total_N_A = 0.0
+    log_total_T_A = 0.0
+    log_total_T_D = 0.0
 
     # 학습 루프
     for update in range(1, cfg.updates + 1):
@@ -269,26 +299,82 @@ def main():
             agent.dones[step] = torch.tensor(done, dtype=torch.float32).to(cfg.device)
             agent.values[step] = value.squeeze()  # (1, 1) -> 스칼라
 
+            # --- [MTD 지표용 per-step 정보 추출] ---
+            cost = 0.0
+            is_attack = False
+            is_decoy = False
+            is_breach = False
+            did_reconfig = False
+            if info is not None:
+                cost = float(info.get("cost", 0.0))
+                is_attack = bool(info.get("is_attack_detected", info.get("is_attack", False)))
+                is_decoy = bool(info.get("is_decoy_action", False))
+                is_breach = bool(info.get("is_breach", False))
+                did_reconfig = bool(info.get("did_reconfigure", info.get("is_reconfig", False)))
+
+            current_ep_total_cost += cost
+            if is_attack:
+                current_ep_total_attack_steps += 1
+            if is_attack and is_decoy:
+                current_ep_steps_on_decoy_while_attacked += 1
+            if is_breach:
+                current_ep_successful_attacks_N_A += 1
+            if did_reconfig:
+                current_ep_reconfigurations_N_R += 1
+            # ---------------------------------------------------------
+
             # 다음 상태 준비
             obs = torch.tensor(next_obs_np, dtype=torch.float32).to(cfg.device).unsqueeze(0)
             
             # 에피소드 종료 처리
             if done:
-                # 1) 에피소드 통계 저장
+                # 1) episode-level MTD 지표 계산
+                T_A = current_ep_total_attack_steps
+                T_D = current_ep_steps_on_decoy_while_attacked
+                N_A = current_ep_successful_attacks_N_A
+                N_R = current_ep_reconfigurations_N_R
+                C_M = current_ep_total_cost / max(current_ep_length, 1)
+
+                S_D = (T_D / T_A) if T_A > 0 else 0.0
+                if N_A == 0:
+                    R_A = min(float(N_R), R_MAX)
+                else:
+                    R_A = float(N_R) / float(N_A)
+
+                S_MTD = W_S_D * S_D + W_R_A * R_A - W_C_M * C_M
+
+                # 2) 롤링 윈도우 누적
+                window_episodes += 1
+                log_avg_S_MTD += S_MTD
+                log_avg_S_D += S_D
+                log_avg_R_A += R_A
+                log_avg_C_M += C_M
+                log_total_N_R += N_R
+                log_total_N_A += N_A
+                log_total_T_A += T_A
+                log_total_T_D += T_D
+
+                # 3) 에피소드 reward/length 저장
                 ep_rewards.append(current_ep_reward)
                 ep_lengths.append(current_ep_length)
                 
-                # 2) 에피소드 단위 환경 메트릭 로깅 (선택)
+                # 4) 추가 환경 메트릭 로깅 (선택)
                 if info and (update % 10 == 0):
                     for key, val in info.items():
                         if "Metrics/" in key or "Params/" in key:
                             writer.add_scalar(f"EpisodeEnd/{key}", val, update)
 
-                # 3) 환경 리셋
+                # 5) 에피소드 리셋
                 obs = torch.tensor(env.reset(), dtype=torch.float32).to(cfg.device).unsqueeze(0)
                 done_mask = torch.ones((1, 1)).to(cfg.device)
+
                 current_ep_reward = 0.0
                 current_ep_length = 0
+                current_ep_total_attack_steps = 0
+                current_ep_steps_on_decoy_while_attacked = 0
+                current_ep_successful_attacks_N_A = 0
+                current_ep_reconfigurations_N_R = 0
+                current_ep_total_cost = 0.0
             else:
                 done_mask = torch.ones((1, 1)).to(cfg.device)
 
@@ -326,14 +412,41 @@ def main():
         if update % 10 == 0:
             avg_reward = np.mean(ep_rewards[-50:]) if ep_rewards else 0.0
             avg_length = np.mean(ep_lengths[-50:]) if ep_lengths else 0.0
-            
             sps = int(cfg.batch_size * update / (time.time() - start_time))
-            print(f"Update {update}/{cfg.updates}... Avg Reward: {avg_reward:.2f}")
 
-            # TensorBoard 로깅
+            # ----- MTD Score 윈도우 평균 -----
+            if window_episodes > 0:
+                avg_S_MTD = log_avg_S_MTD / window_episodes
+                avg_S_D = log_avg_S_D / window_episodes
+                avg_R_A = log_avg_R_A / window_episodes
+                avg_C_M = log_avg_C_M / window_episodes
+            else:
+                avg_S_MTD = avg_S_D = avg_R_A = avg_C_M = 0.0
+
+            print(
+                f"Update {update}/{cfg.updates}... "
+                f"Avg Reward: {avg_reward:.2f} | "
+                f"S_MTD: {avg_S_MTD:.2f} (S_D={avg_S_D:.2f}, R_A={avg_R_A:.2f}, C_M={avg_C_M:.2f})"
+            )
+
+            # TensorBoard 로깅 (wandb에 그대로 sync)
             writer.add_scalar("Rollout/mean_ep_reward", avg_reward, update)
             writer.add_scalar("Rollout/mean_ep_length", avg_length, update)
             writer.add_scalar("Debug/SPS", sps, update)
+
+            writer.add_scalar("Metric/MTD_Score_Overall", avg_S_MTD, update)
+            writer.add_scalar("Metric/Metric_Deception_Success (S_D)", avg_S_D, update)
+            writer.add_scalar("Metric/Metric_Attack_Resilience (R_A)", avg_R_A, update)
+            writer.add_scalar("Metric/Metric_MTD_Cost (C_M)", avg_C_M, update)
+            writer.add_scalar("Metric/Detail_Reconfigurations (N_R)", log_total_N_R, update)
+            writer.add_scalar("Metric/Detail_Successful_Attacks (N_A)", log_total_N_A, update)
+            writer.add_scalar("Metric/Detail_Total_Attack_Steps (T_A)", log_total_T_A, update)
+            writer.add_scalar("Metric/Detail_Total_Decoy_Steps (T_D)", log_total_T_D, update)
+
+            # 윈도우 리셋
+            window_episodes = 0
+            log_avg_S_MTD = log_avg_S_D = log_avg_R_A = log_avg_C_M = 0.0
+            log_total_N_R = log_total_N_A = log_total_T_A = log_total_T_D = 0.0
 
     # --- 학습 종료 ---
     print("\n학습 완료.")
