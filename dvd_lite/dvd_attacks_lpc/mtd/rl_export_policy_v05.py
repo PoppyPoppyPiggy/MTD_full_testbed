@@ -4,6 +4,7 @@
 # -*- coding: utf-8 -*-
 """
 [신규 7/8] 학습된 정책을 실전 배포용(v05)으로 내보내는 스크립트
+(기존 rl_train_v05.py 파일의 실제 내용)
 
 - [v04 대비 변경점]
 - v05 계약(rl_config_v05.py)을 임포트하여 meta.json 생성
@@ -15,9 +16,9 @@ import torch
 import numpy as np
 from typing import List, Dict, Any
 
-# 학습 환경과 동일한 정의를 가져옵니다.
-from mtd.rl_model_v05 import MTDPolicyNet
-from mtd.rl_config_v05 import (
+# mtd 패키지 내의 다른 모듈을 참조 (상대 경로)
+from .rl_model_v05 import MTDPolicyNet
+from .rl_config_v05 import (
     ACTION_PARAM_KEYS, ACTION_DIM,
     FEATURE_KEYS, OBS_DIM
 )
@@ -46,6 +47,8 @@ def export_mtd_policy(
     meta_path = os.path.join(save_dir, f"{base_name}_meta.json")
 
     # 1. 모델 가중치(.pth) 저장 (Actor Net만)
+    # CPU로 모델을 이동시킨 후 state_dict 저장 (배포 환경 호환성)
+    policy_net.to('cpu')
     torch.save(policy_net.state_dict(), ckpt_path)
 
     # 2. 메타데이터(.json) 생성
@@ -73,3 +76,6 @@ def export_mtd_policy(
     print(f"\n[MTD 정책 내보내기 완료]")
     print(f"  - 가중치: {ckpt_path}")
     print(f"  - 메타  : {meta_path}")
+
+# 이 파일은 유틸리티 모듈이므로, 직접 실행 코드가 없습니다.
+# rl_train_v05.py가 이 파일의 export_mtd_policy 함수를 임포트하여 사용합니다.
