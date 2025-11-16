@@ -224,6 +224,10 @@ def main():
     # 에피소드 보상/길이 추적
     ep_rewards = []
     ep_lengths = []
+    # --- [수정] 현재 에피소드 추적 변수 추가 ---
+    current_ep_reward = 0.0
+    current_ep_length = 0
+    # -------------------------------------
 
     # 학습 루프
     for update in range(1, cfg.updates + 1):
@@ -238,6 +242,11 @@ def main():
             # 환경 스텝 실행
             next_obs_np, reward, done, info = env.step(action_np)
             
+            # --- [수정] 현재 에피소드 보상/길이 누적 ---
+            current_ep_reward += reward
+            current_ep_length += 1
+            # ---------------------------------------
+            
             # 버퍼에 저장
             agent.obs[step] = obs.squeeze(0)
             agent.actions[step] = action.squeeze(0)
@@ -249,17 +258,30 @@ def main():
             # 다음 상태 준비
             obs = torch.tensor(next_obs_np, dtype=torch.float32).to(cfg.device).unsqueeze(0)
             
-            # 에피소드 종료 처리
+            # --- [수정] 에피소드 종료 처리 로직 변경 ---
             if done:
-                # print(f"Update {update}, Step {step}: 에피소드 종료. Reward: {info.get('episode_reward', 0)}")
-                ep_rewards.append(info.get("episode_reward", 0))
-                ep_lengths.append(info.get("episode_length", 0))
+                # 1. 실제 누적 보상/길이 저장
+                ep_rewards.append(current_ep_reward)
+                ep_lengths.append(current_ep_length)
                 
-                # 환경 리셋 및 마스크 갱신
+                # 2. (중요) 에피소드가 끝났을 때의 Metrics/Params를 wandb에 로깅
+                # (10 업데이트 주기로 로깅)
+                if info and update % 10 == 0: 
+                    # "EpisodeEnd/" 그룹으로 로깅하여 "LastStep/"과 구분 (선택 사항)
+                    log_prefix = "EpisodeEnd/" 
+                    for key, val in info.items():
+                        if "Metrics/" in key or "Params/" in key:
+                             # wandb/tensorboard에 로그 전송
+                             writer.add_scalar(f"{log_prefix}{key}", val, update) 
+                
+                # 3. 환경 리셋 및 추적자 초기화
                 obs = torch.tensor(env.reset(), dtype=torch.float32).to(cfg.device).unsqueeze(0)
                 done_mask = torch.ones((1, 1)).to(cfg.device)
+                current_ep_reward = 0.0
+                current_ep_length = 0
             else:
                 done_mask = torch.ones((1, 1)).to(cfg.device)
+            # --- [수정 완료] ---
 
         # GAE (Generalized Advantage Estimation) 계산
         with torch.no_grad():
@@ -289,11 +311,16 @@ def main():
             writer.add_scalar("Rollout/mean_ep_length", avg_length, update)
             writer.add_scalar("Debug/SPS", int(cfg.batch_size * update / (time.time() - start_time)), update)
             
-            # 환경 메트릭 로깅 (info에서 마지막 값 기준)
-            if info:
-                for key, val in info.items():
-                    if "Metrics/" in key or "Params/" in key:
-                         writer.add_scalar(key, val, update)
+            # --- [수정] 아래 블록 삭제 ---
+            # (이 로직은 "if done:" 블록으로 이동되었으며,
+            #  "batch_size 마지막 스텝" 기준 로깅은 부정확하여 제거합니다.)
+            #
+            # # 환경 메트릭 로깅 (info에서 마지막 값 기준)
+            # if info:
+            #     for key, val in info.items():
+            #         if "Metrics/" in key or "Params/" in key:
+            #              writer.add_scalar(key, val, update)
+            # ----------------------------
 
     # --- 학습 종료 ---
     print("\n학습 완료.")
