@@ -1,0 +1,40 @@
+{
+  "os": "Linux-6.12.38+kali-amd64-x86_64-with-glibc2.41",
+  "python": "CPython 3.13.7",
+  "startedAt": "2025-11-13T03:01:44.790799Z",
+  "args": [
+    "--level",
+    "L0",
+    "--config",
+    "mtd/configs/iptables_mtd.yaml",
+    "--interval",
+    "8",
+    "--wandb_project",
+    "mtd_testbed_live",
+    "--wandb_group",
+    "vs_L0_Seeker"
+  ],
+  "program": "/home/kali/MTD_full_testbed/dvd_lite/dvd_attacks_lpc/mtd/seeker.py",
+  "codePath": "dvd_lite/dvd_attacks_lpc/mtd/seeker.py",
+  "codePathLocal": "mtd/seeker.py",
+  "git": {
+    "remote": "https://github.com/PoppyPoppyPiggy/MTD_full_testbed",
+    "commit": "02ca2048d17c040b3a94d152ac39b4714508ed46"
+  },
+  "email": "emforhsqhf29@gmail.com",
+  "root": "/home/kali/MTD_full_testbed/dvd_lite/dvd_attacks_lpc",
+  "host": "kali",
+  "executable": "/home/kali/MTD_full_testbed/dvd_lite/dvd_attacks_lpc/mtd_env/bin/python3",
+  "cpu_count": 4,
+  "cpu_count_logical": 4,
+  "disk": {
+    "/": {
+      "total": "147469127680",
+      "used": "90987696128"
+    }
+  },
+  "memory": {
+    "total": "31390842880"
+  },
+  "writerId": "vu5kb2oez4z60mcgg10mjpd3dfyiyvqm"
+}
