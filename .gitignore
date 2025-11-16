@@ -153,4 +153,10 @@ ns-3.45/
 Damn-Vulnerable-Drone/
 wandb/
 
-.pth
+# PyTorch / RL model checkpoints
+*.pth
+*.pt
+*.ckpt
+
+# (선택) RL 모델 export 디렉토리 전체 무시하고 싶으면 아래도 추가
+dvd_lite/dvd_attacks_lpc/mtd/rl_models/
