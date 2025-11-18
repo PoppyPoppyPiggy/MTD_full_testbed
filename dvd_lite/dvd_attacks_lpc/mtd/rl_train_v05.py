@@ -144,17 +144,24 @@ def train_ppo(args):
 
             # --- Rollout Collection Phase ---
             while not done:
-                # 1. Agent acts
-                action, log_prob, value = agent.get_action_and_value(torch.as_tensor(state, dtype=torch.float32).to(device))
+                # 1. Agent acts: Add batch dimension (unsqueeze(0)) for single input
+                action, log_prob, value = agent.get_action_and_value(
+                    torch.as_tensor(state, dtype=torch.float32).to(device).unsqueeze(0)
+                )
                 
                 # 2. Step environment
                 # The environment returns next_state, reward, terminated, truncated, info
                 next_state, reward, terminated, truncated, info = env.step(action.cpu().numpy())
                 done = terminated or truncated
 
-                # 3. Store transition
+                # 3. Store transition: action/log_prob/value are size (1, N) or (1,), so use .squeeze(0) or .item()
                 agent.store_transition(
-                    state, action.cpu().numpy(), log_prob.item(), reward, value.item(), done
+                    state, 
+                    action.squeeze(0).cpu().numpy(), 
+                    log_prob.item(), 
+                    reward, 
+                    value.item(), 
+                    done
                 )
                 
                 state = next_state
@@ -290,7 +297,7 @@ if __name__ == '__main__':
     parser.add_argument("--gamma", type=float, default=0.99, help="Discount factor (gamma)")
     parser.add_argument("--gae-lambda", type=float, default=0.95, help="GAE lambda parameter")
     parser.add_argument("--clip-coef", type=float, default=0.2, help="PPO clipping coefficient")
-    parser.add_argument("--max-grad-norm", type=float, default=0.5, help="Maximum norm for gradient clipping") # <-- 추가된 부분
+    parser.add_argument("--max-grad-norm", type=float, default=0.5, help="Maximum norm for gradient clipping")
     parser.add_argument("--ent-coef", type=float, default=0.01, help="Entropy coefficient")
     parser.add_argument("--vf-coef", type=float, default=0.5, help="Value function coefficient")
     parser.add_argument("--ppo-epochs", type=int, default=10, help="Number of epochs to run PPO update per batch")
