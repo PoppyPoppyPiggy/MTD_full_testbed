@@ -33,7 +33,7 @@ def _safe_divide(numerator, denominator):
 
 def calculate_metrics_from_infos(ep_infos):
     """
-    Calculates detailed episode-level metrics from collected info dictionaries.
+    Calculates detailed episode-level metrics collected info dictionaries.
     Note: The environment's _get_current_metrics already calculates DRS/TTF 
     based on internal state at the last step. We aggregate and average other metrics here.
     
