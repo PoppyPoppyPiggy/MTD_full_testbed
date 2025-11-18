@@ -1,4 +1,3 @@
-# 파일 경로: dvd_lite/dvd_attacks_lpc/mtd/rl_model_v05.py
 import torch
 import torch.nn as nn
 from torch.distributions import Normal
@@ -36,7 +35,7 @@ class ActorCritic(nn.Module):
         # Log Standard Deviation (Learned parameter for the Gaussian policy)
         # One log_std parameter per action dimension
         self.log_std = nn.Parameter(torch.zeros(action_dim))
-        self.log_std.data.fill_(0.0)  # Initialize log_std to 0 (std=1)
+        self.log_std.data.fill_(0.0) # Initialize log_std to 0 (std=1)
 
     def _layer_init(self, layer, std=np.sqrt(2), bias_const=0.0):
         """Orthogonal Initialization."""
