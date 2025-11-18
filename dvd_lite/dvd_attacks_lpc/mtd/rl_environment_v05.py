@@ -1,573 +1,707 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-rl_environment_v05.py
-
-MTD 학습용 시뮬레이션 환경 (NetworkEnv v0.5)
-
-- SimulatedHeuristicSeeker   : 공격자(Seeker) 행동 시뮬레이션
-- SimulatedPassiveCTI        : CTI(수동 센서) 시뮬레이션
-- SimulatedBlacklister       : 블랙리스트 정책 시뮬레이션
-- NetworkEnv                 : PPO가 상호작용하는 Gym-like 환경
-
-목표:
-- 학습 중에 관측되는 state / info 구조를
-  실제 테스트베드(CTI + MTD 컨트롤러 + Seeker 공격 로그)와 의미론적으로 맞춘다.
-"""
-
-from __future__ import annotations
-
-import math
-from collections import deque
-from typing import Dict, Tuple, Any, Optional
-
+import gym
+from gym import spaces
 import numpy as np
-
-from rl_config_v05 import (
-    ACTION_PARAM_KEYS,
-    FEATURE_KEYS,
-    OBS_DIM,
-    ACTION_DIM,
-    SIM_TIME_PER_STEP_SEC,
+import random
+import logging
+from collections import deque
+from scipy.special import expit, logit # sigmoid and logit
+import math
+from .rl_config_v05 import (
+    FEATURE_KEYS, ACTION_PARAM_KEYS, SIM_TIME_PER_STEP_SEC,
+    NUM_TARGET_ENDPOINTS, NUM_DECOY_ENDPOINTS, NUM_TOTAL_ENDPOINTS,
+    SEEKER_PROB_PARAMS, COST_MTD_ACTION, COST_SHUFFLE, COST_DECOY, COST_BL, COST_WEIGHT
 )
 
+# Set up logging
+logger = logging.getLogger(__name__)
+
+# --- Utility Functions ---
+def _scale_action(action, lower_bound=0.0, upper_bound=1.0):
+    """Rescales an action from [-1, 1] (tanh output) to [lower_bound, upper_bound]."""
+    return lower_bound + (0.5 * (action + 1.0) * (upper_bound - lower_bound))
+
+def _safe_divide(numerator, denominator):
+    """Divides safely, returning 0 if the denominator is zero."""
+    return numerator / denominator if denominator != 0 else 0.0
+
+# --- Simulated Components (Simplified for brevity, focusing on the core logic changes) ---
 
 class SimulatedPassiveCTI:
-    """
-    간단한 수동 CTI 센서 시뮬레이터.
-    - suspicious=True 인 트래픽에 대해 높은 점수를 내고,
-      threshold 이상이면 경보로 처리.
-    """
+    """Simulates a passive CTI agent providing a raw alert rate metric."""
+    def __init__(self, rng, window_size=100, detection_threshold=0.5):
+        self.rng = rng
+        # Note: Actual CTI threshold should be tuned to match real-world detection rate
+        self.detection_threshold = detection_threshold 
+        self.alert_history = deque([0] * window_size, maxlen=window_size)
 
-    def __init__(
-        self,
-        detection_threshold: float = 0.5,
-        window_size: int = 200,
-        rng: Optional[np.random.Generator] = None,
-    ) -> None:
-        self.detection_threshold = detection_threshold
-        self.window_size = window_size
-        self.rng = rng or np.random.default_rng()
-        self._alert_history = deque(maxlen=window_size)
-        self._score_history = deque(maxlen=window_size)
-
-    def process_traffic(self, suspicious: bool) -> Tuple[float, bool]:
-        if suspicious:
-            score = float(self.rng.normal(loc=0.8, scale=0.15))
+    def process_traffic(self, is_suspicious):
+        """Generates a CTI score and updates alert status."""
+        # Score distribution: Suspicious traffic is more likely to score high
+        if is_suspicious:
+            score = self.rng.normal(loc=0.8, scale=0.1)
         else:
-            score = float(self.rng.normal(loc=0.1, scale=0.05))
-        score = max(0.0, min(1.0, score))
+            score = self.rng.normal(loc=0.1, scale=0.1)
+        
+        score = np.clip(score, 0.0, 1.0)
+        
         is_alert = score >= self.detection_threshold
-
-        self._score_history.append(score)
-        self._alert_history.append(1.0 if is_alert else 0.0)
-
+        self.alert_history.append(1 if is_alert else 0)
+        
         return score, is_alert
 
-    @property
-    def alert_rate(self) -> float:
-        if not self._alert_history:
-            return 0.0
-        return float(sum(self._alert_history) / len(self._alert_history))
-
-    @property
-    def last_score(self) -> float:
-        if not self._score_history:
-            return 0.0
-        return float(self._score_history[-1])
-
+    def get_alert_rate(self):
+        """Calculates the rolling alert rate."""
+        return sum(self.alert_history) / self.alert_history.maxlen
 
 class SimulatedBlacklister:
-    """
-    블랙리스트 정책 시뮬레이터.
+    """Simulates the blacklisting policy effect (BL)."""
+    def __init__(self, rng):
+        self.rng = rng
+        self.blacklist_policy = {
+            "aggression": 0.0,  # 0 to 1
+            "duration": 0.0,    # 0 to 1
+        }
+        self.blocked_ips = {} # {ip: remaining_steps}
 
-    - blacklist_aggression (0~1):
-        0.0 → threshold=0.1 (민감, 잘 막음)
-        1.0 → threshold=0.9 (둔감, 거의 안 막음)
+    def update_policy(self, aggression_param, duration_param):
+        """Maps RL action parameters (0-1) to internal policy parameters."""
+        from .rl_config_v05 import BLACKLIST_SENSITIVITY_MIN, BLACKLIST_SENSITIVITY_MAX, BLACKLIST_DURATION_MIN_STEPS, BLACKLIST_DURATION_MAX_STEPS
+        
+        # Aggression maps to CTI sensitivity/threshold
+        sensitivity = aggression_param * (BLACKLIST_SENSITIVITY_MAX - BLACKLIST_SENSITIVITY_MIN) + BLACKLIST_SENSITIVITY_MIN
+        # Duration maps to block time in steps
+        duration_steps = int(duration_param * (BLACKLIST_DURATION_MAX_STEPS - BLACKLIST_DURATION_MIN_STEPS) + BLACKLIST_DURATION_MIN_STEPS)
 
-    - blacklist_duration (0~1):
-        0.0 → 10 스텝
-        1.0 → 10000 스텝 (사실상 매우 길게)
-    """
+        self.blacklist_policy.update({
+            "aggression": sensitivity,
+            "duration": duration_steps,
+        })
+        return self.blacklist_policy
 
-    def __init__(
-        self,
-        rng: Optional[np.random.Generator] = None,
-    ) -> None:
-        self.rng = rng or np.random.default_rng()
-        self.threshold: float = 0.5
-        self.duration_steps: int = 100
-        self._entries: Dict[str, int] = {}
-        self.min_duration: int = 10
-        self.max_duration: int = 10_000
+    def apply_block(self, ip, cti_score):
+        """Applies a block if CTI score is above the dynamic aggression threshold."""
+        if cti_score >= self.blacklist_policy["aggression"]:
+            self.blocked_ips[ip] = self.blacklist_policy["duration"]
+            return True
+        return False
 
-    def set_policy_parameters(
-        self,
-        aggression: float,
-        duration: float,
-    ) -> None:
-        agg = float(np.clip(aggression, 0.0, 1.0))
-        dur = float(np.clip(duration, 0.0, 1.0))
-        self.threshold = 0.1 + agg * 0.8
-        self.duration_steps = int(self.min_duration + dur * (self.max_duration - self.min_duration))
+    def step(self):
+        """Decrements duration of all active blocks and clears expired ones."""
+        expired_ips = [ip for ip, duration in self.blocked_ips.items() if duration <= 1]
+        for ip in expired_ips:
+            del self.blocked_ips[ip]
+        
+        for ip in list(self.blocked_ips.keys()): # Use list() for safe iteration during modification
+            self.blocked_ips[ip] -= 1
 
-    def process_alert(self, ip: str, cti_score: float) -> None:
-        if cti_score >= self.threshold:
-            self._entries[ip] = self.duration_steps
+    def is_blocked(self, ip):
+        """Checks if a given IP is currently blocked."""
+        return ip in self.blocked_ips
 
-    def step_decay(self) -> None:
-        to_delete = []
-        for ip, ttl in self._entries.items():
-            ttl -= 1
-            if ttl <= 0:
-                to_delete.append(ip)
-            else:
-                self._entries[ip] = ttl
-        for ip in to_delete:
-            del self._entries[ip]
-
-    def is_blocked(self, ip: str) -> bool:
-        return ip in self._entries
-
-    @property
-    def size(self) -> int:
-        return len(self._entries)
-
+    def get_size_ratio(self):
+        """Returns current blacklist size normalized by total endpoints (approximation)."""
+        return min(1.0, len(self.blocked_ips) / NUM_TOTAL_ENDPOINTS)
+        
+    def get_current_level(self):
+        """Returns the current Blacklist Level (aggression proxy) for cost calculation."""
+        return self.blacklist_policy['aggression']
 
 class SimulatedHeuristicSeeker:
     """
-    시뮬레이터용 Heuristic 공격자.
-
-    level에 따라 scan / exploit / ip-change 패턴이 달라진다고 가정.
-    실제 테스트베드 시커가 비슷한 통계를 가지도록 튜닝하면 됨.
+    Simulates the multi-stage attack process (Scan -> Find -> Exploit -> Breach).
+    Seeker is not an RL agent itself, but follows heuristic probability model.
     """
-
-    def __init__(
-        self,
-        level: int = 2,
-        rng: Optional[np.random.Generator] = None,
-    ) -> None:
-        self.level = level
-        self.rng = rng or np.random.default_rng()
-        self.current_ip: str = "100.10.1.1"
-        self.ip_change_count: int = 0
-        self.total_steps: int = 0
-
-        # 레벨별 대략적인 행동 비율 설정
-        if level == 0:
-            self.scan_prob = 0.1
-            self.attack_prob = 0.1
-            self.ip_change_prob = 0.02
-        elif level == 1:
-            self.scan_prob = 0.2
-            self.attack_prob = 0.2
-            self.ip_change_prob = 0.05
-        elif level == 2:
-            self.scan_prob = 0.25
-            self.attack_prob = 0.35
-            self.ip_change_prob = 0.08
-        elif level == 3:
-            self.scan_prob = 0.3
-            self.attack_prob = 0.45
-            self.ip_change_prob = 0.12
-        else:  # level >= 4
-            self.scan_prob = 0.3
-            self.attack_prob = 0.55
-            self.ip_change_prob = 0.2
-
-        # 나머지는 "휴식" (공격 없음)
-
-    def _change_ip_if_needed(self) -> None:
-        if self.rng.random() < self.ip_change_prob:
-            last_octet = self.rng.integers(2, 254)
-            self.current_ip = f"100.10.1.{int(last_octet)}"
-            self.ip_change_count += 1
-
-    def act(self) -> Tuple[str, str, bool]:
-        """
-        Returns:
-            action_type: "none" | "scan" | "attack"
-            ip: 현재 공격 IP
-            suspicious: CTI 기준 '수상한' 트래픽인지 여부
-        """
-        self.total_steps += 1
-        self._change_ip_if_needed()
-
-        r = self.rng.random()
-        if r < self.scan_prob:
-            return "scan", self.current_ip, True
-        elif r < self.scan_prob + self.attack_prob:
-            return "attack", self.current_ip, True
-        else:
-            return "none", self.current_ip, False
-
-    @property
-    def ip_change_rate(self) -> float:
-        if self.total_steps == 0:
-            return 0.0
-        return float(self.ip_change_count / self.total_steps)
-
-
-class NetworkEnv:
-    """
-    PPO 학습용 MTD 환경.
-
-    - 관찰: FEATURE_KEYS (16차원)
-    - 행동: ACTION_PARAM_KEYS (6차원 연속 [-1, 1])
-
-    step(...) 반환:
-        obs, reward, done, info
-
-    info에는 반드시 아래 필드가 포함됨:
-        cost: float
-        is_attack: bool
-        is_attack_detected: bool
-        is_decoy_action: bool
-        is_breach: bool
-        did_reconfigure: bool
-        attack_stage: str ("idle"|"recon"|"exploit"|"breach")
-      + Metrics/*, Params/*
-    """
-
-    def __init__(
-        self,
-        seeker_level: int = 2,
-        seed: int = 0,
-        max_episode_steps: int = 512,
-    ) -> None:
+    def __init__(self, rng, seeker_level, ip_list, decoy_ip_list):
+        self.rng = rng
+        self.ip_list = ip_list
+        self.decoy_ip_list = decoy_ip_list
         self.seeker_level = seeker_level
-        self.max_episode_steps = max_episode_steps
+        self.current_ip = self.rng.choice(self.ip_list + self.decoy_ip_list)
+        
+        # Internal Seeker state for LPC (Low-level Persistent Cache)
+        # 0=unknown, 1=found, 2=exploited
+        self.ip_knowledge = {ip: 0 for ip in self.ip_list + self.decoy_ip_list} 
+        self.current_exposure_steps = 0 # Steps since last IP change/shuffle
+        
+        # Attack Parameters based on Level (L0-L2 fixed, L3 uses adaptive parameters)
+        self.scan_effort, self.attack_bias, self.ip_change_prob = self._get_seeker_params(seeker_level)
+        self.seeker_params = (self.scan_effort, self.attack_bias) # For feature logging
 
-        self.rng = np.random.default_rng(seed)
-        self.cti = SimulatedPassiveCTI(rng=self.rng)
-        self.blacklister = SimulatedBlacklister(rng=self.rng)
-        self.seeker = SimulatedHeuristicSeeker(level=seeker_level, rng=self.rng)
+        # Counters for metrics (resets per episode)
+        self.scan_attempts = 0
+        self.find_events = 0
+        self.exploit_attempts = 0
+        self.exploit_block = 0
+        self.exploit_success = 0
+        self.breach_attempts = 0
+        self.breach_block = 0
+        self.breach_success = 0
+        self.decoy_lures = 0
 
-        # 상태 / 통계
-        self.step_count: int = 0
-        self.episode_step: int = 0
+    def _get_seeker_params(self, level):
+        """Sets fixed parameters for seeker levels L0-L2. L3 uses a fixed value for simplicity here."""
+        if level == 0:  # Naive
+            return 0.5, 0.5, 0.05
+        elif level == 1: # Scanner (High scan, Loud bias)
+            return 2.0, 0.8, 0.02
+        elif level == 2: # Stealthy (Low scan, Stealth bias)
+            return 0.8, 0.2, 0.01
+        elif level == 3: # ARL (Adaptive - simulated via hardcoded medium)
+            return 1.0, 0.5, 0.03 
+        else: # Default/Custom
+            return 1.0, 0.5, 0.05
 
-        self.current_route_type: str = "REAL"  # "REAL" | "DECOY" | "ALTERNATE"
-        self.last_action_params = np.full(ACTION_DIM, 0.5, dtype=np.float32)
-        self.prev_action_params = self.last_action_params.copy()
+    def _update_ip_knowledge(self, ip, status_code):
+        """Updates knowledge of an IP (1=Found, 2=Exploited)."""
+        if status_code > self.ip_knowledge.get(ip, 0):
+            self.ip_knowledge[ip] = status_code
 
-        # 메트릭 누적
-        self.metrics: Dict[str, float] = {}
-        self._uptime_window = deque(maxlen=100)
-        self._attack_window = deque(maxlen=100)    # bool is_attack
-        self._breach_times: list[float] = []
+    def _get_seeker_scan_prob(self):
+        """Calculates scan probability based on effort and clamping. p_scan = clamp(0.4*scan_effort, 0.05, 0.95)"""
+        factor = SEEKER_PROB_PARAMS["SCAN_PROB_FACTOR"]
+        min_p = SEEKER_PROB_PARAMS["SCAN_PROB_MIN"]
+        max_p = SEEKER_PROB_PARAMS["SCAN_PROB_MAX"]
+        return np.clip(factor * self.scan_effort, min_p, max_p)
 
-        # 공격 스텝 집계 (에피소드 단위)
-        self.reset_episode_counters()
+    def _get_seeker_find_prob(self):
+        """Calculates find probability based on accumulated exposure time. p_find = 1 - exp(-0.05 * exposure_steps)"""
+        if self.ip_knowledge.get(self.current_ip, 0) < 1:
+            exp_factor = SEEKER_PROB_PARAMS["FIND_EXP_FACTOR"]
+            p_find = 1.0 - math.exp(-exp_factor * self.current_exposure_steps)
+            return np.clip(p_find, 0.0, 1.0)
+        return 1.0 # Already found/exploited
 
-    # --------------------------------------------------------------------- #
-    # 내부 유틸
-    # --------------------------------------------------------------------- #
-
-    def reset_episode_counters(self) -> None:
-        self.ep_return = 0.0
-        self.ep_attack_steps = 0
-        self.ep_detected_attack_steps = 0
-        self.ep_decoy_attack_steps = 0
-        self.ep_breach_events = 0
-        self.ep_mtd_cost = 0.0
-        self.ep_reconfig_steps = 0
-        self.ep_first_attack_step: Optional[int] = None
-        self.ep_first_breach_step: Optional[int] = None
-
-    # --------------------------------------------------------------------- #
-    # Gym-like API
-    # --------------------------------------------------------------------- #
-
-    def reset(self) -> np.ndarray:
-        self.step_count += 1
-        self.episode_step = 0
-
-        # 새 시뮬레이터 인스턴스
-        self.cti = SimulatedPassiveCTI(rng=self.rng)
-        self.blacklister = SimulatedBlacklister(rng=self.rng)
-        self.seeker = SimulatedHeuristicSeeker(level=self.seeker_level, rng=self.rng)
-
-        self.current_route_type = "REAL"
-        self.prev_action_params = np.full(ACTION_DIM, 0.5, dtype=np.float32)
-        self.last_action_params = self.prev_action_params.copy()
-
-        self.metrics = {
-            "cti_alert_rate": 0.0,
-            "blacklist_size": 0.0,
-            "seeker_ip_change_rate": 0.0,
-            "breach_success_rate": 0.0,
-            "decoy_lure_rate": 0.0,
-            "alternate_node_health": 1.0,
-            "service_uptime_ratio": 1.0,
-            "system_cost": 0.0,
-            "recent_attack_flag": 0.0,
-            "mean_time_to_breach": 0.0,
-        }
-        self._uptime_window.clear()
-        self._attack_window.clear()
-        self._breach_times.clear()
-        self.reset_episode_counters()
-
-        return self._get_state()
-
-    def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, Dict[str, Any]]:
-        self.episode_step += 1
-
-        # 1) 액션 스케일링 [-1,1] -> [0,1]
-        action = np.asarray(action, dtype=np.float32).reshape(-1)
-        assert action.shape[0] == ACTION_DIM, f"expected {ACTION_DIM} actions, got {action.shape[0]}"
-        raw_action = np.clip(action, -1.0, 1.0)
-        scaled_action = (raw_action + 1.0) / 2.0  # 0~1
-        self.prev_action_params = self.last_action_params.copy()
-        self.last_action_params = scaled_action.copy()
-
-        # 2) MTD 전략 적용
-        step_cost, did_reconfigure = self._apply_mtd_strategy(scaled_action)
-
-        # 3) 시커 턴 실행
-        turn_info = self._run_seeker_turn()
-
-        is_attack = turn_info["is_attack"]
-        is_breach = turn_info["is_breach"]
-        is_decoy_action = (self.current_route_type == "DECOY") and is_attack
-        is_attack_detected = turn_info["is_attack_detected"]
-
-        # 4) 메트릭 업데이트
-        self._update_metrics(step_cost, is_attack, is_breach, is_decoy_action)
-
-        # 5) 보상 계산
-        reward = self._calculate_reward(step_cost)
-
-        # 에피소드 통계
-        self.ep_return += reward
-        if is_attack:
-            self.ep_attack_steps += 1
-        if is_attack_detected:
-            self.ep_detected_attack_steps += 1
-        if is_decoy_action:
-            self.ep_decoy_attack_steps += 1
-        if is_breach:
-            self.ep_breach_events += 1
-        self.ep_mtd_cost += step_cost
-        if did_reconfigure:
-            self.ep_reconfig_steps += 1
-
-        # 에피소드 종료 조건
-        done = self.episode_step >= self.max_episode_steps
-
-        # 6) 상태/정보 구성
-        obs = self._get_state()
-        info: Dict[str, Any] = {
-            # PPO 학습에서 사용하는 핵심 플래그
-            "cost": float(step_cost),
-            "is_attack": bool(is_attack),
-            "is_attack_detected": bool(is_attack_detected),
-            "is_decoy_action": bool(is_decoy_action),
-            "is_breach": bool(is_breach),
-            "did_reconfigure": bool(did_reconfigure),
-            "attack_stage": turn_info["attack_stage"],
-
-            # Metrics/*
-            "Metrics/cti_alert_rate": self.metrics["cti_alert_rate"],
-            "Metrics/blacklist_size": self.metrics["blacklist_size"],
-            "Metrics/seeker_ip_change_rate": self.metrics["seeker_ip_change_rate"],
-            "Metrics/breach_success_rate": self.metrics["breach_success_rate"],
-            "Metrics/decoy_lure_rate": self.metrics["decoy_lure_rate"],
-            "Metrics/alternate_node_health": self.metrics["alternate_node_health"],
-            "Metrics/service_uptime_ratio": self.metrics["service_uptime_ratio"],
-            "Metrics/system_cost": self.metrics["system_cost"],
-            "Metrics/recent_attack_flag": self.metrics["recent_attack_flag"],
-            "Metrics/mean_time_to_breach": self.metrics["mean_time_to_breach"],
-
-            # Params/*
-            "Params/dnat_route_type": self.current_route_type,
-            "Params/dnat_real_focus": float(self.last_action_params[0]),
-            "Params/dnat_decoy_focus": float(self.last_action_params[1]),
-            "Params/dnat_alternate_focus": float(self.last_action_params[2]),
-            "Params/shuffle_intensity": float(self.last_action_params[3]),
-            "Params/blacklist_aggression": float(self.last_action_params[4]),
-            "Params/blacklist_duration": float(self.last_action_params[5]),
-        }
-
-        return obs, float(reward), bool(done), info
-
-    # ------------------------------------------------------------------ #
-    # 내부 로직
-    # ------------------------------------------------------------------ #
-
-    def _apply_mtd_strategy(self, scaled_action: np.ndarray) -> Tuple[float, bool]:
+    def _get_exploit_block_prob(self, blacklist_level):
         """
-        scaled_action: 0~1 범위 6차원
-
-        Returns:
-            step_cost: float
-            did_reconfigure: bool
+        Calculates exploit block probability based on BL level and attack type.
+        Loud: sigmoid(0.9*BL - 0.5), Stealth: sigmoid(0.2*BL - 1.5)
         """
-        dnat_logits = np.array(scaled_action[:3], dtype=np.float64) + 1e-8
-        dnat_probs = dnat_logits / dnat_logits.sum()
-        route_idx = int(self.rng.choice(3, p=dnat_probs))
-        new_route_type = ["REAL", "DECOY", "ALTERNATE"][route_idx]
+        is_loud = self.rng.random() < self.attack_bias # High bias -> Loud
+        
+        if is_loud:
+            slope = SEEKER_PROB_PARAMS["EXPLOIT_BLOCK_LOUD_SLOPE"]
+            shift = SEEKER_PROB_PARAMS["EXPLOIT_BLOCK_LOUD_SHIFT"]
+        else: # Stealth
+            slope = SEEKER_PROB_PARAMS["EXPLOIT_BLOCK_STEALTH_SLOPE"]
+            shift = SEEKER_PROB_PARAMS["EXPLOIT_BLOCK_STEALTH_SHIFT"]
+            
+        p_block = expit(slope * blacklist_level + shift)
+        return p_block, is_loud
 
-        shuffle_intensity = float(scaled_action[3])
-        blacklist_aggression = float(scaled_action[4])
-        blacklist_duration = float(scaled_action[5])
+    def _get_breach_block_prob(self, blacklist_level):
+        """Calculates breach block probability based on BL level. sigmoid(0.3*BL - 1.0)"""
+        slope = SEEKER_PROB_PARAMS["BREACH_BLOCK_SLOPE"]
+        shift = SEEKER_PROB_PARAMS["BREACH_BLOCK_SHIFT"]
+        return expit(slope * blacklist_level + shift)
 
-        # 블랙리스트 정책 적용
-        self.blacklister.set_policy_parameters(
-            aggression=blacklist_aggression,
-            duration=blacklist_duration,
-        )
+    def step(self, blacklist_level, is_mtd_shuffle):
+        """
+        Executes one seeker turn (Scan/Attack/IP Change) and determines outcomes.
+        Returns a dictionary of outcomes for environment reward calculation.
+        """
+        
+        # --- 1. MTD/Time Update ---
+        self.current_exposure_steps += 1
+        
+        # If MTD shuffle occurred
+        if is_mtd_shuffle:
+            self.current_exposure_steps = 1 # Reset exposure time (new IP)
+            # Seeker loses knowledge of the current IP and moves to a random one
+            self.ip_knowledge[self.current_ip] = 0
+            self.current_ip = self.rng.choice(self.ip_list + self.decoy_ip_list) 
+            
+        # Determine if IP change occurs (Independent of Scan/Attack)
+        did_ip_change = self.rng.random() < self.ip_change_prob and not is_mtd_shuffle # MTD shuffle overrides
+        if did_ip_change:
+            self.current_ip = self.rng.choice(self.ip_list + self.decoy_ip_list)
+            self.current_exposure_steps = 1 
+            self._update_ip_knowledge(self.current_ip, 0)
+            
+        # --- 2. Attack Stage Simulation ---
+        
+        # Reset current step flags
+        is_attack, is_exploit, is_breach = False, False, False
+        is_find, is_exploit_block, is_breach_block = False, False, False
+        is_exploit_success, is_breach_success = False, False
+        is_decoy = self.current_ip in self.decoy_ip_list
+        exposure_at_found = 0
+        exposure_at_exploit_block = 0
+        exposure_at_breach_success = 0
+        is_loud = False # Flag for exploit type
 
-        # 셔플 → 가용성 / 비용 모델
-        if shuffle_intensity > 0.75:
-            uptime = 0.1
-            shuffle_cost = 5.0 * shuffle_intensity
-        elif shuffle_intensity > 0.3:
-            uptime = 0.7
-            shuffle_cost = 2.0 * shuffle_intensity
+        
+        # Determine Seeker action (Scan vs Attack)
+        if self.ip_knowledge.get(self.current_ip, 0) < 1: # Unknown -> Scan
+            action_type = "Scan"
+        elif self.ip_knowledge.get(self.current_ip, 0) == 1: # Found -> Exploit Attempt
+            action_type = "Attack"
+            is_exploit = True
+        elif self.ip_knowledge.get(self.current_ip, 0) == 2: # Exploited -> Breach Attempt
+            action_type = "Attack"
+            is_breach = True
         else:
-            uptime = 1.0
-            shuffle_cost = 0.5 * shuffle_intensity
-
-        self._uptime_window.append(uptime)
-
-        # 대체 노드 health 모델
-        if new_route_type == "ALTERNATE":
-            alt_health = 0.4 + 0.2 * self.rng.random()  # 0.4~0.6
-        else:
-            alt_health = 1.0
-        self.metrics["alternate_node_health"] = alt_health
-
-        # 블랙리스트 유지 비용
-        blacklist_cost = 0.05 * self.blacklister.size
-
-        step_cost = shuffle_cost + blacklist_cost
-
-        # 재구성 여부 체크
-        did_reconfigure = (
-            (new_route_type != self.current_route_type)
-            or (np.abs(self.last_action_params - self.prev_action_params).max() > 1e-3)
-        )
-        self.current_route_type = new_route_type
-
-        return float(step_cost), bool(did_reconfigure)
-
-    def _run_seeker_turn(self) -> Dict[str, Any]:
-        action_type, ip, suspicious = self.seeker.act()
-
-        is_attack = action_type in ("scan", "attack")
-        attack_stage = "idle"
-        if action_type == "scan":
-            attack_stage = "recon"
-        elif action_type == "attack":
-            attack_stage = "exploit"
-
-        # CTI 처리
-        cti_score, cti_alert = self.cti.process_traffic(suspicious=is_attack and suspicious)
-        self.blacklister.process_alert(ip, cti_score)
-        self.blacklister.step_decay()
-        blocked = self.blacklister.is_blocked(ip)
-
-        is_attack_detected = is_attack and (cti_alert or blocked)
-
-        # 침투 / 디코이 판정
-        is_breach = False
-        is_decoy = False
-        if action_type == "attack" and not blocked:
-            if self.current_route_type == "DECOY":
-                is_decoy = True
-                attack_stage = "exploit"
-            elif self.current_route_type in ("REAL", "ALTERNATE"):
-                is_breach = True
-                attack_stage = "breach"
-
-        # TTB/TTBR 기록용
-        if is_attack:
-            if self.ep_first_attack_step is None:
-                self.ep_first_attack_step = self.episode_step
-        if is_breach:
-            if self.ep_first_breach_step is None:
-                self.ep_first_breach_step = self.episode_step
-                ttb = (self.ep_first_breach_step - (self.ep_first_attack_step or 0)) * SIM_TIME_PER_STEP_SEC
-                self._breach_times.append(float(max(ttb, 0.0)))
-
+            action_type = "None"
+            
+        if action_type == "Scan":
+            self.scan_attempts += 1
+            # Check for Find (Probabilistic and depends on accumulated exposure)
+            if self.rng.random() < self._get_seeker_scan_prob():
+                if self.rng.random() < self._get_seeker_find_prob():
+                    is_find = True
+                    self.find_events += 1
+                    self._update_ip_knowledge(self.current_ip, 1) # Found
+                    exposure_at_found = self.current_exposure_steps
+                
+        elif action_type == "Attack":
+            is_attack = True
+            
+            if is_exploit:
+                self.exploit_attempts += 1
+                
+                # Exploit Block Check
+                p_block, is_loud = self._get_exploit_block_prob(blacklist_level)
+                is_exploit_block = self.rng.random() < p_block
+                
+                if is_exploit_block:
+                    self.exploit_block += 1
+                    exposure_at_exploit_block = self.current_exposure_steps
+                else:
+                    # Exploit Success Check (if not blocked)
+                    p_success = SEEKER_PROB_PARAMS["EXPLOIT_SUCCESS_LOUD"] if is_loud else SEEKER_PROB_PARAMS["EXPLOIT_SUCCESS_STEALTH"]
+                    
+                    if self.rng.random() < p_success:
+                        is_exploit_success = True
+                        self.exploit_success += 1
+                        self._update_ip_knowledge(self.current_ip, 2) # Exploited
+                    
+            if is_breach or (is_exploit_success and self.rng.random() < SEEKER_PROB_PARAMS["BREACH_ATTEMPT_PROB"]):
+                # Breach Attempt (either starting from exploited state or immediately after exploit success)
+                is_breach_attempt = True
+                self.breach_attempts += 1
+                
+                # Breach Block Check
+                p_block = self._get_breach_block_prob(blacklist_level)
+                is_breach_block = self.rng.random() < p_block
+                
+                if is_breach_block:
+                    self.breach_block += 1
+                else:
+                    is_breach_success = True
+                    self.breach_success += 1
+                    exposure_at_breach_success = self.current_exposure_steps
+            else:
+                 is_breach_attempt = False
+        
+            # Decoy check (Decoy counts as a lure only if an attack/exploit attempt occurred)
+            if is_decoy and (is_exploit or is_breach_attempt):
+                self.decoy_lures += 1
+                
+        
         return {
-            "is_attack": bool(is_attack),
-            "is_attack_detected": bool(is_attack_detected),
-            "is_breach": bool(is_breach),
-            "is_decoy": bool(is_decoy),
-            "attack_stage": attack_stage,
+            "is_scan": action_type == "Scan",
+            "is_find": is_find,
+            "is_exploit_attempt": is_exploit,
+            "is_exploit_block": is_exploit_block,
+            "is_exploit_success": is_exploit_success,
+            "is_breach_attempt": is_breach_attempt if is_attack else False,
+            "is_breach_block": is_breach_block,
+            "is_breach_success": is_breach_success,
+            "is_decoy_hit": is_decoy and is_attack, # Attack hit a decoy
+            "is_loud": is_loud,
+            "exposure_at_found": exposure_at_found,
+            "exposure_at_exploit_block": exposure_at_exploit_block,
+            "exposure_at_breach_success": exposure_at_breach_success,
+            "seeker_ip": self.current_ip,
+            "seeker_knowledge": self.ip_knowledge
         }
 
-    def _update_metrics(
-        self,
-        step_cost: float,
-        is_attack: bool,
-        is_breach: bool,
-        is_decoy_action: bool,
-    ) -> None:
-        # 공격 여부 윈도우
-        self._attack_window.append(1.0 if is_attack else 0.0)
+    def get_knowledge_ratios(self):
+        """Returns the ratios of known and exploited IPs."""
+        total_ips = len(self.ip_list + self.decoy_ip_list)
+        known_count = sum(1 for status in self.ip_knowledge.values() if status >= 1)
+        exploited_count = sum(1 for status in self.ip_knowledge.values() if status == 2)
+        return _safe_divide(known_count, total_ips), _safe_divide(exploited_count, total_ips)
 
-        # breach / decoy 통계 (에피소드 레벨은 self.* 로 따로 집계)
-        # 여기서는 전체 에피소드 기준 비율만 기록
-        attack_count = max(self.ep_attack_steps, 1)
-        self.metrics["breach_success_rate"] = float(self.ep_breach_events / attack_count)
-        self.metrics["decoy_lure_rate"] = float(self.ep_decoy_attack_steps / attack_count)
+    def get_current_exposure(self):
+        return self.current_exposure_steps
 
-        # CTI / 블랙리스트 / 시커
-        self.metrics["cti_alert_rate"] = self.cti.alert_rate
-        self.metrics["blacklist_size"] = float(self.blacklister.size)
-        self.metrics["seeker_ip_change_rate"] = self.seeker.ip_change_rate
+    def get_seeker_params(self):
+        return self.seeker_params
 
-        # 서비스 가동률
-        if self._uptime_window:
-            self.metrics["service_uptime_ratio"] = float(sum(self._uptime_window) / len(self._uptime_window))
-        else:
-            self.metrics["service_uptime_ratio"] = 1.0
 
-        # 시스템 비용 (스텝 평균)
-        self.ep_mtd_cost += step_cost
-        total_steps = max(self.episode_step, 1)
-        self.metrics["system_cost"] = float(self.ep_mtd_cost / total_steps)
+class NetworkEnv(gym.Env):
+    """Custom Environment for MTD RL policy learning using Gym API."""
+    metadata = {'render_modes': ['human'], 'render_fps': 4}
 
-        # 최근 공격 플래그 (윈도우 안에 1개라도 있으면 1)
-        self.metrics["recent_attack_flag"] = 1.0 if any(self._attack_window) else 0.0
+    def __init__(self, seed=None, seeker_level=2, log_dir=None):
+        super(NetworkEnv, self).__init__()
+        
+        self.rng = np.random.default_rng(seed)
+        self.seeker_level = seeker_level
+        self.ip_list = [f"192.168.1.{i}" for i in range(NUM_TARGET_ENDPOINTS)]
+        self.decoy_ip_list = [f"10.0.0.{i}" for i in range(NUM_DECOY_ENDPOINTS)]
+        self.max_episode_steps = 1000 # Default max steps
+        self.current_step = 0
+        self.log_dir = log_dir
 
-        # mean_time_to_breach
-        if self._breach_times:
-            self.metrics["mean_time_to_breach"] = float(
-                sum(self._breach_times) / len(self._breach_times)
-            )
-        else:
-            self.metrics["mean_time_to_breach"] = 0.0
+        # Initialize components (will be reset in reset())
+        self.cti = None
+        self.blacklister = None
+        self.seeker = None
 
-    def _calculate_reward(self, step_cost: float) -> float:
+        # Define action and observation space
+        self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(len(ACTION_PARAM_KEYS),), dtype=np.float32)
+        self.observation_space = spaces.Box(low=-100.0, high=100.0, shape=(len(FEATURE_KEYS),), dtype=np.float32) # Using float to allow normalized features
+
+        # Episode-level counters (for end-of-episode metric calculation)
+        self.ep_total_steps = 0
+        self.ep_total_cost = 0
+        self.ep_shuffle_count = 0
+        self.ep_uptime_steps = 0
+        
+        # New counters for detailed metrics (resets per episode)
+        self.ep_scan_attempts = 0
+        self.ep_find_events = 0
+        self.ep_exploit_attempts = 0
+        self.ep_exploit_block = 0
+        self.ep_exploit_success = 0
+        self.ep_breach_attempts = 0
+        self.ep_breach_block = 0
+        self.ep_breach_success = 0
+        self.ep_decoy_hits = 0 # Decoy lure during attack/exploit
+        
+        # Time-to-Event accumulators
+        self.tte_find_accum = []
+        self.tte_exploit_block_accum = []
+        self.tte_breach_success_accum = []
+        
+        # Policy tracking for DRS (Diversity, Redundancy, Shuffle)
+        self.endpoint_visits = {ip: 0 for ip in self.ip_list + self.decoy_ip_list}
+        self.policy_history = [] # Stores (dnat_focus, decoy_ratio, bl) for analysis
+
+    def reset(self, seed=None, options=None):
+        """Resets the environment for a new episode."""
+        if seed is not None:
+            self.rng = np.random.default_rng(seed)
+            # Gym compatibility:
+            super().reset(seed=seed)
+
+        # Re-initialize components
+        self.cti = SimulatedPassiveCTI(self.rng)
+        self.blacklister = SimulatedBlacklister(self.rng)
+        self.seeker = SimulatedHeuristicSeeker(self.rng, self.seeker_level, self.ip_list, self.decoy_ip_list)
+        
+        # Reset episode counters
+        self.current_step = 0
+        self.ep_total_steps = 0
+        self.ep_total_cost = 0
+        self.ep_shuffle_count = 0
+        self.ep_uptime_steps = 0
+        
+        self.ep_scan_attempts = 0
+        self.ep_find_events = 0
+        self.ep_exploit_attempts = 0
+        self.ep_exploit_block = 0
+        self.ep_exploit_success = 0
+        self.ep_breach_attempts = 0
+        self.ep_breach_block = 0
+        self.ep_breach_success = 0
+        self.ep_decoy_hits = 0
+
+        self.tte_find_accum = []
+        self.tte_exploit_block_accum = []
+        self.tte_breach_success_accum = []
+        self.endpoint_visits = {ip: 0 for ip in self.ip_list + self.decoy_ip_list}
+        self.policy_history = []
+
+        # Initial dummy action (to populate 'last_action_...' features)
+        self.last_actions = {key: 0.5 for key in ACTION_PARAM_KEYS}
+        
+        observation = self._get_state()
+        info = self._get_current_metrics() # Initial metrics also calculated
+        info["last_action"] = self.last_actions
+        
+        return observation, info
+
+    def _apply_mtd_strategy(self, action):
         """
-        직관적인 보상 설계:
-        - 침투율 ↓ : 보상 +
-        - 디코이율 ↑ : 보상 +
-        - 가동률 ↑ : 보상 +
-        - MTD 비용 ↑ : 보상 -
+        Translates RL action into MTD parameters and updates system state.
+        
+        Args:
+            action (np.array): 6D continuous action from the RL agent.
+        
+        Returns:
+            dict: {cost_total, bl_level, decoy_ratio, is_shuffle}
         """
-        m = self.metrics
-        breach_rate = m["breach_success_rate"]
-        decoy_rate = m["decoy_lure_rate"]
-        uptime = m["service_uptime_ratio"]
+        
+        # Rescale actions from [-1, 1] to [0, 1]
+        action_params = {
+            "dnat_target_focus": _scale_action(action[0]),
+            "dnat_decoy_focus": _scale_action(action[1]),
+            "shuffle_intensity": _scale_action(action[2]),
+            "blacklist_aggression": _scale_action(action[3]),
+            "blacklist_duration": _scale_action(action[4]),
+            "decoy_ratio": _scale_action(action[5]),
+        }
+        self.last_actions = action_params # Store for next state features
 
-        reward = 0.0
-        reward += (1.0 - breach_rate) * 10.0
-        reward += decoy_rate * 3.0
-        reward += uptime * 2.0
-        reward -= step_cost * 0.5
+        # --- 1. Blacklisting Policy Update ---
+        bl_policy = self.blacklister.update_policy(
+            action_params["blacklist_aggression"],
+            action_params["blacklist_duration"]
+        )
+        
+        # --- 2. DNAT/Shuffle Logic (Simplified) ---
+        is_shuffle = action_params["shuffle_intensity"] > 0.75 # High intensity triggers a shuffle
+        
+        if is_shuffle:
+            self.ep_shuffle_count += 1
+        
+        # --- 3. Cost Calculation (Based on Cdef formula in Section 2.1) ---
+        
+        bl_level = self.blacklister.get_current_level() # Get aggression as BL level proxy
+        
+        # cost = COST_MTD_ACTION + COST_SHUFFLE*1_shuffle + COST_DECOY*decoy_ratio + COST_BL*BL
+        cost_mtd = COST_MTD_ACTION
+        cost_shuffle = COST_SHUFFLE if is_shuffle else 0.0
+        cost_decoy = COST_DECOY * action_params["decoy_ratio"]
+        cost_bl = COST_BL * bl_level
+        
+        total_cost = cost_mtd + cost_shuffle + cost_decoy + cost_bl
+        self.ep_total_cost += total_cost
+        
+        # Track policy for overall metrics
+        self.policy_history.append({
+            "decoy_ratio": action_params["decoy_ratio"],
+            "bl": bl_level,
+            "cost": total_cost,
+            "is_shuffle": is_shuffle
+        })
+        
+        return {
+            "cost": total_cost, 
+            "bl_level": bl_level,
+            "decoy_ratio": action_params["decoy_ratio"],
+            "is_shuffle": is_shuffle,
+        }
 
-        return float(reward)
+    def step(self, action):
+        self.current_step += 1
+        self.ep_total_steps += 1
+        terminated = self.current_step >= self.max_episode_steps
+        truncated = False
+        
+        # --- 1. Defender MTD Phase ---
+        mtd_results = self._apply_mtd_strategy(action)
+        is_shuffle = mtd_results["is_shuffle"]
+        bl_level = mtd_results["bl_level"]
+        
+        # --- 2. Seeker Phase ---
+        seeker_outcomes = self.seeker.step(bl_level, is_shuffle)
+        current_ip = seeker_outcomes["seeker_ip"]
+        self.endpoint_visits[current_ip] += 1
+        
+        # --- 3. CTI/Blacklister Update ---
+        is_suspicious = seeker_outcomes["is_scan"] or seeker_outcomes["is_exploit_attempt"]
+        cti_score, is_alert = self.cti.process_traffic(is_suspicious)
+        
+        # Blacklister attempts block if CTI raises alarm
+        if is_alert:
+            self.blacklister.apply_block(current_ip, cti_score)
+        
+        self.blacklister.step() # Decrement block durations
+        
+        # --- 4. Update Detailed Counters and Uptime ---
+        
+        is_breach_success = seeker_outcomes["is_breach_success"]
+        
+        # Update episode-level raw counts
+        if seeker_outcomes["is_scan"]: self.ep_scan_attempts += 1
+        if seeker_outcomes["is_find"]: 
+            self.ep_find_events += 1
+            if seeker_outcomes["exposure_at_found"] > 0:
+                self.tte_find_accum.append(seeker_outcomes["exposure_at_found"])
+                
+        if seeker_outcomes["is_exploit_attempt"]: self.ep_exploit_attempts += 1
+        if seeker_outcomes["is_exploit_block"]: 
+            self.ep_exploit_block += 1
+            if seeker_outcomes["exposure_at_exploit_block"] > 0:
+                 self.tte_exploit_block_accum.append(seeker_outcomes["exposure_at_exploit_block"])
+                 
+        if seeker_outcomes["is_exploit_success"]: self.ep_exploit_success += 1
+        
+        if seeker_outcomes["is_breach_attempt"]: self.ep_breach_attempts += 1
+        if seeker_outcomes["is_breach_block"]: self.ep_breach_block += 1
+        if is_breach_success: 
+            self.ep_breach_success += 1
+            if seeker_outcomes["exposure_at_breach_success"] > 0:
+                self.tte_breach_success_accum.append(seeker_outcomes["exposure_at_breach_success"])
+                
+        if seeker_outcomes["is_decoy_hit"]: self.ep_decoy_hits += 1
+        
+        # Uptime (Simplified: Shuffle causes downtime)
+        is_downtime = is_shuffle 
+        if not is_downtime:
+            self.ep_uptime_steps += 1
+        
+        # --- 5. Reward Calculation ---
+        reward = self._calculate_reward(mtd_results, seeker_outcomes)
 
-    def _get_state(self) -> np.ndarray:
-        state = np.zeros(OBS_DIM, dtype=np.float32)
-        # BASE_FEATURE_KEYS + last_action
-        for i, key in enumerate(FEATURE_KEYS[: len(self.metrics)]):
-            state[i] = float(self.metrics.get(key, 0.0))
-        state[len(self.metrics) :] = self.last_action_params.astype(np.float32)
-        return state
+        # --- 6. Next State and Info ---
+        observation = self._get_state()
+        
+        # Get comprehensive episode metrics (DRS, TTF, etc.) and update info dict
+        info = self._get_current_metrics()
+        info.update({
+            # Essential flags/values for PPO logging
+            "cost": mtd_results["cost"],
+            "is_shuffle": is_shuffle,
+            "is_find": seeker_outcomes["is_find"],
+            "is_exploit_block": seeker_outcomes["is_exploit_block"],
+            "is_breach_block": seeker_outcomes["is_breach_block"],
+            "is_exploit_success": seeker_outcomes["is_exploit_success"],
+            "is_breach_success": is_breach_success,
+            "is_decoy_hit": seeker_outcomes["is_decoy_hit"],
+            "exposure_at_found": seeker_outcomes["exposure_at_found"],
+            "exposure_at_exploit_block": seeker_outcomes["exposure_at_exploit_block"],
+            "exposure_at_breach_success": seeker_outcomes["exposure_at_breach_success"],
+            # Parameters (Action/Policy means)
+            "Params/bl_level": bl_level,
+            "Params/decoy_ratio": mtd_results["decoy_ratio"],
+            "Params/shuffle_intensity": self.last_actions["shuffle_intensity"],
+        })
+        
+        # Check termination condition
+        if is_breach_success:
+            terminated = True # Stop episode on successful breach
+
+        return observation, reward, terminated, truncated, info
+
+    def _calculate_reward(self, mtd_results, seeker_outcomes):
+        """Calculates the Defender's reward based on the specified formula (Section 5.1)."""
+        
+        cost = mtd_results["cost"]
+
+        # Indicator functions (1 or 0)
+        exploit_block = 1.0 if seeker_outcomes["is_exploit_block"] else 0.0
+        decoy = 1.0 if seeker_outcomes["is_decoy_hit"] else 0.0 # Decoy is counted if hit by attack
+        exploit_success = 1.0 if seeker_outcomes["is_exploit_success"] else 0.0
+        breach_block = 1.0 if seeker_outcomes["is_breach_block"] else 0.0
+        breach_success = 1.0 if seeker_outcomes["is_breach_success"] else 0.0
+        find = 1.0 if seeker_outcomes["is_find"] else 0.0 # Note: Find is penalized (-0.1)
+        
+        # Reward calculation:
+        # r_def = (+1.0)*1_ExploitBlock + (+1.0)*1_Decoy + (-2.0)*1_ExploitSuccess + 
+        #         (+2.0)*1_BreachBlock + (-5.0)*1_BreachSuccess + (-0.1)*1_Find - COST_WEIGHT*cost
+        r_def = (
+              (+1.0) * exploit_block
+            + (+1.0) * decoy
+            + (-2.0) * exploit_success
+            + (+2.0) * breach_block
+            + (-5.0) * breach_success
+            + (-0.1) * find
+            - COST_WEIGHT * cost
+        )
+        return r_def
+
+    def _get_state(self):
+        """Builds the 16D observation vector (Metrics + Last Actions)."""
+        
+        # Calculate windowed/cumulative metrics needed for the state
+        current_breach_rate = _safe_divide(self.ep_breach_success, self.ep_breach_attempts)
+        current_decoy_lure_rate = _safe_divide(self.ep_decoy_hits, self.ep_exploit_attempts)
+        
+        metrics = {
+            "cti_alert_rate": self.cti.get_alert_rate(),
+            "blacklist_size_ratio": self.blacklister.get_size_ratio(),
+            "uptime_ratio": _safe_divide(self.ep_uptime_steps, self.ep_total_steps) if self.ep_total_steps > 0 else 1.0,
+            "breach_success_rate": current_breach_rate,
+            "decoy_lure_rate": current_decoy_lure_rate,
+            "current_exposure_mean": self.seeker.get_current_exposure(),
+            "r_known_ratio": self.seeker.get_knowledge_ratios()[0],
+            "r_exploited_ratio": self.seeker.get_knowledge_ratios()[1],
+            "seeker_scan_effort": self.seeker.get_seeker_params()[0],
+            "seeker_attack_bias": self.seeker.get_seeker_params()[1],
+        }
+        
+        # Construct the state vector (10 metrics + 6 last actions)
+        state_vector = [metrics.get(key, 0.0) for key in FEATURE_KEYS[:10]]
+        state_vector.extend([self.last_actions.get(key, 0.5) for key in ACTION_PARAM_KEYS])
+        
+        return np.array(state_vector, dtype=np.float32)
+
+    def _get_current_metrics(self):
+        """
+        Calculates and returns all derived metrics (for logging, not for state).
+        This includes the final DRS, Time-to-Event metrics, and Success Rates.
+        """
+        info = {}
+        
+        # Recalculate based on episode-wide counters (can use self.ep_* directly)
+        
+        # R_succ (Breach Stop Rate) = 1 - (#BreachSuccess / #BreachAttempts)
+        breach_attempts = self.ep_breach_attempts
+        breach_success = self.ep_breach_success
+        r_succ = 1.0 - _safe_divide(breach_success, breach_attempts)
+        
+        # C_def (Avg. Defense Cost per Step)
+        c_def = _safe_divide(self.ep_total_cost, self.ep_total_steps)
+        
+        # CostPerBlock (Total Cost / Total Blocks)
+        total_blocks = self.ep_exploit_block + self.ep_breach_block + self.ep_decoy_hits
+        cost_per_block = _safe_divide(self.ep_total_cost, total_blocks)
+        
+        # S_MTD (Composite Score)
+        decoy_lure_rate = _safe_divide(self.ep_decoy_hits, self.ep_exploit_attempts)
+        s_mtd_overall = (0.5 * decoy_lure_rate) + (0.5 * r_succ) - (0.1 * c_def)
+        
+        # Metric Dictionaries (for logging structure in rl_train_v05.py)
+        info["Metrics"] = {
+            # --- 1. Core Defense Metrics ---
+            "Defense/R_succ": r_succ,
+            "Defense/C_def": c_def,
+            "Defense/CostPerBlock": cost_per_block,
+            "Defense/S_MTD_overall": s_mtd_overall,
+            
+            # --- 2. Multi-stage Success/Block Ratios ---
+            "Attack/r_exploit_success": _safe_divide(self.ep_exploit_success, self.ep_exploit_attempts),
+            "Attack/r_exploit_block": _safe_divide(self.ep_exploit_block, self.ep_exploit_attempts),
+            "Attack/r_breach_success": _safe_divide(breach_success, breach_attempts),
+            "Attack/r_breach_block": _safe_divide(self.ep_breach_block, breach_attempts),
+            "Attack/r_scan": _safe_divide(self.ep_scan_attempts, self.ep_total_steps),
+            "Attack/r_find": _safe_divide(self.ep_find_events, self.ep_scan_attempts),
+            "Attack/decoy_lure_rate": decoy_lure_rate,
+
+            # --- 3. Time-to-Event (TTF/TTEB/TTBr) ---
+            "Time/TTF_mean": np.mean(self.tte_find_accum) if self.tte_find_accum else 0.0,
+            "Time/TTEB_mean": np.mean(self.tte_exploit_block_accum) if self.tte_exploit_block_accum else 0.0,
+            "Time/TTBr_mean": np.mean(self.tte_breach_success_accum) if self.tte_breach_success_accum else 0.0,
+            
+            # --- 4. DRS Metrics ---
+            # D_bits (Diversity): Entropy of endpoint visitation (simulated)
+            "DRS/D_bits": self._calculate_diversity(),
+            # R (Redundancy): Simplified to target endpoints count
+            "DRS/R_redundancy": NUM_TARGET_ENDPOINTS, 
+            # S (Shuffle): Normalized Shuffle Frequency
+            "DRS/S_shuffle": self._calculate_shuffle_score(),
+        }
+        
+        return info
+
+    def _calculate_diversity(self):
+        """Calculates Entropy of endpoint visitation D_bits = -sum(p_i * log2(p_i))."""
+        visit_counts = np.array(list(self.endpoint_visits.values()))
+        total_visits = np.sum(visit_counts)
+        if total_visits > 0:
+            probabilities = visit_counts / total_visits
+            # Filter out zero probabilities for log calculation
+            probabilities = probabilities[probabilities > 0]
+            d_bits = -np.sum(probabilities * np.log2(probabilities))
+            return d_bits
+        return 0.0
+
+    def _calculate_shuffle_score(self):
+        """Calculates Normalized Shuffle Frequency S = (#shuffle / total_steps) * log2(#endpoints)."""
+        shuffle_freq = _safe_divide(self.ep_shuffle_count, self.ep_total_steps)
+        s_shuffle = shuffle_freq * math.log2(NUM_TOTAL_ENDPOINTS)
+        return s_shuffle

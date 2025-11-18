@@ -1,395 +1,310 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-rl_train_v05.py
-
-MTD PPO 학습 스크립트 (v0.5, 테스트베드 정합성 강화판)
-
-- NetworkEnv (rl_environment_v05)
-- MTDPolicyNet / MTDValueNet (rl_model_v05)
-- PPO 업데이트
-- 에피소드 단위 MTD 지표(S_D, R_A, C_M, S_MTD) 계산 및 로깅
-"""
-
+# 파일 경로: dvd_lite/dvd_attacks_lpc/mtd/rl_train_v05.py
 import argparse
+import random
 import time
-from dataclasses import asdict
-from typing import Dict, Any, List, Optional
+import os
+import json
+import logging
+from collections import deque
+from datetime import datetime
 
 import numpy as np
 import torch
-import torch.nn as nn
 from torch.utils.tensorboard import SummaryWriter
+import wandb
+# Assuming existing rl_model_v05.py implements PPOAgent and ActorCritic
+from .rl_model_v05 import PPOAgent # Import PPOAgent
+from .rl_environment_v05 import NetworkEnv, ACTION_PARAM_KEYS, FEATURE_KEYS
+from .rl_config_v05 import LOG_METRICS_DEFENSE, LOG_METRICS_ATTACK, LOG_METRICS_TIME_TO_EVENT, LOG_METRICS_DRS
 
-from rl_config_v05 import RLConfigV05, OBS_DIM, ACTION_DIM
-from rl_environment_v05 import NetworkEnv
-from rl_model_v05 import MTDPolicyNet, MTDValueNet
+# Setup logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
-try:
-    import wandb  # type: ignore
-    WANDB_AVAILABLE = True
-except Exception:
-    wandb = None  # type: ignore
-    WANDB_AVAILABLE = False
+# --- Utility Functions for Training Loop ---
 
+def _safe_mean(arr):
+    """Calculates mean safely, returning 0.0 for empty arrays."""
+    return np.mean(arr) if arr else 0.0
 
-# --------------------------------------------------------------------------- #
-# Argument parsing
-# --------------------------------------------------------------------------- #
+def _safe_divide(numerator, denominator):
+    """Divides safely, returning 0.0 for empty arrays."""
+    return numerator / denominator if denominator != 0 else 0.0
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="MTD PPO Trainer v0.5 (testbed-aligned)")
+def calculate_metrics_from_infos(ep_infos):
+    """
+    Calculates detailed episode-level metrics from collected info dictionaries.
+    Note: The environment's _get_current_metrics already calculates DRS/TTF 
+    based on internal state at the last step. We aggregate and average other metrics here.
+    
+    Args:
+        ep_infos (list): A list of dictionaries, one per episode step.
+    
+    Returns:
+        dict: A dictionary of aggregated metrics for logging.
+    """
+    
+    if not ep_infos:
+        return {}
 
-    parser.add_argument("--total-timesteps", type=int, default=200_000)
-    parser.add_argument("--batch-size", type=int, default=2048)
+    # The last step's info dictionary contains the final episode-wide metrics (DRS, TTF, etc.)
+    final_metrics = ep_infos[-1].get("Metrics", {})
+    
+    # 1. Collect policy parameter time-averages
+    bl_level_mean = _safe_mean([info.get("Params/bl_level", 0.0) for info in ep_infos])
+    decoy_ratio_mean = _safe_mean([info.get("Params/decoy_ratio", 0.0) for info in ep_infos])
+    shuffle_intensity_mean = _safe_mean([info.get("Params/shuffle_intensity", 0.0) for info in ep_infos])
+    
+    # 2. Combine and re-group metrics for consistent logging structure
+    metrics = {}
+    
+    # Core Metrics (from final step's comprehensive calculation)
+    metrics.update(final_metrics.get("Defense", {}))
+    metrics.update(final_metrics.get("Attack", {}))
+    metrics.update(final_metrics.get("Time", {}))
+    metrics.update(final_metrics.get("DRS", {}))
+    
+    # Policy Parameters (time-average)
+    metrics["Policy/bl_level_mean"] = bl_level_mean
+    metrics["Policy/decoy_ratio_mean"] = decoy_ratio_mean
+    metrics["Policy/shuffle_intensity_mean"] = shuffle_intensity_mean
 
-    parser.add_argument("--gamma", type=float, default=0.99)
-    parser.add_argument("--gae-lambda", type=float, default=0.95)
-    parser.add_argument("--clip-coef", type=float, default=0.2)
-    parser.add_argument("--update-epochs", type=int, default=10)
-    parser.add_argument("--ent-coef", type=float, default=0.01)
-    parser.add_argument("--vf-coef", type=float, default=0.5)
-    parser.add_argument("--max-grad-norm", type=float, default=0.5)
-    parser.add_argument("--learning-rate", type=float, default=3e-4)
+    return metrics
 
-    parser.add_argument("--seeker-level", type=int, default=2)
-    parser.add_argument("--seed", type=int, default=0)
+def train_ppo(args):
+    # --- Setup and Initialization ---
+    
+    # Seed for reproducibility
+    random.seed(args.seed)
+    np.random.seed(args.seed)
+    torch.manual_seed(args.seed)
+    torch.backends.cudnn.deterministic = args.torch_deterministic
 
-    parser.add_argument("--log-dir", type=str, default="./runs/mtd_v05")
-    parser.add_argument("--run-name", type=str, default="mtd_rl_v05")
-    parser.add_argument("--disable-wandb", action="store_true", default=False)
+    device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
-    parser.add_argument("--device", type=str, default="cuda", choices=["cuda", "cpu"])
-    parser.add_argument("--max-episode-steps", type=int, default=512)
-
-    parser.add_argument("--export-dir", type=str, default="./mtd/rl_models/ver_05")
-    parser.add_argument("--no-export", action="store_true", default=False)
-
-    return parser.parse_args()
-
-
-# --------------------------------------------------------------------------- #
-# PPO Agent
-# --------------------------------------------------------------------------- #
-
-class PPOAgent:
-    def __init__(self, cfg: RLConfigV05, device: torch.device) -> None:
-        self.cfg = cfg
-        self.device = device
-
-        self.actor = MTDPolicyNet().to(device)
-        self.critic = MTDValueNet().to(device)
-
-        self.optimizer = torch.optim.Adam(
-            list(self.actor.parameters()) + list(self.critic.parameters()),
-            lr=cfg.learning_rate,
+    # Environment Setup
+    # Max steps per episode is set via args before env initialization for consistency
+    NetworkEnv.max_episode_steps = args.max_steps_per_episode
+    env = NetworkEnv(seed=args.seed, seeker_level=args.seeker_level)
+    
+    # Logging Setup
+    run_name = args.run_name if args.run_name else f"PPO_v06_vs_Seeker_L{args.seeker_level}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    log_path = os.path.join(args.log_dir, run_name)
+    os.makedirs(log_path, exist_ok=True)
+    
+    writer = SummaryWriter(log_path)
+    if args.wandb_project:
+        wandb.init(
+            project=args.wandb_project,
+            entity=args.wandb_entity,
+            sync_tensorboard=False, # Manual logging
+            config=vars(args),
+            name=run_name,
+            dir=args.log_dir,
+            reinit=True # Handle possible re-initialization cleanly
         )
-
-        bsz = cfg.batch_size
-        self.obs_buf = torch.zeros((bsz, OBS_DIM), dtype=torch.float32, device=device)
-        self.action_buf = torch.zeros((bsz, ACTION_DIM), dtype=torch.float32, device=device)
-        self.logprob_buf = torch.zeros((bsz,), dtype=torch.float32, device=device)
-        self.reward_buf = torch.zeros((bsz,), dtype=torch.float32, device=device)
-        self.done_buf = torch.zeros((bsz,), dtype=torch.float32, device=device)
-        self.value_buf = torch.zeros((bsz,), dtype=torch.float32, device=device)
-
-    @torch.no_grad()
-    def get_action_and_value(
-        self,
-        obs: torch.Tensor,
-    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-        obs = obs.to(self.device)
-        dist = self.actor.get_dist(obs)
-        action = dist.sample()
-        log_prob = dist.log_prob(action).sum(-1)
-        value = self.critic(obs)
-        return action, log_prob, value
-
-    def update(
-        self,
-        advantages: torch.Tensor,
-        returns: torch.Tensor,
-        b_obs: torch.Tensor,
-        b_actions: torch.Tensor,
-        b_logprobs: torch.Tensor,
-    ) -> Dict[str, float]:
-        cfg = self.cfg
-        bsz = cfg.batch_size
-
-        advantages = (advantages - advantages.mean()) / (advantages.std(unbiased=False) + 1e-8)
-
-        batch_inds = np.arange(bsz)
-        metrics: Dict[str, float] = {}
-
-        for _ in range(cfg.update_epochs):
-            np.random.shuffle(batch_inds)
-            for start in range(0, bsz, 64):
-                end = start + 64
-                mb_inds = batch_inds[start:end]
-                mb_obs = b_obs[mb_inds]
-                mb_actions = b_actions[mb_inds]
-                mb_logprobs = b_logprobs[mb_inds]
-                mb_advantages = advantages[mb_inds]
-                mb_returns = returns[mb_inds]
-
-                dist = self.actor.get_dist(mb_obs)
-                new_logprobs = dist.log_prob(mb_actions).sum(-1)
-                entropy = dist.entropy().sum(-1).mean()
-
-                ratio = (new_logprobs - mb_logprobs).exp()
-                pg_loss1 = -mb_advantages * ratio
-                pg_loss2 = -mb_advantages * torch.clamp(
-                    ratio,
-                    1.0 - cfg.clip_coef,
-                    1.0 + cfg.clip_coef,
-                )
-                pg_loss = torch.max(pg_loss1, pg_loss2).mean()
-
-                value = self.critic(mb_obs)
-                v_loss = 0.5 * (mb_returns - value).pow(2).mean()
-
-                loss = pg_loss + cfg.vf_coef * v_loss - cfg.ent_coef * entropy
-
-                self.optimizer.zero_grad(set_to_none=True)
-                loss.backward()
-                nn.utils.clip_grad_norm_(
-                    list(self.actor.parameters()) + list(self.critic.parameters()),
-                    cfg.max_grad_norm,
-                )
-                self.optimizer.step()
-
-                metrics["train/policy_loss"] = float(pg_loss.item())
-                metrics["train/value_loss"] = float(v_loss.item())
-                metrics["train/entropy"] = float(entropy.item())
-
-        return metrics
-
-
-# --------------------------------------------------------------------------- #
-# Training Loop
-# --------------------------------------------------------------------------- #
-
-def run_training(args: argparse.Namespace) -> None:
-    cfg = RLConfigV05(
-        seed=args.seed,
-        seeker_level=args.seeker_level,
-        total_timesteps=args.total_timesteps,
-        batch_size=args.batch_size,
+        logger.info("WandB initialized.")
+    
+    # Agent Setup
+    agent = PPOAgent(
+        state_dim=env.observation_space.shape[0],
+        action_dim=env.action_space.shape[0],
+        hidden_size=args.hidden_size,
+        lr=args.learning_rate,
         gamma=args.gamma,
         gae_lambda=args.gae_lambda,
         clip_coef=args.clip_coef,
-        update_epochs=args.update_epochs,
+        max_grad_norm=args.max_grad_norm,
         ent_coef=args.ent_coef,
         vf_coef=args.vf_coef,
-        max_grad_norm=args.max_grad_norm,
-        learning_rate=args.learning_rate,
+        ppo_epochs=args.ppo_epochs,
+        minibatch_size=args.minibatch_size,
+        target_kl=args.target_kl,
+        device=device
     )
 
-    device = torch.device(args.device if torch.cuda.is_available() and args.device == "cuda" else "cpu")
-
-    # 시드 고정
-    np.random.seed(cfg.seed)
-    torch.manual_seed(cfg.seed)
-    if device.type == "cuda":
-        torch.cuda.manual_seed_all(cfg.seed)
-
-    # 환경 / 에이전트
-    env = NetworkEnv(
-        seeker_level=cfg.seeker_level,
-        seed=cfg.seed,
-        max_episode_steps=args.max_episode_steps,
-    )
-    agent = PPOAgent(cfg, device=device)
-
-    # 로깅
-    writer = SummaryWriter(log_dir=args.log_dir + "/" + args.run_name)
-    use_wandb = WANDB_AVAILABLE and not args.disable_wandb
-
-    if use_wandb:
-        wandb.init(
-            project="MTD_RL_v05",
-            name=args.run_name,
-            config=asdict(cfg),
-        )
-
-    obs = env.reset()
-    obs_t = torch.as_tensor(obs, dtype=torch.float32, device=device)
-
+    # Total training steps and episodes
+    total_episodes = args.total_episodes
     global_step = 0
-    num_updates = cfg.total_timesteps // cfg.batch_size
-
-    # 최근 에피소드 윈도우 (MTD 지표 moving average 용)
-    window_size = 50
-    recent_eps_scores: List[Dict[str, float]] = []
-
-    start_time = time.time()
-
-    for update in range(num_updates):
-        # Rollout 수집
-        for step in range(cfg.batch_size):
-            with torch.no_grad():
-                action_t, logprob_t, value_t = agent.get_action_and_value(obs_t.unsqueeze(0))
-            action = action_t.squeeze(0).cpu().numpy()
-
-            next_obs, reward, done, info = env.step(action)
-
-            agent.obs_buf[step] = obs_t
-            agent.action_buf[step] = torch.as_tensor(action, dtype=torch.float32, device=device)
-            agent.logprob_buf[step] = logprob_t.squeeze(0)
-            agent.reward_buf[step] = float(reward)
-            agent.done_buf[step] = float(done)
-            agent.value_buf[step] = value_t.squeeze(0)
-
-            global_step += 1
-            obs = next_obs
-            obs_t = torch.as_tensor(obs, dtype=torch.float32, device=device)
-
-            # episode 종료 시 MTD 지표 계산
-            if done:
-                ep_len = env.episode_step
-                ep_ret = env.ep_return
-                attack_steps = max(env.ep_attack_steps, 1)
-                decoy_steps = env.ep_decoy_attack_steps
-                breach_events = env.ep_breach_events
-                ep_cost = env.ep_mtd_cost
-
-                # S_D, R_A, C_M, S_MTD
-                s_d = float(decoy_steps / attack_steps)
-                r_a = float(1.0 - (breach_events / attack_steps))
-                c_m = float(ep_cost / max(ep_len, 1))
-                s_mtd = 0.5 * s_d + 0.5 * r_a - 0.1 * c_m
-
-                ep_metrics = {
-                    "Episode/return": ep_ret,
-                    "Episode/length": ep_len,
-                    "Episode/S_D_decoy_success": s_d,
-                    "Episode/R_A_resilience": r_a,
-                    "Episode/C_M_cost": c_m,
-                    "Episode/S_MTD_overall": s_mtd,
-                    "Episode/attack_steps": env.ep_attack_steps,
-                    "Episode/detected_attack_steps": env.ep_detected_attack_steps,
-                    "Episode/decoy_attack_steps": env.ep_decoy_attack_steps,
-                    "Episode/breach_events": env.ep_breach_events,
-                    "Episode/mtd_cost": env.ep_mtd_cost,
-                    "Episode/reconfig_steps": env.ep_reconfig_steps,
-                }
-
-                # TensorBoard 기록
-                for k, v in ep_metrics.items():
-                    writer.add_scalar(k, v, global_step)
-
-                # 최근 윈도우에 추가
-                recent_eps_scores.append(ep_metrics)
-                if len(recent_eps_scores) > window_size:
-                    recent_eps_scores.pop(0)
-
-                # 최근 윈도우 평균도 기록
-                if len(recent_eps_scores) >= 5:
-                    avg = {}
-                    for k in recent_eps_scores[0].keys():
-                        avg[k] = float(
-                            sum(e[k] for e in recent_eps_scores) / len(recent_eps_scores)
-                        )
-                    writer.add_scalar("EpisodeWindow/S_MTD_overall", avg["Episode/S_MTD_overall"], global_step)
-                    writer.add_scalar("EpisodeWindow/S_D_decoy_success", avg["Episode/S_D_decoy_success"], global_step)
-                    writer.add_scalar("EpisodeWindow/R_A_resilience", avg["Episode/R_A_resilience"], global_step)
-                    writer.add_scalar("EpisodeWindow/C_M_cost", avg["Episode/C_M_cost"], global_step)
-
-                    if use_wandb:
-                        wandb.log(
-                            {
-                                "EpisodeWindow/S_MTD_overall": avg["Episode/S_MTD_overall"],
-                                "EpisodeWindow/S_D_decoy_success": avg["Episode/S_D_decoy_success"],
-                                "EpisodeWindow/R_A_resilience": avg["Episode/R_A_resilience"],
-                                "EpisodeWindow/C_M_cost": avg["Episode/C_M_cost"],
-                                "global_step": global_step,
-                            }
-                        )
-
-                if use_wandb:
-                    wandb.log({**ep_metrics, "global_step": global_step})
-
-                # 에피소드 리셋
-                obs = env.reset()
-                obs_t = torch.as_tensor(obs, dtype=torch.float32, device=device)
-
-        # GAE 계산
-        with torch.no_grad():
-            _, _, last_val = agent.get_action_and_value(obs_t.unsqueeze(0))
-            last_val = last_val.squeeze(0)
-
-        advantages = torch.zeros_like(agent.reward_buf, device=device)
-        last_gae_lam = 0.0
-        for t in reversed(range(cfg.batch_size)):
-            if t == cfg.batch_size - 1:
-                next_non_terminal = 1.0 - agent.done_buf[t]
-                next_value = last_val
-            else:
-                next_non_terminal = 1.0 - agent.done_buf[t + 1]
-                next_value = agent.value_buf[t + 1]
-
-            delta = (
-                agent.reward_buf[t]
-                + cfg.gamma * next_value * next_non_terminal
-                - agent.value_buf[t]
-            )
-            last_gae_lam = (
-                delta
-                + cfg.gamma * cfg.gae_lambda * next_non_terminal * last_gae_lam
-            )
-            advantages[t] = last_gae_lam
-
-        returns = advantages + agent.value_buf
-
-        # PPO 업데이트
-        metrics = agent.update(
-            advantages,
-            returns,
-            agent.obs_buf,
-            agent.action_buf,
-            agent.logprob_buf,
-        )
-
-        for k, v in metrics.items():
-            writer.add_scalar(k, v, global_step)
-
-        if use_wandb:
-            wandb.log({**metrics, "global_step": global_step})
-
-        if (update + 1) % 10 == 0:
-            fps = int(global_step / (time.time() - start_time))
-            print(
-                f"[Update {update+1}/{num_updates}] "
-                f"global_step={global_step}, fps={fps}, "
-                f"policy_loss={metrics.get('train/policy_loss', 0.0):.3f}, "
-                f"value_loss={metrics.get('train/value_loss', 0.0):.3f}"
-            )
-
-    # 종료 처리
-    writer.flush()
-    writer.close()
-    if use_wandb:
-        wandb.finish()
-
-    # 정책 export (선택)
-    if not args.no_export:
+    
+    # For rolling window metrics (addressing the user's calculation error)
+    episode_reward_window = deque(maxlen=args.metric_window_size)
+    episode_metrics_window = deque(maxlen=args.metric_window_size)
+    
+    # --- Main Training Loop ---
+    logger.info("Starting MTD PPO training loop. ")
+    
+    for episode in range(1, total_episodes + 1):
         try:
-            from rl_export_policy_v05 import export_mtd_policy
-            import os
+            state, info = env.reset(seed=args.seed + episode) # Reseed per episode
+            done = False
+            ep_reward = 0
+            ep_steps = 0
+            ep_infos = [] # Collect info for detailed end-of-episode metrics
 
-            os.makedirs(args.export_dir, exist_ok=True)
-            # 간단하게 state_history를 비워두고 export (필요시 학습 중 수집 구조 붙이면 됨)
-            state_history: List[np.ndarray] = []
-            export_mtd_policy(
-                policy_net=agent.actor.to("cpu"),
-                state_history=state_history,
-                save_dir=args.export_dir,
-                version="ver_05",
-            )
-            print(f"[+] Exported policy to {args.export_dir}")
+            # --- Rollout Collection Phase ---
+            while not done:
+                # 1. Agent acts
+                action, log_prob, value = agent.get_action_and_value(torch.as_tensor(state, dtype=torch.float32).to(device))
+                
+                # 2. Step environment
+                # The environment returns next_state, reward, terminated, truncated, info
+                next_state, reward, terminated, truncated, info = env.step(action.cpu().numpy())
+                done = terminated or truncated
+
+                # 3. Store transition
+                agent.store_transition(
+                    state, action.cpu().numpy(), log_prob.item(), reward, value.item(), done
+                )
+                
+                state = next_state
+                ep_reward += reward
+                ep_steps += 1
+                global_step += 1
+                
+                # We store a copy of the info dictionary for later metric calculation
+                # Deep copy is important if info contains mutable objects, but here we assume it's flat/safe.
+                ep_infos.append(info.copy()) 
+
+                # Early stop on terminal condition if necessary
+                if done:
+                    break
+
+            # --- Policy Update Phase ---
+            if agent.ready_for_update():
+                logger.info(f"Global Step {global_step}: Starting PPO update.")
+                policy_loss, value_loss, entropy_loss, approx_kl, frac_var_explained = agent.update_policy()
+                
+                # Log PPO Update Stats
+                writer.add_scalar("Loss/Policy_Loss", policy_loss, global_step)
+                writer.add_scalar("Loss/Value_Loss", value_loss, global_step)
+                writer.add_scalar("Loss/Entropy_Loss", entropy_loss, global_step)
+                writer.add_scalar("Stats/Approx_KL", approx_kl, global_step)
+                writer.add_scalar("Stats/Frac_Variance_Explained", frac_var_explained, global_step)
+                
+                if args.wandb_project:
+                     wandb.log({
+                        "Loss/Policy_Loss": policy_loss,
+                        "Loss/Value_Loss": value_loss,
+                        "Loss/Entropy_Loss": entropy_loss,
+                        "Stats/Approx_KL": approx_kl,
+                        "Stats/Frac_Variance_Explained": frac_var_explained,
+                        "global_step": global_step,
+                    })
+                
+                logger.info(f"PPO Update finished. Loss: {policy_loss:.4f}")
+                agent.clear_buffer() # Clear buffer after update
+
+            # --- Episode Logging and Metrics Aggregation ---
+            
+            # 1. Update rolling reward/metric windows
+            episode_reward_window.append(ep_reward)
+            current_metrics = calculate_metrics_from_infos(ep_infos)
+            episode_metrics_window.append(current_metrics)
+            
+            # 2. Calculate windowed average metrics
+            avg_reward = _safe_mean(episode_reward_window)
+            
+            # Calculate rolling averages for all collected metric keys
+            window_metrics = {}
+            # Get a superset of all keys present in the window
+            all_keys = set().union(*(m.keys() for m in episode_metrics_window)) 
+            for key in all_keys:
+                window_metrics[key] = _safe_mean([m.get(key, 0.0) for m in episode_metrics_window])
+            
+            # 3. Log Episode Totals
+            writer.add_scalar("Episode/Reward_Total", ep_reward, episode)
+            writer.add_scalar("Episode/Reward_Mean_Window", avg_reward, episode)
+            writer.add_scalar("Episode/Length", ep_steps, episode)
+            
+            log_data = {
+                "Episode/Reward_Total": ep_reward,
+                "Episode/Reward_Mean_Window": avg_reward,
+                "Episode/Length": ep_steps,
+                "global_step": global_step,
+            }
+            
+            # 4. Log Detailed Metrics (Ep-level & Window Avg)
+            for key, value in current_metrics.items():
+                # Log current episode metric
+                writer.add_scalar(key, value, episode)
+                log_data[key] = value
+                
+                # Log windowed average metric (using consistent grouping)
+                window_key = key.replace("/", "Window/") # e.g. Defense/R_succ -> DefenseWindow/R_succ
+                writer.add_scalar(window_key, window_metrics[key], episode)
+                log_data[window_key] = window_metrics[key]
+                
+            if args.wandb_project:
+                wandb.log(log_data)
+                
+            logger.info(f"Episode {episode}/{total_episodes}: Reward={ep_reward:.2f} | S_MTD={current_metrics.get('Defense/S_MTD_overall', 0.0):.3f} | R_succ={current_metrics.get('Defense/R_succ', 0.0):.3f}")
+
         except Exception as e:
-            print(f"[!] Failed to export policy: {e}")
+            logger.error(f"An error occurred during episode {episode}: {e}")
+            if args.wandb_project:
+                wandb.log({"error": f"Episode {episode} failed with error: {e}", "global_step": global_step})
+            # Attempt to save model before exiting (simple save)
+            if agent.network is not None:
+                 torch.save(agent.network.state_dict(), os.path.join(log_path, f"checkpoint_ep{episode}.pth"))
+            break
 
 
-if __name__ == "__main__":
-    run_training(parse_args())
+    # --- Finalization ---
+    logger.info("Training finished. Closing writers.")
+    writer.close()
+    if args.wandb_project:
+        wandb.finish()
+        
+    # Save final model and normalization data (Simplified export via PPOAgent)
+    final_model_path = os.path.join(log_path, "final_policy.pth")
+    agent.save_policy(final_model_path)
+    
+    # Save dummy normalization data (to be consistent with export script requirement)
+    norm_metadata = {
+        "FEATURE_KEYS": FEATURE_KEYS,
+        "ACTION_PARAM_KEYS": ACTION_PARAM_KEYS,
+        "FEATURE_NORM_METADATA": {"means": [0.0]*len(FEATURE_KEYS), "stds": [1.0]*len(FEATURE_KEYS)}
+    }
+    with open(os.path.join(log_path, "norm_metadata.json"), 'w') as f:
+        json.dump(norm_metadata, f, indent=4)
+        
+    logger.info(f"Final policy saved to {final_model_path}")
+    logger.info(f"Training log data saved to {log_path}")
+
+
+if __name__ == '__main__':
+    parser = argparse.ArgumentParser(description="MTD PPO Reinforcement Learning Trainer")
+    parser.add_argument("--seed", type=int, default=42, help="Random seed")
+    parser.add_argument("--cuda", action="store_true", default=False, help="Enable CUDA training")
+    parser.add_argument("--torch-deterministic", action="store_true", default=True, help="Make torch operations deterministic")
+    
+    # Environment Params
+    parser.add_argument("--seeker-level", type=int, default=2, help="Seeker difficulty level (0-3)")
+    parser.add_argument("--total-episodes", type=int, default=1000, help="Total number of episodes to train")
+    parser.add_argument("--max-steps-per-episode", type=int, default=1000, help="Maximum steps per episode")
+    
+    # PPO Hyperparameters
+    parser.add_argument("--learning-rate", type=float, default=3e-4, help="Learning rate for policy and value networks")
+    parser.add_argument("--hidden-size", type=int, default=128, help="Hidden layer size for networks")
+    parser.add_argument("--gamma", type=float, default=0.99, help="Discount factor (gamma)")
+    parser.add_argument("--gae-lambda", type=float, default=0.95, help="GAE lambda parameter")
+    parser.add_argument("--clip-coef", type=float, default=0.2, help="PPO clipping coefficient")
+    parser.add_argument("--ent-coef", type=float, default=0.01, help="Entropy coefficient")
+    parser.add_argument("--vf-coef", type=float, default=0.5, help="Value function coefficient")
+    parser.add_argument("--ppo-epochs", type=int, default=10, help="Number of epochs to run PPO update per batch")
+    parser.add_argument("--minibatch-size", type=int, default=64, help="Minibatch size for optimization")
+    parser.add_argument("--target-kl", type=float, default=0.015, help="Target KL divergence threshold")
+
+    # Logging/Reporting
+    parser.add_argument("--log-dir", type=str, default="runs", help="Directory for TensorBoard/Model logs")
+    parser.add_argument("--wandb-project", type=str, default="mtd_rl_v06", help="WandB project name")
+    parser.add_argument("--wandb-entity", type=str, default=None, help="WandB entity/user name")
+    parser.add_argument("--metric-window-size", type=int, default=50, help="Window size for calculating mean episode metrics")
+
+    args = parser.parse_args()
+    
+    # Set max episode steps in environment configuration
+    NetworkEnv.max_episode_steps = args.max_steps_per_episode
+
+    train_ppo(args)

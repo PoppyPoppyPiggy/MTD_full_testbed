@@ -1,95 +1,74 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-rl_export_policy_v05.py
-
-- 학습된 MTDPolicyNet 파라미터(.pth)와
-  상태 정규화 정보(feature_norm), FEATURE_KEYS/ACTION_PARAM_KEYS 메타를
-  JSON으로 저장.
-- 테스트베드에서 이 메타를 그대로 읽어들여 인퍼런스하면,
-  학습/실환경 입력 의미가 동일해진다.
-"""
-
+# 파일 경로: dvd_lite/dvd_attacks_lpc/mtd/rl_export_policy_v05.py
+import torch
 import json
 import os
-from typing import Sequence, Dict, Any
+import argparse
+import logging
+from datetime import datetime
+from .rl_config_v05 import FEATURE_KEYS, ACTION_PARAM_KEYS, FEATURE_NORM_METADATA
+from .rl_model_v05 import ActorCritic # Import the network definition
 
-import numpy as np
-import torch
+logger = logging.getLogger(__name__)
 
-from rl_config_v05 import FEATURE_KEYS, ACTION_PARAM_KEYS, OBS_DIM, ACTION_DIM
-
-
-def compute_feature_norms(state_history: Sequence[np.ndarray]) -> Dict[str, Dict[str, float]]:
+def export_policy(model_path, export_dir, state_dim, action_dim, hidden_size):
     """
-    state_history: (N, OBS_DIM) 형태의 numpy 배열 리스트
-    FEATURE_KEYS 순서에 맞춰 평균/표준편차 계산.
+    Exports the trained policy model and associated metadata for deployment.
     """
-    if not state_history:
-        # 데이터를 못 모았을 경우 기본값
-        return {
-            key: {"mean": 0.0, "std": 1.0}
-            for key in FEATURE_KEYS
-        }
+    logger.info(f"Loading model from: {model_path}")
+    
+    # --- 1. Load the Model ---
+    # Determine the device (CPU is standard for deployment/export)
+    device = torch.device("cpu")
+    
+    # Initialize the model structure
+    model = ActorCritic(state_dim, action_dim, hidden_size).to(device)
+    
+    # Load the trained weights
+    try:
+        model.load_state_dict(torch.load(model_path, map_location=device))
+        model.eval() # Set to evaluation mode
+        logger.info("Model weights loaded successfully.")
+    except Exception as e:
+        logger.error(f"Error loading model state dict: {e}")
+        return
 
-    states = np.stack(state_history, axis=0)
-    assert states.shape[1] == OBS_DIM
+    # --- 2. Save Policy Network (Only the necessary part for inference) ---
+    policy_output_path = os.path.join(export_dir, "mtd_policy.pth")
+    torch.save(model.state_dict(), policy_output_path)
+    logger.info(f"Policy model (.pth) saved to: {policy_output_path}")
 
-    norms: Dict[str, Dict[str, float]] = {}
-    for i, key in enumerate(FEATURE_KEYS):
-        col = states[:, i]
-        mean = float(np.mean(col))
-        std = float(np.std(col) + 1e-6)
-        norms[key] = {"mean": mean, "std": std}
-
-    return norms
-
-
-def export_mtd_policy(
-    policy_net: torch.nn.Module,
-    state_history: Sequence[np.ndarray],
-    save_dir: str,
-    version: str = "ver_05",
-) -> None:
-    """
-    정책 파라미터 + 메타데이터를 저장.
-
-    Outputs:
-        save_dir/mtd_policy_{version}.pth
-        save_dir/mtd_policy_{version}_meta.json
-    """
-    os.makedirs(save_dir, exist_ok=True)
-
-    # 1) 모델 저장 (CPU 호환)
-    policy_cpu = policy_net.to("cpu")
-    model_path = os.path.join(save_dir, f"mtd_policy_{version}.pth")
-    torch.save(policy_cpu.state_dict(), model_path)
-
-    # 2) feature_norm 계산
-    feature_norm = compute_feature_norms(state_history)
-
-    # 3) 메타 JSON 생성
-    meta: Dict[str, Any] = {
-        "version": version,
-        "model_path": os.path.basename(model_path),
-        "obs_dim": OBS_DIM,
-        "action_dim": ACTION_DIM,
-        "feature_keys": FEATURE_KEYS,
-        "action_param_keys": ACTION_PARAM_KEYS,
-        "feature_norm": feature_norm,
-        "semantic_contract": {
-            "description": (
-                "This policy was trained in NetworkEnv v0.5. "
-                "Inputs must be normalized using feature_norm over FEATURE_KEYS, "
-                "and actions are interpreted as continuous parameters in [-1,1], "
-                "scaled to [0,1] before mapping to DNAT/shuffle/blacklist semantics."
-            ),
-        },
+    # --- 3. Save Metadata (JSON) ---
+    metadata = {
+        "export_timestamp": datetime.now().isoformat(),
+        "model_architecture": "PPO_ActorCritic_Continuous",
+        "input_features": FEATURE_KEYS,
+        "output_actions": ACTION_PARAM_KEYS,
+        "input_dim": state_dim,
+        "output_dim": action_dim,
+        "hidden_size": hidden_size,
+        "normalization_metadata": FEATURE_NORM_METADATA, # Includes assumed normalization
+        "notes": "Policy output is continuous [-1, 1] and must be rescaled to [0, 1] before applying MTD functions (e.g. blacklist_aggression)."
     }
+    
+    metadata_output_path = os.path.join(export_dir, "mtd_policy_metadata.json")
+    with open(metadata_output_path, 'w') as f:
+        json.dump(metadata, f, indent=4)
+        
+    logger.info(f"Policy metadata (.json) saved to: {metadata_output_path}")
 
-    meta_path = os.path.join(save_dir, f"mtd_policy_{version}_meta.json")
-    with open(meta_path, "w", encoding="utf-8") as f:
-        json.dump(meta, f, indent=2, ensure_ascii=False)
 
-    print(f"[+] Saved policy: {model_path}")
-    print(f"[+] Saved meta:   {meta_path}")
+if __name__ == '__main__':
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+
+    parser = argparse.ArgumentParser(description="MTD PPO Policy Export Utility")
+    parser.add_argument("model_path", type=str, help="Path to the trained PyTorch model file (.pth)")
+    parser.add_argument("--export-dir", type=str, default="exported_policy", help="Directory to save the exported files")
+    parser.add_argument("--state-dim", type=int, default=len(FEATURE_KEYS), help="State dimension")
+    parser.add_argument("--action-dim", type=int, default=len(ACTION_PARAM_KEYS), help="Action dimension")
+    parser.add_argument("--hidden-size", type=int, default=128, help="Hidden layer size (must match training)")
+    
+    args = parser.parse_args()
+
+    os.makedirs(args.export_dir, exist_ok=True)
+    
+    export_policy(args.model_path, args.export_dir, args.state_dim, args.action_dim, args.hidden_size)

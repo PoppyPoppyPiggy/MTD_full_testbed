@@ -1,121 +1,123 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-"""
-rl_config_v05.py
+# Configuration for the MTD Reinforcement Learning Agent and Environment (v06: Refined Metrics & Reward)
+import numpy as np
+import math
 
-- 학습 환경(NetworkEnv v0.5)과 실제 테스트베드 인퍼런스에서
-  공통으로 사용하는 상태/행동 공간 정의.
-- 여기 정의된 FEATURE_KEYS / ACTION_PARAM_KEYS / SIM_TIME_PER_STEP_SEC 를
-  기준으로 논문에서 "시뮬레이션과 실제 환경의 의미론적 동일성"을 주장할 수 있음.
-"""
+# --- ENVIRONMENT CONSTANTS AND PARAMETERS ---
 
-from dataclasses import dataclass, field
-from typing import List, Dict, Any
+# Time constants
+SIM_TIME_PER_STEP_SEC = 1.0  # Time represented by a single simulation step (1 second)
 
-# --- Action (연속 파라미터) 정의 -------------------------------------------
-# [-1, 1] → (action + 1) / 2 → [0, 1] 로 스케일링해서 사용.
-# 테스트베드에서도 동일한 해석을 해야 함.
+# Network Endpoints Configuration (Used for Diversity/Shuffle metrics)
+NUM_TARGET_ENDPOINTS = 5
+NUM_DECOY_ENDPOINTS = 2
+NUM_TOTAL_ENDPOINTS = NUM_TARGET_ENDPOINTS + NUM_DECOY_ENDPOINTS
 
-ACTION_PARAM_KEYS: List[str] = [
-    # DNAT 포커스 비율 (3개 합이 1이 되도록 softmax / 정규화)
-    "dnat_real_focus",
-    "dnat_decoy_focus",
-    "dnat_alternate_focus",
+# Seeker Attack Model Parameters (based on user specification)
+SEEKER_PROB_PARAMS = {
+    # Scan probability clamping
+    "SCAN_PROB_FACTOR": 0.4,
+    "SCAN_PROB_MIN": 0.05,
+    "SCAN_PROB_MAX": 0.95,
+    # Find probability exponential decay factor
+    "FIND_EXP_FACTOR": 0.05,
+    # Exploit/Breach block success sigmoid parameters (BL = blacklist level [0, 1])
+    "EXPLOIT_BLOCK_LOUD_SLOPE": 0.9,
+    "EXPLOIT_BLOCK_LOUD_SHIFT": -0.5,
+    "EXPLOIT_BLOCK_STEALTH_SLOPE": 0.2,
+    "EXPLOIT_BLOCK_STEALTH_SHIFT": -1.5,
+    "BREACH_BLOCK_SLOPE": 0.3,
+    "BREACH_BLOCK_SHIFT": -1.0,
+    # Exploit/Breach success probabilities (if not blocked)
+    "EXPLOIT_SUCCESS_LOUD": 0.8,
+    "EXPLOIT_SUCCESS_STEALTH": 0.5,
+    "BREACH_ATTEMPT_PROB": 0.9,
+}
 
-    # 셔플 강도 (0: 셔플 없음, 1: 매우 공격적인 셔플)
-    "shuffle_intensity",
+# Cost Weights for Defender (based on user specification - Section 5.1)
+COST_MTD_ACTION = 0.005  # Base cost per MTD policy change
+COST_SHUFFLE = 0.5       # Cost multiplier for shuffle operation
+COST_DECOY = 0.05        # Cost multiplier for decoy ratio
+COST_BL = 0.01           # Cost multiplier for blacklist level
+COST_WEIGHT = 0.5        # Multiplier for total calculated cost term in reward function
 
-    # 블랙리스트 공격성 (0: 매우 공격적(민감), 1: 거의 차단 안함)
-    "blacklist_aggression",
+# Blacklister Mapping (Used in SimulatedBlacklister)
+BLACKLIST_SENSITIVITY_MIN = 0.1
+BLACKLIST_SENSITIVITY_MAX = 0.9
+BLACKLIST_DURATION_MIN_STEPS = 10
+BLACKLIST_DURATION_MAX_STEPS = 10000
 
-    # 블랙리스트 유지 기간 (0: 짧게, 1: 매우 길게/무기한)
-    "blacklist_duration",
+# --- RL AGENT CONFIGURATION ---
+
+# Observation State Features (FEATURE_KEYS - 16 dimensions)
+# NOTE: The first 10 are dynamic metrics, the last 6 are the last actions taken.
+FEATURE_KEYS = [
+    # Metrics (10D)
+    "cti_alert_rate",           # (1) CTI passive detection rate (0..1)
+    "blacklist_size_ratio",     # (2) Current Blacklist size / Max size (0..1)
+    "uptime_ratio",             # (3) Overall network uptime/availability (0..1)
+    "breach_success_rate",      # (4) Breach events / Total attack steps (0..1) - Cumulative/Windowed
+    "decoy_lure_rate",          # (5) Decoy attack steps / Total attack steps (0..1) - Cumulative/Windowed
+    "current_exposure_mean",    # (6) LPC: Average steps seeker has been exposed to the current IP
+    "r_known_ratio",            # (7) LPC: Ratio of known IPs (Seeker's knowledge)
+    "r_exploited_ratio",        # (8) LPC: Ratio of exploited IPs
+    "seeker_scan_effort",       # (9) Seeker's current/last known scan effort (0..1)
+    "seeker_attack_bias",       # (10) Seeker's current/last known attack bias (0..1)
+    # Last Action Parameters (6D)
+    "last_action_dnat_target_focus",
+    "last_action_dnat_decoy_focus",
+    "last_action_shuffle_intensity",
+    "last_action_blacklist_aggression",
+    "last_action_blacklist_duration",
+    "last_action_decoy_ratio"
 ]
 
-# --- State (Feature) 정의 ---------------------------------------------------
-# 10개 운영/보안 메트릭 + 6개 마지막 액션 파라미터 = 16차원 상태공간
-
-BASE_FEATURE_KEYS: List[str] = [
-    # CTI / MTD / 공격 상황
-    "cti_alert_rate",          # CTI 경보율 (최근 윈도우 기준)
-    "blacklist_size",          # 현재 블랙리스트에 올라간 IP 개수
-    "seeker_ip_change_rate",   # 공격자 IP 변경률
-    "breach_success_rate",     # 침투 성공률
-    "decoy_lure_rate",         # 디코이 유인률
-
-    # 서비스/자원/비용 상태
-    "alternate_node_health",   # 대체 노드(ALT) 품질 지표 (0~1)
-    "service_uptime_ratio",    # 서비스 가동률 (0~1)
-    "system_cost",             # MTD 비용 누적/평균 값
-
-    # 공격 타임라인
-    "recent_attack_flag",      # 최근 윈도우 안에 공격 발생 여부 플래그
-    "mean_time_to_breach",     # 평균 Time-To-Breach (초 단위)
+# Action Space Definition (ACTION_PARAM_KEYS - 6 dimensions)
+# Output is continuous [-1, 1], mapped to [0, 1] for environment use.
+ACTION_PARAM_KEYS = [
+    "dnat_target_focus",        # Target redirection priority (0=low, 1=high)
+    "dnat_decoy_focus",         # Decoy redirection priority (0=low, 1=high)
+    "shuffle_intensity",        # Frequency/Force of MTD shuffle (0=none, 1=max)
+    "blacklist_aggression",     # Sensitivity of blacklisting (0=min, 1=max)
+    "blacklist_duration",       # Duration of blacklisting (0=min, 1=max)
+    "decoy_ratio"               # Proportion of traffic to decoy targets (0=min, 1=max)
 ]
 
-ACTION_FEATURE_KEYS: List[str] = [f"last_{k}" for k in ACTION_PARAM_KEYS]
+# State Normalization Metadata (Placeholders - MUST be determined by pre-training or consistent with testbed)
+# The actual normalization should occur based on data collected, but placeholders are included
+# for consistency with a typical RL config file structure.
+FEATURE_NORM_METADATA = {
+    "means": [0.5] * len(FEATURE_KEYS),
+    "stds": [0.25] * len(FEATURE_KEYS)
+}
 
-FEATURE_KEYS: List[str] = BASE_FEATURE_KEYS + ACTION_FEATURE_KEYS
+# --- LOGGING AND EVALUATION METRICS (New DRS/TTE/Cost Metrics) ---
+# These are the derived metrics for plotting/logging in rl_train_v05.py
 
-OBS_DIM: int = len(FEATURE_KEYS)
-ACTION_DIM: int = len(ACTION_PARAM_KEYS)
+LOG_METRICS_DEFENSE = [
+    "R_succ",             # Breach Stop Rate (1 - Breach Success / Breach Attempts)
+    "C_def",              # Avg. Defense Cost per Step
+    "CostPerBlock",       # Total Cost / Total Blocks (Exploit + Breach + Decoy)
+    "S_MTD_overall"       # Composite Score (e.g., 0.5*R_succ + 0.5*Decoy_Rate - 0.1*C_def)
+]
 
-# 시뮬레이션 1스텝이 실제 시간에서 몇 초에 대응하는지
-# 테스트베드에서 CTI/모니터링 수집 주기와 맞춰서 설정.
-SIM_TIME_PER_STEP_SEC: float = 1.0
+LOG_METRICS_DRS = [
+    "D_bits",             # Diversity (Entropy of endpoint visitation)
+    "R_redundancy",       # Redundancy (Number of distinct ports - simplified)
+    "S_shuffle",          # Shuffle (Normalized Shuffle Frequency)
+]
 
+LOG_METRICS_ATTACK = [
+    "r_scan",             # Scan attempts / Total Steps
+    "r_find",             # Find events / Scan attempts
+    "r_exploit_block",    # Exploit Block / Exploit Attempts
+    "r_exploit_success",  # Exploit Success / Exploit Attempts
+    "r_breach_block",     # Breach Block / Breach Attempts
+    "r_breach_success",   # Breach Success / Breach Attempts
+    "decoy_lure_rate"
+]
 
-@dataclass
-class RLConfigV05:
-    """학습 및 환경 공통 설정."""
-
-    seed: int = 0
-    seeker_level: int = 2
-
-    # PPO 하이퍼파라미터
-    total_timesteps: int = 200_000
-    batch_size: int = 2048
-    gamma: float = 0.99
-    gae_lambda: float = 0.95
-    clip_coef: float = 0.2
-    update_epochs: int = 10
-    ent_coef: float = 0.01
-    vf_coef: float = 0.5
-    max_grad_norm: float = 0.5
-    learning_rate: float = 3e-4
-
-    # 테스트베드 메트릭 키 매핑 (논문/코드에서 명시적으로 사용 가능)
-    testbed_metric_mapping: Dict[str, str] = field(default_factory=lambda: {
-        # 아래 값들은 실제 테스트베드에서 사용하는 JSON / 로그 키에 맞게 조정하면 됨.
-        "cti_alert_rate": "cti.alert_rate",
-        "blacklist_size": "mtd.blacklist_size",
-        "seeker_ip_change_rate": "seeker.ip_change_rate",
-        "breach_success_rate": "attack.breach_rate",
-        "decoy_lure_rate": "attack.decoy_lure_rate",
-        "alternate_node_health": "service.alternate_node_health",
-        "service_uptime_ratio": "service.uptime_ratio",
-        "system_cost": "mtd.system_cost",
-        "recent_attack_flag": "attack.recent_flag",
-        "mean_time_to_breach": "attack.mean_time_to_breach",
-        # last_* 키들은 그대로 사용 (마지막 액션 파라미터 기록용)
-    })
-
-
-def build_state_vector_from_metrics(
-    metrics: Dict[str, float],
-    last_action_params: List[float],
-) -> List[float]:
-    """
-    실 테스트베드에서 수집한 metrics + 마지막 액션 파라미터를
-    FEATURE_KEYS 순서에 맞게 벡터로 정렬.
-
-    metrics: BASE_FEATURE_KEYS 에 해당하는 값 딕셔너리
-    last_action_params: 0~1 범위 6차원 리스트 (ACTION_PARAM_KEYS 순서)
-    """
-    assert len(last_action_params) == len(ACTION_PARAM_KEYS)
-    vec: List[float] = []
-    for k in BASE_FEATURE_KEYS:
-        vec.append(float(metrics.get(k, 0.0)))
-    for v in last_action_params:
-        vec.append(float(v))
-    return vec
+LOG_METRICS_TIME_TO_EVENT = [
+    "TTF_mean",           # Time-to-Find (Avg Exposure Steps at Find)
+    "TTEB_mean",          # Time-to-Exploit-Block (Avg Exposure Steps at Exploit Block)
+    "TTBr_mean",          # Time-to-Breach (Avg Exposure Steps at Breach Success)
+]
