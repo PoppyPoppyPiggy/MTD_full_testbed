@@ -88,6 +88,7 @@ def train_ppo(args):
     env = NetworkEnv(seed=args.seed, seeker_level=args.seeker_level)
     
     # Logging Setup
+    # Use args.run_name if provided, otherwise generate a default name
     run_name = args.run_name if args.run_name else f"PPO_v06_vs_Seeker_L{args.seeker_level}_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
     log_path = os.path.join(args.log_dir, run_name)
     os.makedirs(log_path, exist_ok=True)
@@ -298,8 +299,9 @@ if __name__ == '__main__':
 
     # Logging/Reporting
     parser.add_argument("--log-dir", type=str, default="runs", help="Directory for TensorBoard/Model logs")
-    parser.add_argument("--wandb-project", type=str, default="mtd_rl_v06", help="WandB project name")
-    parser.add_argument("--wandb-entity", type=str, default=None, help="WandB entity/user name")
+    parser.add_argument("--run-name", type=str, default=None, help="Specific name for the WandB/TensorBoard run")
+    parser.add_argument("--wandb-project", type=str, default="mtd_rl_v06_comparison", help="WandB project name")
+    parser.add_argument("--wandb-entity", type=str, default="emforhsqhf29-", help="WandB entity/user name")
     parser.add_argument("--metric-window-size", type=int, default=50, help="Window size for calculating mean episode metrics")
 
     args = parser.parse_args()
