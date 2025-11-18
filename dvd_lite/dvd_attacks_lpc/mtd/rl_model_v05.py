@@ -1,58 +1,95 @@
-# File: MTD_full_testbed/dvd_lite/dvd_attacks_lpc/mtd/rl_model_v05.py
-#
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-[신규 3/11] RL 정책 네트워크 모델 정의 (v05)
+rl_model_v05.py
 
-- v04 모델(MTDPolicyNet, MTDValueNet)과 구조적으로 100% 동일합니다.
-- (Obs_dim=16, Act_dim=6)
+MTD PPO용 정책/가치 네트워크 정의.
 """
+
+from typing import Tuple
 
 import torch
 import torch.nn as nn
-import numpy as np
-from torch.distributions.normal import Normal
+from torch.distributions import Normal
+
+from rl_config_v05 import OBS_DIM, ACTION_DIM
+
 
 class MTDPolicyNet(nn.Module):
-    """ (Actor Network - Continuous) """
-    def __init__(self, obs_dim: int, act_dim: int):
-        super().__init__()
-        self.body = nn.Sequential(
-            nn.Linear(obs_dim, 128), nn.Tanh(),
-            nn.Linear(128, 128), nn.Tanh(),
-        )
-        self.actor_mean = nn.Sequential(
-            nn.Linear(128, act_dim), nn.Tanh() 
-        )
-        self.actor_log_std = nn.Parameter(torch.zeros(1, act_dim))
+    """
+    연속 행동 정책 네트워크.
+    입력: obs_dim (16)
+    출력: mean ([-1,1] 범위 6차원), log_std (학습 가능한 파라미터)
+    """
 
-    def forward(self, x: torch.Tensor) -> Normal:
-        """ PPO 학습 시 (Normal Distribution) 반환 """
-        body_out = self.body(x)
-        mean = self.actor_mean(body_out)
-        log_std = self.actor_log_std.expand_as(mean)
+    def __init__(self, obs_dim: int = OBS_DIM, action_dim: int = ACTION_DIM):
+        super().__init__()
+        self.obs_dim = obs_dim
+        self.action_dim = action_dim
+
+        self.net = nn.Sequential(
+            nn.Linear(obs_dim, 128),
+            nn.Tanh(),
+            nn.Linear(128, 128),
+            nn.Tanh(),
+        )
+        self.mean_head = nn.Linear(128, action_dim)
+        # log_std 는 상태에 상관없이 하나의 학습 가능한 파라미터로 유지
+        self.log_std = nn.Parameter(torch.zeros(action_dim))
+
+        self._init_weights()
+
+    def _init_weights(self) -> None:
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.orthogonal_(m.weight, gain=1.0)
+                nn.init.constant_(m.bias, 0.0)
+
+    def forward(self, obs: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        x = self.net(obs)
+        mean = torch.tanh(self.mean_head(x))  # [-1, 1] 범위
+        log_std = self.log_std.expand_as(mean)
+        return mean, log_std
+
+    def get_dist(self, obs: torch.Tensor) -> Normal:
+        mean, log_std = self.forward(obs)
         std = torch.exp(log_std)
         return Normal(mean, std)
 
-    def act_greedy(self, obs_vec: np.ndarray) -> np.ndarray:
-        """ 배포 환경에서 사용할 결정론적 행동(평균) 반환 """
-        self.eval() 
-        with torch.no_grad():
-            x = torch.from_numpy(obs_vec).float().unsqueeze(0)
-            body_out = self.body(x)
-            mean = self.actor_mean(body_out)
-            return mean.squeeze(0).cpu().numpy() # (6,) 벡터, -1.0 ~ 1.0
+    def act(self, obs: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        dist = self.get_dist(obs)
+        action = dist.sample()
+        log_prob = dist.log_prob(action).sum(-1)
+        return action, log_prob
+
+    def act_greedy(self, obs: torch.Tensor) -> torch.Tensor:
+        mean, _ = self.forward(obs)
+        return mean
+
 
 class MTDValueNet(nn.Module):
-    """ (Critic Network) """
-    def __init__(self, obs_dim: int):
+    """
+    상태 가치함수 네트워크.
+    """
+
+    def __init__(self, obs_dim: int = OBS_DIM):
         super().__init__()
+        self.obs_dim = obs_dim
+
         self.net = nn.Sequential(
-            nn.Linear(obs_dim, 128), nn.Tanh(),
-            nn.Linear(128, 128), nn.Tanh(),
+            nn.Linear(obs_dim, 128),
+            nn.Tanh(),
+            nn.Linear(128, 128),
+            nn.Tanh(),
             nn.Linear(128, 1),
         )
-    
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.net(x)
+        self._init_weights()
+
+    def _init_weights(self) -> None:
+        for m in self.modules():
+            if isinstance(m, nn.Linear):
+                nn.init.orthogonal_(m.weight, gain=1.0)
+                nn.init.constant_(m.bias, 0.0)
+
+    def forward(self, obs: torch.Tensor) -> torch.Tensor:
+        return self.net(obs).squeeze(-1)

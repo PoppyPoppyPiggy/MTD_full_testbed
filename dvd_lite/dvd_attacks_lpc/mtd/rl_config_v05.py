@@ -1,73 +1,121 @@
-# File: MTD_full_testbed/dvd_lite/dvd_attacks_lpc/mtd/rl_config_v05.py
-#
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-[신규 1/8] MTD-RL v04 하이브리드 아키텍처 - 핵심 계약 (Contract)
+rl_config_v05.py
 
-- [v03 대비 변경점]
-- ACTION_MAP (이산적) -> ACTION_PARAM_KEYS (연속적)로 변경
-- RL 에이전트는 이제 (N,) 벡터의 연속 파라미터를 출력합니다.
+- 학습 환경(NetworkEnv v0.5)과 실제 테스트베드 인퍼런스에서
+  공통으로 사용하는 상태/행동 공간 정의.
+- 여기 정의된 FEATURE_KEYS / ACTION_PARAM_KEYS / SIM_TIME_PER_STEP_SEC 를
+  기준으로 논문에서 "시뮬레이션과 실제 환경의 의미론적 동일성"을 주장할 수 있음.
 """
 
-# --- [A] Docker-Compose 기반 타겟 정의 ---
-# docker-compose-lite.yaml의 IP/Port 기반
-REAL_TARGETS = [
-    {"name": "flight-controller", "ip": "10.13.0.2", "port": 14550},
-    {"name": "companion-computer", "ip": "10.13.0.3", "port": 3000},
-    {"name": "ground-control-station", "ip": "10.13.0.4", "port": 14550},
-]
-DECOY_TARGETS = [
-    {"name": "decoy-gateway", "ip": "10.13.0.6", "port": 80},
-]
-ALTERNATE_NODE_TARGETS = [
-    {"name": "virtual-drone", "ip": "10.13.0.100", "port": 14550},
+from dataclasses import dataclass, field
+from typing import List, Dict, Any
+
+# --- Action (연속 파라미터) 정의 -------------------------------------------
+# [-1, 1] → (action + 1) / 2 → [0, 1] 로 스케일링해서 사용.
+# 테스트베드에서도 동일한 해석을 해야 함.
+
+ACTION_PARAM_KEYS: List[str] = [
+    # DNAT 포커스 비율 (3개 합이 1이 되도록 softmax / 정규화)
+    "dnat_real_focus",
+    "dnat_decoy_focus",
+    "dnat_alternate_focus",
+
+    # 셔플 강도 (0: 셔플 없음, 1: 매우 공격적인 셔플)
+    "shuffle_intensity",
+
+    # 블랙리스트 공격성 (0: 매우 공격적(민감), 1: 거의 차단 안함)
+    "blacklist_aggression",
+
+    # 블랙리스트 유지 기간 (0: 짧게, 1: 매우 길게/무기한)
+    "blacklist_duration",
 ]
 
-# --- [B] RL 행동(Action) 공간 정의 (v04: 연속적 파라미터) ---
-# RL 에이전트("전략가")가 *동시에* 출력하는 6개의 파라미터
-# PPO는 각 파라미터의 평균(mean)과 표준편차(std)를 학습합니다.
-# [!] 순서가 매우 중요합니다.
-ACTION_PARAM_KEYS = [
-    # 1. DNAT 라우팅 전략 (3개 파라미터, 합쳐서 100%가 됨)
-    "dnat_real_focus_prob",    # (0.0~1.0) 실제 서비스로 보낼 확률 (Softmax Logit)
-    "dnat_decoy_focus_prob",   # (0.0~1.0) 디코이 서비스로 보낼 확률 (Softmax Logit)
-    "dnat_alternate_focus_prob", # (0.0~1.0) 대체 노드로 보낼 확률 (Softmax Logit)
-    
-    # 2. 셔플 전략 (1개 파라미터)
-    "shuffle_intensity",     # (0.0~1.0) 0.0=Noop, 1.0=Aggressive Shuffle
-    
-    # 3. 블랙리스트 정책 (2개 파라미터)
-    "blacklist_aggression",  # (0.0~1.0) CTI 탐지 공격성 (0.0=느슨, 1.0=공격적)
-    "blacklist_duration",    # (0.0~1.0) CTI 차단 시간 (0.0=5분, 1.0=영구)
-]
-ACTION_DIM = len(ACTION_PARAM_KEYS) # 6
+# --- State (Feature) 정의 ---------------------------------------------------
+# 10개 운영/보안 메트릭 + 6개 마지막 액션 파라미터 = 16차원 상태공간
 
-# --- [C] RL 상태(State) 공간 정의 (v04: 16D Vector) ---
-# [!] MtdScorer와 CtiAgentStatus는 이 키값과 순서대로 메트릭을 반환해야 함.
-# [v03 대비 변경점] current_strategy_id(이산적) 대신 6D action 파라미터(연속적)가 피드백됨
-METRIC_FEATURE_KEYS = [
-    # 1. CTI Agent (전술가) 성과 (From CtiAgentStatus)
-    "cti_alert_rate",       # (0.0 ~ 1.0) CTI 분류기 탐지율
-    "blacklist_size",       # (0 ~ N) 현재 블랙리스트에 등록된 IP 수
-    "seeker_ip_change_rate",# (0.0 ~ 1.0) Seeker가 IP를 변경(회피)한 비율
-    
-    # 2. MTD Scorer (전장) 성과 (From MtdScorer)
-    "breach_success_rate",  # (0.0 ~ 1.0) `attack_orchestrator.py` 침투 성공률
-    "decoy_lure_rate",      # (0.0 ~ 1.0) 디코이 유인 성공률
-    "alternate_node_health",# (0.0 ~ 1.0) 대체 노드(GCS/FC) 품질 (QoS)
-    
-    # 3. 시스템 상태
-    "system_cost",          # (0.0 ~ N) 현재 전략의 비용 (MtdScorer)
-    "service_uptime_ratio", # (0.0 ~ 1.0) 실제 서비스(Real) 평균 응답률 (MtdScorer)
-    "attack_orchestrator_running", # (0.0 or 1.0) `attack_orchestrator.py`가 활성화되었는가 (MtdScorer)
-    
-    # (v02 레거시 지표 - 단순화)
-    "ttbr",                 # Time-to-First-Breach (단순화)
-]
-METRIC_DIM = len(METRIC_FEATURE_KEYS) # 10
+BASE_FEATURE_KEYS: List[str] = [
+    # CTI / MTD / 공격 상황
+    "cti_alert_rate",          # CTI 경보율 (최근 윈도우 기준)
+    "blacklist_size",          # 현재 블랙리스트에 올라간 IP 개수
+    "seeker_ip_change_rate",   # 공격자 IP 변경률
+    "breach_success_rate",     # 침투 성공률
+    "decoy_lure_rate",         # 디코이 유인률
 
-# [핵심] 최종 상태 벡터 = (메트릭 10개) + (이전 행동 파라미터 6개)
-# [!] 순서가 매우 중요합니다.
-FEATURE_KEYS = METRIC_FEATURE_KEYS + [f"prev_action_{k}" for k in ACTION_PARAM_KEYS]
-OBS_DIM = len(FEATURE_KEYS) # 10 + 6 = 16
+    # 서비스/자원/비용 상태
+    "alternate_node_health",   # 대체 노드(ALT) 품질 지표 (0~1)
+    "service_uptime_ratio",    # 서비스 가동률 (0~1)
+    "system_cost",             # MTD 비용 누적/평균 값
+
+    # 공격 타임라인
+    "recent_attack_flag",      # 최근 윈도우 안에 공격 발생 여부 플래그
+    "mean_time_to_breach",     # 평균 Time-To-Breach (초 단위)
+]
+
+ACTION_FEATURE_KEYS: List[str] = [f"last_{k}" for k in ACTION_PARAM_KEYS]
+
+FEATURE_KEYS: List[str] = BASE_FEATURE_KEYS + ACTION_FEATURE_KEYS
+
+OBS_DIM: int = len(FEATURE_KEYS)
+ACTION_DIM: int = len(ACTION_PARAM_KEYS)
+
+# 시뮬레이션 1스텝이 실제 시간에서 몇 초에 대응하는지
+# 테스트베드에서 CTI/모니터링 수집 주기와 맞춰서 설정.
+SIM_TIME_PER_STEP_SEC: float = 1.0
+
+
+@dataclass
+class RLConfigV05:
+    """학습 및 환경 공통 설정."""
+
+    seed: int = 0
+    seeker_level: int = 2
+
+    # PPO 하이퍼파라미터
+    total_timesteps: int = 200_000
+    batch_size: int = 2048
+    gamma: float = 0.99
+    gae_lambda: float = 0.95
+    clip_coef: float = 0.2
+    update_epochs: int = 10
+    ent_coef: float = 0.01
+    vf_coef: float = 0.5
+    max_grad_norm: float = 0.5
+    learning_rate: float = 3e-4
+
+    # 테스트베드 메트릭 키 매핑 (논문/코드에서 명시적으로 사용 가능)
+    testbed_metric_mapping: Dict[str, str] = field(default_factory=lambda: {
+        # 아래 값들은 실제 테스트베드에서 사용하는 JSON / 로그 키에 맞게 조정하면 됨.
+        "cti_alert_rate": "cti.alert_rate",
+        "blacklist_size": "mtd.blacklist_size",
+        "seeker_ip_change_rate": "seeker.ip_change_rate",
+        "breach_success_rate": "attack.breach_rate",
+        "decoy_lure_rate": "attack.decoy_lure_rate",
+        "alternate_node_health": "service.alternate_node_health",
+        "service_uptime_ratio": "service.uptime_ratio",
+        "system_cost": "mtd.system_cost",
+        "recent_attack_flag": "attack.recent_flag",
+        "mean_time_to_breach": "attack.mean_time_to_breach",
+        # last_* 키들은 그대로 사용 (마지막 액션 파라미터 기록용)
+    })
+
+
+def build_state_vector_from_metrics(
+    metrics: Dict[str, float],
+    last_action_params: List[float],
+) -> List[float]:
+    """
+    실 테스트베드에서 수집한 metrics + 마지막 액션 파라미터를
+    FEATURE_KEYS 순서에 맞게 벡터로 정렬.
+
+    metrics: BASE_FEATURE_KEYS 에 해당하는 값 딕셔너리
+    last_action_params: 0~1 범위 6차원 리스트 (ACTION_PARAM_KEYS 순서)
+    """
+    assert len(last_action_params) == len(ACTION_PARAM_KEYS)
+    vec: List[float] = []
+    for k in BASE_FEATURE_KEYS:
+        vec.append(float(metrics.get(k, 0.0)))
+    for v in last_action_params:
+        vec.append(float(v))
+    return vec
