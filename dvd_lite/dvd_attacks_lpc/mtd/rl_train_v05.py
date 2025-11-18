@@ -1,3 +1,4 @@
+# 파일 경로: dvd_lite/dvd_attacks_lpc/mtd/rl_train_v05.py
 import argparse
 import random
 import time
@@ -32,7 +33,7 @@ def _safe_divide(numerator, denominator):
 
 def calculate_metrics_from_infos(ep_infos):
     """
-    Calculates detailed episode-level metrics collected info dictionaries.
+    Calculates detailed episode-level metrics from collected info dictionaries.
     Note: The environment's _get_current_metrics already calculates DRS/TTF 
     based on internal state at the last step. We aggregate and average other metrics here.
     
@@ -105,7 +106,10 @@ def train_ppo(args):
         )
         logger.info("WandB initialized.")
     
-    # Agent Setup
+    # --- Agent Setup: Fix AttributeError by using getattr or a default value ---
+    # We explicitly check for existence or use the default value 0.5 (as defined in argparse)
+    MAX_GRAD_NORM = getattr(args, 'max_grad_norm', 0.5) 
+    
     agent = PPOAgent(
         state_dim=env.observation_space.shape[0],
         action_dim=env.action_space.shape[0],
@@ -114,7 +118,7 @@ def train_ppo(args):
         gamma=args.gamma,
         gae_lambda=args.gae_lambda,
         clip_coef=args.clip_coef,
-        max_grad_norm=args.max_grad_norm, # 이제 argparse를 통해 올바르게 전달됩니다.
+        max_grad_norm=MAX_GRAD_NORM, # 수정된 변수 사용
         ent_coef=args.ent_coef,
         vf_coef=args.vf_coef,
         ppo_epochs=args.ppo_epochs,
@@ -151,7 +155,7 @@ def train_ppo(args):
                 
                 # 2. Step environment
                 # The environment returns next_state, reward, terminated, truncated, info
-                next_state, reward, terminated, truncated, info = env.step(action.cpu().numpy())
+                next_state, reward, terminated, truncated, info = env.step(action.cpu().numpy().squeeze(0)) # Action needs to be squeezed for environment
                 done = terminated or truncated
 
                 # 3. Store transition: action/log_prob/value are size (1, N) or (1,), so use .squeeze(0) or .item()
@@ -190,7 +194,7 @@ def train_ppo(args):
                 writer.add_scalar("Stats/Frac_Variance_Explained", frac_var_explained, global_step)
                 
                 if args.wandb_project:
-                    wandb.log({
+                     wandb.log({
                         "Loss/Policy_Loss": policy_loss,
                         "Loss/Value_Loss": value_loss,
                         "Loss/Entropy_Loss": entropy_loss,
@@ -253,7 +257,7 @@ def train_ppo(args):
                 wandb.log({"error": f"Episode {episode} failed with error: {e}", "global_step": global_step})
             # Attempt to save model before exiting (simple save)
             if agent.network is not None:
-                torch.save(agent.network.state_dict(), os.path.join(log_path, f"checkpoint_ep{episode}.pth"))
+                 torch.save(agent.network.state_dict(), os.path.join(log_path, f"checkpoint_ep{episode}.pth"))
             break
 
 
