@@ -2,18 +2,15 @@
 # -*- coding: utf-8 -*-
 """
 CTI Dataset Manager v4.2 (Stable)
-- processed_data의 최신 features_batch_*.csv 자동 탐색 (--input 미지정 시)
-- 무한대/NaN 안전 처리
-- bool/카테고리 컬럼 정리
-- 비숫자형은 자동 무시하고 '숫자형만' 학습 피처로 사용
-- 계층적(train/test) 분할 및 저장
+- processed_data의 최신 features_batch_*.csv 자동 탐색
+- 훈련/테스트 분할 (계층적) 및 저장
 """
 
 import os
 import sys
 import argparse
 import pathlib
-from typing import Optional
+from typing import Optional, List, Dict
 
 import numpy as np
 import pandas as pd
@@ -100,13 +97,11 @@ def main():
         sys.exit(1)
 
     # 3) 무한대/NaN 정리
-    #    - 우선 inf를 NaN으로 바꾸고, 후에 일괄 처리
     if np.isinf(df.select_dtypes(include=np.number).values).any():
         print("[!] 경고: 무한대 값 존재 → NaN으로 전환")
         df.replace([np.inf, -np.inf], np.nan, inplace=True)
 
     # 4) 불리언/카테고리 정리
-    #    - 불리언은 int(0/1)로 변환
     bool_cols = df.select_dtypes(include=["bool"]).columns.tolist()
     if bool_cols:
         df[bool_cols] = df[bool_cols].astype("int64")
@@ -119,7 +114,7 @@ def main():
 
     # 6) X/y 분리
     y = df["label"].astype("int64")
-    #    숫자형만 선택해서 X 구성(비숫자형은 자동 배제)
+    # 숫자형만 선택해서 X 구성
     X = df.drop(columns=["label"], errors="ignore").select_dtypes(include=[np.number])
 
     if X.empty:

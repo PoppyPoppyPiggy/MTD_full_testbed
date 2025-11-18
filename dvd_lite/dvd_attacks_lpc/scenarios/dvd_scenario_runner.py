@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# v9: CTI/ML 자동화 로직 제거 (권한 문제), HTTP/Orchestrator 타임아웃 수정
+#dvd_lite/dvd_attacks_lpc/scenarios/dvd_scenario_runner.py
 import os
 import sys
 import time
@@ -27,8 +27,12 @@ BUS_LOG = os.path.join(BUS_DIR, "bus.log") # 중앙 이벤트 버스 로그
 # --- 상수 정의 ---
 API_BASE = os.environ.get("DVD_API_BASE", "http://127.0.0.1:8000") # DVD WebUI
 ATTACK_ORCH = os.path.join(ROOT, "attack_orchestrator.py")
-SEEKER_AGENT = os.path.join(ROOT, "rl", "seeker.py") 
-DECEPTION_MGR = os.path.join(ROOT, "mtd", "rl_driven_deception_manager.py") 
+SEEKER_AGENT = os.path.join(ROOT, "rl", "seeker.py")
+DECEPTION_MGR = os.path.join(ROOT, "mtd", "rl_driven_deception_manager.py")
+# ⭐️ [추가] CTI ML 파이프라인 경로
+DATA_BUILDER = os.path.join(ROOT, "ml", "data_builder.py")
+DATASET_MANAGER = os.path.join(ROOT, "ml", "dataset_manager.py")
+TRAIN_CLASSIFIER = os.path.join(ROOT, "ml", "train_classifier.py")
 
 # --- Bus Logger ---
 def bus_write(source: str, type_: str, data: Optional[Dict[str, Any]] = None):
@@ -68,7 +72,6 @@ def try_http(endpoint: str, params: Optional[Dict[str, Any]] = None) -> bool:
     log.info(f"[HTTP] API 호출 시도: {api_url} (params: {params or {}})")
     
     try:
-        # ⭐️ [수정 v9] API 타임아웃을 60초로 늘려 stage1/2/3의 긴 실행 시간 허용
         r = requests.post(api_url, json=params or {}, timeout=60) 
         
         if r.status_code // 100 == 2:
@@ -78,7 +81,6 @@ def try_http(endpoint: str, params: Optional[Dict[str, Any]] = None) -> bool:
             log.warning(f"  -> [HTTP {r.status_code}] {endpoint} ({api_url}) 실패: {r.text[:200]}")
             
     except requests.exceptions.ReadTimeout as e:
-        # ⭐️ [수정 v9] 타임아웃은 API 호출 실패로 간주하고 Fallback을 유도
         log.warning(f"  -> [HTTP Timeout] {endpoint} ({api_url}) 응답 시간 초과 (60s). Fallback 시도.")
     except requests.exceptions.ConnectionError as e:
         log.error(f"  -> [HTTP FAIL] {endpoint} 연결 실패. WebUI (port 8000)가 실행 중인지 확인하세요. ({e})")
@@ -169,7 +171,7 @@ def do_attack(name: str, duration_sec: int, params: Optional[Dict[str, Any]] = N
         log.info(f"[ATTACK] 스크립트 공격 시작: {name} (Duration: {duration_sec}s)")
         cmd = [sys.executable, ATTACK_ORCH, "start", name, "-d", str(duration_sec)]
         try:
-            # ⭐️ [수정 v9] 타임아웃을 10초 -> 30초로 늘려 MTD 타겟 리졸브 시간 확보
+            # ⭐️ MTD 타겟 리졸브 시간 확보를 위해 타임아웃을 30초로 유지
             result = subprocess.run(cmd, capture_output=True, text=True, check=True, timeout=30)
             log.info(f"  -> Orchestrator 'start' 명령 전달 성공.")
             log.debug(f"Orchestrator stdout: {result.stdout}")
@@ -210,6 +212,58 @@ def enable_mtd_rl(policy_path: str):
         log.error(f"  -> [MTD FAIL] RL Deception Manager 실행 실패: {e}")
         bus_write("scenario_runner", "mtd_rl_failed", {"error": str(e)})
 
+# ⭐️ [추가] CTI ML 파이프라인 실행 함수
+def run_cti_ml_pipeline():
+    """데이터 빌더, 데이터셋 관리자, 분류기 훈련을 순차적으로 실행합니다."""
+    log.info("="*60)
+    log.info("🤖 [ML PIPELINE] CTI 분류기 학습 파이프라인 시작")
+    log.info("="*60)
+    bus_write("scenario_runner", "ml_pipeline_start", {"stage": "data_building"})
+
+    # 1. Data Builder 실행 (특징 추출 및 CSV 저장)
+    log.info("[ML] 1. Data Builder 실행 (로그 파일 병합 및 특징 추출)...")
+    try:
+        # data_builder.py의 출력은 processed_data 폴더에 features_batch_*.csv로 저장됨
+        subprocess.run([sys.executable, DATA_BUILDER], check=True, timeout=300) # 5분 타임아웃
+        log.info("✅ Data Builder 완료.")
+    except subprocess.CalledProcessError as e:
+        log.critical(f"❌ [ML FAIL] Data Builder 실패 (RC: {e.returncode}). 스크립트 중단.")
+        log.debug(f"Data Builder Stderr: {e.stderr}")
+        bus_write("scenario_runner", "ml_pipeline_fail", {"stage": "data_building", "error": e.stderr})
+        return
+    except subprocess.TimeoutExpired:
+        log.critical("❌ [ML FAIL] Data Builder 시간 초과 (5분). 스크립트 중단.")
+        bus_write("scenario_runner", "ml_pipeline_fail", {"stage": "data_building", "error": "Timeout (300s)"})
+        return
+
+    # 2. Dataset Manager 실행 (훈련/테스트 분할)
+    log.info("[ML] 2. Dataset Manager 실행 (훈련/테스트 데이터셋 분할)...")
+    try:
+        # dataset_manager.py는 processed_data에서 최신 CSV를 자동으로 찾음
+        subprocess.run([sys.executable, DATASET_MANAGER, "--test-size", "0.2"], check=True, timeout=120) # 2분 타임아웃
+        log.info("✅ Dataset Manager 완료.")
+    except subprocess.CalledProcessError as e:
+        log.critical(f"❌ [ML FAIL] Dataset Manager 실패 (RC: {e.returncode}). 스크립트 중단.")
+        bus_write("scenario_runner", "ml_pipeline_fail", {"stage": "dataset_splitting", "error": e.stderr})
+        return
+    except subprocess.TimeoutExpired:
+        log.critical("❌ [ML FAIL] Dataset Manager 시간 초과 (120s). 스크립트 중단.")
+        bus_write("scenario_runner", "ml_pipeline_fail", {"stage": "dataset_splitting", "error": "Timeout (120s)"})
+        return
+
+    # 3. Classifier Trainer 실행 (훈련, 모델 저장 및 평가)
+    log.info("[ML] 3. Classifier Trainer 실행 (모델 훈련 및 평가)...")
+    try:
+        # train_classifier.py는 output/train_dataset.csv를 자동으로 사용
+        subprocess.run([sys.executable, TRAIN_CLASSIFIER], check=True, timeout=180) # 3분 타임아웃
+        log.info("✅ Classifier Trainer 완료. 모델 및 평가 보고서가 output/에 저장됨.")
+        bus_write("scenario_runner", "ml_pipeline_success", {"stage": "training_complete"})
+    except subprocess.CalledProcessError as e:
+        log.critical(f"❌ [ML FAIL] Classifier Trainer 실패 (RC: {e.returncode}). 스크립트 중단.")
+        bus_write("scenario_runner", "ml_pipeline_fail", {"stage": "training_evaluation", "error": e.stderr})
+    except subprocess.TimeoutExpired:
+        log.critical("❌ [ML FAIL] Classifier Trainer 시간 초과 (180s). 스크립트 중단.")
+        bus_write("scenario_runner", "ml_pipeline_fail", {"stage": "training_evaluation", "error": "Timeout (180s)"})
 
 # --- 3. 시나리오 실행기 ---
 def run_step(step: Dict[str, Any]):
@@ -242,6 +296,10 @@ def run_step(step: Dict[str, Any]):
         elif action == "mtd_rl_enable":
             enable_mtd_rl(step.get("policy_path"))
         
+        # ⭐️ [추가된 액션] ML 파이프라인 실행
+        elif action == "run_ml_pipeline":
+             run_cti_ml_pipeline()
+             
         else:
             log.warning(f"알 수 없는 액션입니다: {action}")
             
@@ -254,7 +312,6 @@ def main():
     ap = argparse.ArgumentParser(description="DVD Scenario Runner (v9 - Standalone Runner)")
     ap.add_argument("--scenario", required=True, help="실행할 시나리오 키 (playlist.yml 참조)")
     ap.add_argument("--playlist", default=os.path.join(SCRIPT_DIR, "playlist.yml"), help="시나리오 YML 파일 경로")
-    # ⭐️ [제거 v9] --train 플래그 제거
     args = ap.parse_args()
 
     try:
@@ -272,8 +329,6 @@ def main():
         log.critical(f"시나리오 '{args.scenario}'를 플레이리스트에서 찾을 수 없습니다.")
         log.error(f"사용 가능한 시나리오: {list(pl.keys())}")
         sys.exit(1)
-
-    # ⭐️ [제거 v9] CTI 모니터 시작 로직 제거
 
     log.info("="*60)
     log.info(f"시나리오 실행 시작: {args.scenario}")
@@ -303,7 +358,10 @@ def main():
         log.info("="*60)
         bus_write("scenario_runner", "scenario_finished", {"name": args.scenario, "duration_sec": duration})
 
-        # ⭐️ [제거 v9] CTI 모니터 중지 및 학습 로직 제거
+        # ⭐️ [CTI 데이터 수집 완료 후, ML 파이프라인 자동 실행]
+        if args.scenario == "s_cti_data_collection_full":
+             run_cti_ml_pipeline()
+
 
 if __name__ == "__main__":
     main()

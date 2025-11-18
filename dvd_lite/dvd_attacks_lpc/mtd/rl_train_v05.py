@@ -9,13 +9,12 @@ MTD PPO 학습 스크립트 (v0.5, 테스트베드 정합성 강화판)
 - MTDPolicyNet / MTDValueNet (rl_model_v05)
 - PPO 업데이트
 - 에피소드 단위 MTD 지표(S_D, R_A, C_M, S_MTD) 계산 및 로깅
-- 모든 Seeker 레벨(L0~L4)에서 파생 학습 가능 (--train-all-seeker-levels)
 """
 
 import argparse
 import time
 from dataclasses import asdict
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 
 import numpy as np
 import torch
@@ -41,57 +40,30 @@ except Exception:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="MTD PPO Trainer v0.5 (testbed-aligned)")
 
-    # 학습 스텝 관련
-    parser.add_argument("--total-timesteps", type=int, default=200_000,
-                        help="총 time step 수 (updates 미사용 시)")
-    parser.add_argument("--updates", type=int, default=None,
-                        help="(선택) update 횟수. 지정 시 total_timesteps = updates * batch_size")
-    parser.add_argument("--batch-size", type=int, default=2048,
-                        help="한 번의 rollout에서 수집할 step 수 (PPO batch size)")
-    parser.add_argument("--minibatch-size", type=int, default=64,
-                        help="PPO 업데이트 시 사용하는 mini-batch 크기")
+    parser.add_argument("--total-timesteps", type=int, default=200_000)
+    parser.add_argument("--batch-size", type=int, default=2048)
 
-    # PPO 하이퍼파라미터
     parser.add_argument("--gamma", type=float, default=0.99)
     parser.add_argument("--gae-lambda", type=float, default=0.95)
     parser.add_argument("--clip-coef", type=float, default=0.2)
-
-    parser.add_argument("--update-epochs", "--n-epochs", dest="update_epochs",
-                        type=int, default=10,
-                        help="한 batch에 대해 PPO 업데이트 반복 횟수")
+    parser.add_argument("--update-epochs", type=int, default=10)
     parser.add_argument("--ent-coef", type=float, default=0.01)
     parser.add_argument("--vf-coef", type=float, default=0.5)
     parser.add_argument("--max-grad-norm", type=float, default=0.5)
+    parser.add_argument("--learning-rate", type=float, default=3e-4)
 
-    parser.add_argument("--learning-rate", "--lr", dest="learning_rate",
-                        type=float, default=3e-4,
-                        help="optimizer learning rate")
-
-    # Seeker 관련
-    parser.add_argument("--seeker-level", type=int, default=2,
-                        help="단일 level 학습 시 사용할 seeker level")
-    parser.add_argument("--train-all-seeker-levels", action="store_true", default=False,
-                        help="에피소드마다 seeker 레벨을 seeker-levels 중 하나로 랜덤 선택")
-    parser.add_argument("--seeker-levels", type=int, nargs="+",
-                        default=[0, 1, 2, 3, 4],
-                        help="--train-all-seeker-levels 사용 시 사용할 seeker 레벨 리스트")
-
-    # 기타 설정
+    parser.add_argument("--seeker-level", type=int, default=2)
     parser.add_argument("--seed", type=int, default=0)
+
+    parser.add_argument("--log-dir", type=str, default="./runs/mtd_v05")
+    parser.add_argument("--run-name", type=str, default="mtd_rl_v05")
+    parser.add_argument("--disable-wandb", action="store_true", default=False)
+
     parser.add_argument("--device", type=str, default="cuda", choices=["cuda", "cpu"])
     parser.add_argument("--max-episode-steps", type=int, default=512)
 
-    # 로깅 / export
-    parser.add_argument("--log-dir", type=str, default="./runs/mtd_v05")
-    parser.add_argument("--run-name", type=str, default="mtd_rl_v05")
-    parser.add_argument("--wandb-project", type=str, default="MTD_RL_v05",
-                        help="wandb 프로젝트 이름")
-    parser.add_argument("--disable-wandb", action="store_true", default=False)
-
-    parser.add_argument("--export-dir", type=str, default="./mtd/rl_models/ver_05",
-                        help="정책 export 경로")
-    parser.add_argument("--no-export", action="store_true", default=False,
-                        help="학습 후 정책 export 하지 않음")
+    parser.add_argument("--export-dir", type=str, default="./mtd/rl_models/ver_05")
+    parser.add_argument("--no-export", action="store_true", default=False)
 
     return parser.parse_args()
 
@@ -101,10 +73,9 @@ def parse_args() -> argparse.Namespace:
 # --------------------------------------------------------------------------- #
 
 class PPOAgent:
-    def __init__(self, cfg: RLConfigV05, device: torch.device, minibatch_size: int = 64) -> None:
+    def __init__(self, cfg: RLConfigV05, device: torch.device) -> None:
         self.cfg = cfg
         self.device = device
-        self.minibatch_size = minibatch_size
 
         self.actor = MTDPolicyNet().to(device)
         self.critic = MTDValueNet().to(device)
@@ -152,8 +123,8 @@ class PPOAgent:
 
         for _ in range(cfg.update_epochs):
             np.random.shuffle(batch_inds)
-            for start in range(0, bsz, self.minibatch_size):
-                end = start + self.minibatch_size
+            for start in range(0, bsz, 64):
+                end = start + 64
                 mb_inds = batch_inds[start:end]
                 mb_obs = b_obs[mb_inds]
                 mb_actions = b_actions[mb_inds]
@@ -199,7 +170,6 @@ class PPOAgent:
 # --------------------------------------------------------------------------- #
 
 def run_training(args: argparse.Namespace) -> None:
-    # RLConfigV05 구성
     cfg = RLConfigV05(
         seed=args.seed,
         seeker_level=args.seeker_level,
@@ -215,10 +185,6 @@ def run_training(args: argparse.Namespace) -> None:
         learning_rate=args.learning_rate,
     )
 
-    # updates 옵션이 있으면 total_timesteps 재계산
-    if args.updates is not None:
-        cfg.total_timesteps = args.updates * cfg.batch_size
-
     device = torch.device(args.device if torch.cuda.is_available() and args.device == "cuda" else "cpu")
 
     # 시드 고정
@@ -233,7 +199,7 @@ def run_training(args: argparse.Namespace) -> None:
         seed=cfg.seed,
         max_episode_steps=args.max_episode_steps,
     )
-    agent = PPOAgent(cfg, device=device, minibatch_size=args.minibatch_size)
+    agent = PPOAgent(cfg, device=device)
 
     # 로깅
     writer = SummaryWriter(log_dir=args.log_dir + "/" + args.run_name)
@@ -241,7 +207,7 @@ def run_training(args: argparse.Namespace) -> None:
 
     if use_wandb:
         wandb.init(
-            project=args.wandb_project,
+            project="MTD_RL_v05",
             name=args.run_name,
             config=asdict(cfg),
         )
@@ -250,10 +216,7 @@ def run_training(args: argparse.Namespace) -> None:
     obs_t = torch.as_tensor(obs, dtype=torch.float32, device=device)
 
     global_step = 0
-    if args.updates is not None:
-        num_updates = args.updates
-    else:
-        num_updates = cfg.total_timesteps // cfg.batch_size
+    num_updates = cfg.total_timesteps // cfg.batch_size
 
     # 최근 에피소드 윈도우 (MTD 지표 moving average 용)
     window_size = 50
@@ -320,7 +283,7 @@ def run_training(args: argparse.Namespace) -> None:
                 if len(recent_eps_scores) > window_size:
                     recent_eps_scores.pop(0)
 
-                # 최근 윈도우 평균 기록
+                # 최근 윈도우 평균도 기록
                 if len(recent_eps_scores) >= 5:
                     avg = {}
                     for k in recent_eps_scores[0].keys():
@@ -345,14 +308,6 @@ def run_training(args: argparse.Namespace) -> None:
 
                 if use_wandb:
                     wandb.log({**ep_metrics, "global_step": global_step})
-
-                # --- 모든 seeker 레벨 학습 모드일 때 레벨 랜덤 스위칭 ---
-                if args.train_all_seeker_levels:
-                    new_level = int(np.random.choice(args.seeker_levels))
-                    env.seeker_level = new_level
-                    writer.add_scalar("Seeker/level", new_level, global_step)
-                    if use_wandb:
-                        wandb.log({"Seeker/level": new_level, "global_step": global_step})
 
                 # 에피소드 리셋
                 obs = env.reset()
@@ -423,13 +378,13 @@ def run_training(args: argparse.Namespace) -> None:
             import os
 
             os.makedirs(args.export_dir, exist_ok=True)
-            # TODO: 원하면 state_history 수집해서 feature_norm 진짜로 계산할 수 있음
+            # 간단하게 state_history를 비워두고 export (필요시 학습 중 수집 구조 붙이면 됨)
             state_history: List[np.ndarray] = []
             export_mtd_policy(
                 policy_net=agent.actor.to("cpu"),
                 state_history=state_history,
                 save_dir=args.export_dir,
-                version="ver_05_all" if args.train_all_seeker_levels else "ver_05",
+                version="ver_05",
             )
             print(f"[+] Exported policy to {args.export_dir}")
         except Exception as e:

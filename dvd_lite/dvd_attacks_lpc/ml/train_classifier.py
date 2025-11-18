@@ -96,7 +96,7 @@ def main():
         print(f"[*] 테스트 데이터 로드 완료: {len(test_df)} 샘플")
     except FileNotFoundError as e:
         print(f"❌ 오류: 데이터 파일을 찾을 수 없습니다. '{e.filename}'")
-        print("     먼저 data_builder.py와 dataset_manager.py를 실행해야 합니다.")
+        print("      먼저 data_builder.py와 dataset_manager.py를 실행해야 합니다.")
         sys.exit(1)
     except Exception as e:
         print(f"❌ 오류: 데이터 로드 실패: {e}", file=sys.stderr)
@@ -183,12 +183,12 @@ def main():
 
         # Classification Report를 JSON 파일로 저장
         try:
-             report_dict = classification_report(y_test, y_pred, labels=class_labels, zero_division=0, output_dict=True)
-             with open(args.report_output, 'w') as f:
-                 json.dump(report_dict, f, indent=4)
-             print(f"[*] Classification Report 저장 완료: '{args.report_output}'")
+              report_dict = classification_report(y_test, y_pred, labels=class_labels, zero_division=0, output_dict=True)
+              with open(args.report_output, 'w') as f:
+                  json.dump(report_dict, f, indent=4)
+              print(f"[*] Classification Report 저장 완료: '{args.report_output}'")
         except Exception as report_save_err:
-             print(f"❌ 오류: Classification Report 저장 실패 ({args.report_output}): {report_save_err}", file=sys.stderr)
+              print(f"❌ 오류: Classification Report 저장 실패 ({args.report_output}): {report_save_err}", file=sys.stderr)
 
     except Exception as e:
         print(f"❌ 오류: 모델 평가 중 오류 발생: {e}", file=sys.stderr)
@@ -199,9 +199,9 @@ def main():
 
     # 5. Confusion Matrix 시각화 및 저장
     if y_pred is not None:
-         plot_confusion_matrix(y_test, y_pred, class_labels, args.cm_output)
+          plot_confusion_matrix(y_test, y_pred, class_labels, args.cm_output)
     else:
-         print("[!] 정보: 예측 실패로 Confusion Matrix를 생성할 수 없습니다.")
+          print("[!] 정보: 예측 실패로 Confusion Matrix를 생성할 수 없습니다.")
 
     # 6. Feature Importance 시각화 및 저장
     plot_feature_importance(model, training_features, args.fi_output)
