@@ -1,4 +1,3 @@
-# 파일 경로: dvd_lite/dvd_attacks_lpc/mtd/rl_train_v05.py
 import argparse
 import random
 import time
@@ -115,7 +114,7 @@ def train_ppo(args):
         gamma=args.gamma,
         gae_lambda=args.gae_lambda,
         clip_coef=args.clip_coef,
-        max_grad_norm=args.max_grad_norm,
+        max_grad_norm=args.max_grad_norm, # 이제 argparse를 통해 올바르게 전달됩니다.
         ent_coef=args.ent_coef,
         vf_coef=args.vf_coef,
         ppo_epochs=args.ppo_epochs,
@@ -184,7 +183,7 @@ def train_ppo(args):
                 writer.add_scalar("Stats/Frac_Variance_Explained", frac_var_explained, global_step)
                 
                 if args.wandb_project:
-                     wandb.log({
+                    wandb.log({
                         "Loss/Policy_Loss": policy_loss,
                         "Loss/Value_Loss": value_loss,
                         "Loss/Entropy_Loss": entropy_loss,
@@ -247,7 +246,7 @@ def train_ppo(args):
                 wandb.log({"error": f"Episode {episode} failed with error: {e}", "global_step": global_step})
             # Attempt to save model before exiting (simple save)
             if agent.network is not None:
-                 torch.save(agent.network.state_dict(), os.path.join(log_path, f"checkpoint_ep{episode}.pth"))
+                torch.save(agent.network.state_dict(), os.path.join(log_path, f"checkpoint_ep{episode}.pth"))
             break
 
 
@@ -291,6 +290,7 @@ if __name__ == '__main__':
     parser.add_argument("--gamma", type=float, default=0.99, help="Discount factor (gamma)")
     parser.add_argument("--gae-lambda", type=float, default=0.95, help="GAE lambda parameter")
     parser.add_argument("--clip-coef", type=float, default=0.2, help="PPO clipping coefficient")
+    parser.add_argument("--max-grad-norm", type=float, default=0.5, help="Maximum norm for gradient clipping") # <-- 추가된 부분
     parser.add_argument("--ent-coef", type=float, default=0.01, help="Entropy coefficient")
     parser.add_argument("--vf-coef", type=float, default=0.5, help="Value function coefficient")
     parser.add_argument("--ppo-epochs", type=int, default=10, help="Number of epochs to run PPO update per batch")
