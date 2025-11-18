@@ -176,3 +176,103 @@ class PPOAgent:
             last_value = self.network.get_value(next_state).item()
             
             advantages = torch.zeros_like(rewards).to(self.device)
+            last_gae_lambda = 0
+            
+            for t in reversed(range(len(rewards))):
+                if t == len(rewards) - 1:
+                    next_non_terminal = 1.0 - dones[t]
+                    next_value = last_value
+                else:
+                    next_non_terminal = 1.0 - dones[t]
+                    next_value = values[t + 1]
+
+                delta = rewards[t] + self.gamma * next_value * next_non_terminal - values[t]
+                last_gae_lambda = delta + self.gamma * self.gae_lambda * next_non_terminal * last_gae_lambda
+                advantages[t] = last_gae_lambda
+                
+            returns = advantages + values
+            
+        # Flatten and normalize advantages
+        advantages = advantages.flatten()
+        advantages = (advantages - advantages.mean()) / (advantages.std() + 1e-8)
+        
+        # Create tensor dataset
+        b_inds = np.arange(len(self.rewards))
+        
+        return states, actions, log_probs.flatten(), returns.flatten(), values.flatten(), advantages, b_inds
+
+    def update_policy(self):
+        """Performs PPO policy update over multiple epochs."""
+        
+        states, actions, old_log_probs, returns, old_values, advantages, b_inds = self._prepare_data()
+        
+        clip_fracs = []
+        
+        for epoch in range(self.ppo_epochs):
+            np.random.shuffle(b_inds)
+            for start in range(0, len(self.rewards), self.minibatch_size):
+                end = start + self.minibatch_size
+                mb_inds = b_inds[start:end]
+                
+                mb_states = states[mb_inds]
+                mb_actions = actions[mb_inds]
+                mb_old_log_probs = old_log_probs[mb_inds]
+                mb_returns = returns[mb_inds]
+                mb_old_values = old_values[mb_inds]
+                mb_advantages = advantages[mb_inds]
+
+                # Re-evaluate network
+                new_log_probs, entropy, new_values = self.network.get_log_prob(mb_states, mb_actions)
+                
+                # Policy Loss calculation (PPO Clip)
+                ratio = torch.exp(new_log_probs - mb_old_log_probs)
+                pg_loss1 = -mb_advantages * ratio
+                pg_loss2 = -mb_advantages * torch.clamp(ratio, 1 - self.clip_coef, 1 + self.clip_coef)
+                policy_loss = torch.max(pg_loss1, pg_loss2).mean()
+                
+                # Clip Fraction Calculation
+                with torch.no_grad():
+                    clip_fracs += [((ratio - 1.0).abs() > self.clip_coef).float().mean().item()]
+                    
+                # Value Loss calculation (Clipped Value Loss)
+                # Value function is often clipped to improve stability
+                v_loss_unclipped = (new_values - mb_returns) ** 2
+                v_clipped = mb_old_values + torch.clamp(new_values - mb_old_values, -self.clip_coef, self.clip_coef)
+                v_loss_clipped = (v_clipped - mb_returns) ** 2
+                value_loss = 0.5 * torch.max(v_loss_unclipped, v_loss_clipped).mean()
+                
+                # Entropy Loss (Encourages exploration)
+                entropy_loss = entropy.mean()
+                
+                # Total Loss
+                total_loss = policy_loss - self.ent_coef * entropy_loss + self.vf_coef * value_loss
+                
+                # Gradient step
+                self.optimizer.zero_grad()
+                total_loss.backward()
+                nn.utils.clip_grad_norm_(self.network.parameters(), self.max_grad_norm)
+                self.optimizer.step()
+        
+        # Calculate final metrics for logging
+        with torch.no_grad():
+            new_log_probs, _, new_values = self.network.get_log_prob(states, actions)
+            
+            # Approx KL divergence
+            ratio = torch.exp(new_log_probs - old_log_probs)
+            approx_kl = (ratio - 1.0 - ratio.log()).mean().item()
+            
+            # Explained Variance of Value Function
+            y_pred = new_values.cpu().numpy()
+            y_true = returns.cpu().numpy()
+            var_y = np.var(y_true)
+            explained_variance = 1 - np.var(y_true - y_pred) / (var_y + 1e-8) if var_y != 0 else 0
+        
+        return policy_loss.item(), value_loss.item(), entropy_loss.item(), approx_kl, explained_variance
+
+    def save_policy(self, path):
+        """Saves the policy network state dictionary."""
+        torch.save(self.network.state_dict(), path)
+
+    def load_policy(self, path):
+        """Loads the policy network state dictionary."""
+        self.network.load_state_dict(torch.load(path, map_location=self.device))
