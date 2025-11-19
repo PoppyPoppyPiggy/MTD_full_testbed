@@ -1,24 +1,27 @@
 # -----------------------------------------------------------------
 # DVD 시나리오 자동화 플레이리스트 (v5.0 - CTI 데이터 수집 및 RL 평가)
+#
+# 목적: ML 분류기 학습을 위한 26가지 공격 데이터를 수집합니다.
 # -----------------------------------------------------------------
 
 # --- CTI 수집용 시나리오 (MTD Off, Seeker Off) ---
-# 목적: 모든 공격 유형별 데이터를 수집하여 분류기 학습에 사용.
-# 공격당 duration_sec: 30초 균일 할당 (정량적 데이터 확보)
+# 공격당 duration_sec: 30초 균일 할당
+# ⭐️ [Reconnaissance], [Tampering], [DoS], [Injection], [Exfiltration] 26개 공격 포함
 
 s1_cti_recon_tampering:
-  description: "CTI 수집 (정찰 & 기본 스푸핑) - 6 Attacks"
+  description: "CTI 수집 (정찰 & 기본 스푸핑) - 7 Attacks"
   steps:
     - { action: "http", endpoint: "stage/boot" }
     - { action: "sleep", sec: 15 }
     - { action: "http", endpoint: "stage/arm-and-takeoff", params: {alt: 10} }
     - { action: "sleep", sec: 25 } # 고도 안정화 대기
     
-    # Reconnaissance (4) + Tampering (2)
+    # Reconnaissance (5) + Tampering (2)
     - { action: "attack", name: "drone-discovery", duration_sec: 30, params: {use_seeker: false} }
     - { action: "attack", name: "companion-computer-discovery", duration_sec: 30, params: {use_seeker: false} }
     - { action: "attack", name: "ground-control-station-discovery", duration_sec: 30, params: {use_seeker: false} }
     - { action: "attack", name: "drone-gps-telemetry-detection", duration_sec: 30, params: {use_seeker: false} }
+    - { action: "attack", name: "wifi-analysis-cracking", duration_sec: 30, params: {use_seeker: false} } # ⭐️ 추가
     - { action: "attack", name: "attitude-spoofing", duration_sec: 30, params: {use_seeker: false} }
     - { action: "attack", name: "battery-spoofing", duration_sec: 30, params: {use_seeker: false} }
     
@@ -45,17 +48,18 @@ s2_cti_adv_tampering_injection:
 
 
 s3_cti_dos_injection:
-  description: "CTI 수집 (DoS & 고급 주입) - 6 Attacks"
+  description: "CTI 수집 (DoS & 고급 주입) - 7 Attacks"
   steps:
     - { action: "http", endpoint: "stage/boot" }
     - { action: "sleep", sec: 15 }
     - { action: "http", endpoint: "stage/arm-and-takeoff", params: {alt: 10} }
     - { action: "sleep", sec: 20 }
     
-    # DoS (4) + Injection (2)
+    # DoS (5) + Injection (2)
     - { action: "attack", name: "wifi-deauth-attack", duration_sec: 30, params: {use_seeker: false} }
     - { action: "attack", name: "geofencing-attack", duration_sec: 30, params: {use_seeker: false} }
     - { action: "attack", name: "gps-offset-glitching", duration_sec: 30, params: {use_seeker: false} }
+    - { action: "attack", name: "flight-termination", duration_sec: 30, params: {use_seeker: false} } # ⭐️ 추가
     - { action: "attack", name: "denial-of-takeoff", duration_sec: 30, params: {use_seeker: false} }
     - { action: "attack", name: "return-to-home-point-override", duration_sec: 30, params: {use_seeker: false} }
     - { action: "attack", name: "waypoint-injection", duration_sec: 30, params: {use_seeker: false} }
@@ -64,7 +68,7 @@ s3_cti_dos_injection:
 
 
 s4_cti_exfil_advanced:
-  description: "CTI 수집 (정보 유출 & 기타 스푸핑) - 6 Attacks"
+  description: "CTI 수집 (정보 유출 & 고급 공격) - 6 Attacks"
   steps:
     - { action: "http", endpoint: "stage/boot" }
     - { action: "sleep", sec: 15 }
@@ -95,53 +99,13 @@ s5_cti_normal:
     - { action: "sleep", sec: 15 }
     
     
-# --- [B] MTD 평가용 시나리오 (Seeker 연동) - 기존과 동일하게 유지 ---
-s6_eval_no_mtd_vs_rl_seeker:
-  description: "MTD 평가 (Baseline): NO MTD vs RL Seeker"
-  steps:
-    - { action: "http", endpoint: "stage/boot" }
-    - { action: "sleep", sec: 15 }
-    - { action: "http", endpoint: "stage/autopilot-flight", params: {route: "A"} }
-    - { action: "sleep", sec: 30 }
-    - { action: "attack", name: "RL Seeker (Baseline)", duration_sec: 120, params: {use_seeker: true, policy_path: "rl/models/seeker_policy.pth"} }
-    - { action: "http", endpoint: "stage/return-to-land" }
-    - { action: "http", endpoint: "stage/post_analysis" }
-
-s4_eval_heuristic_mtd:
-  description: "MTD 평가 (Heuristic): Heuristic MTD vs RL Seeker"
-  steps:
-    - { action: "mtd_set", level: 2 }
-    - { action: "http", endpoint: "stage/boot" }
-    - { action: "sleep", sec: 15 }
-    - { action: "http", endpoint: "stage/autopilot-flight", params: {route: "A"} }
-    - { action: "sleep", sec: 30 }
-    - { action: "attack", name: "RL Seeker (Heuristic)", duration_sec: 120, params: {use_seeker: true, policy_path: "rl/models/seeker_policy.pth"} }
-    - { action: "http", endpoint: "stage/return-to-land" }
-    - { action: "http", endpoint: "stage/post_analysis" }
-
-s5_eval_rl_mtd:
-  description: "MTD 평가 (RL): RL MTD vs RL Seeker (Full Kill Chain)"
-  steps:
-    - { action: "mtd_rl_enable", policy_path: "rl/models/defender_policy.pth" }
-    - { action: "http", endpoint: "stage/boot" }
-    - { action: "sleep", sec: 15 }
-    - { action: "http", endpoint: "stage/autopilot-flight", params: {route: "B"} }
-    - { action: "sleep", sec: 30 }
-    - { action: "attack", name: "RL Seeker (RL Defense)", duration_sec: 180, params: {use_seeker: true, policy_path: "rl/models/seeker_policy.pth"} }
-    - { action: "http", endpoint: "stage/return-to-land" }
-    - { action: "http", endpoint: "stage/post_analysis" }
-
-
-    # (기존 내용에 새로운 시나리오 추가)
-
-# ... (s1_cti_recon_tampering, s2_cti_adv_tampering_injection, s3_cti_dos_injection, s4_cti_exfil_advanced, s5_cti_normal 정의는 유지) ...
-
-# --- [C] 최종 데이터 수집 및 학습 통합 시나리오 ---
+# --- [C] 최종 데이터 수집 및 학습 통합 시나리오 (마스터 실행 키) ---
 # 이 시나리오를 실행하면 모든 CTI 데이터가 수집되고, 종료 시 ML 파이프라인이 실행됩니다.
+# (이 시나리오 키를 run_full_cti_pipeline.sh에서 사용합니다.)
 s_cti_data_collection_full:
-  description: "통합 CTI 데이터 수집 및 ML 학습: 모든 공격(23종) 및 정상 상태를 포함."
+  description: "통합 CTI 데이터 수집 및 ML 학습: 모든 공격(26종) 및 정상 상태를 포함."
   steps:
-    # 1. 시나리오 S5: 긴 정상 상태 데이터 수집 (Baseline)
+    # 1. 시나리오 S5 (긴 정상 상태 데이터 수집)
     - { action: "http", endpoint: "stage/boot" }
     - { action: "sleep", sec: 15 }
     - { action: "http", endpoint: "stage/arm-and-takeoff", params: {alt: 10} }
@@ -151,7 +115,7 @@ s_cti_data_collection_full:
     - { action: "http", endpoint: "stage/return-to-land" }
     - { action: "sleep", sec: 15 }
     
-    # 2. 시나리오 S1: Reconnaissance & Tampering 공격 수집
+    # 2. 시나리오 S1 실행
     - { action: "http", endpoint: "stage/boot" }
     - { action: "sleep", sec: 15 }
     - { action: "http", endpoint: "stage/arm-and-takeoff", params: {alt: 10} }
@@ -160,12 +124,13 @@ s_cti_data_collection_full:
     - { action: "attack", name: "companion-computer-discovery", duration_sec: 30, params: {use_seeker: false} }
     - { action: "attack", name: "ground-control-station-discovery", duration_sec: 30, params: {use_seeker: false} }
     - { action: "attack", name: "drone-gps-telemetry-detection", duration_sec: 30, params: {use_seeker: false} }
+    - { action: "attack", name: "wifi-analysis-cracking", duration_sec: 30, params: {use_seeker: false} } 
     - { action: "attack", name: "attitude-spoofing", duration_sec: 30, params: {use_seeker: false} }
     - { action: "attack", name: "battery-spoofing", duration_sec: 30, params: {use_seeker: false} }
     - { action: "http", endpoint: "stage/return-to-land" }
     - { action: "sleep", sec: 15 }
 
-    # 3. 시나리오 S2: Adv Tampering & Injection 공격 수집
+    # 3. 시나리오 S2 실행
     - { action: "http", endpoint: "stage/boot" }
     - { action: "sleep", sec: 15 }
     - { action: "http", endpoint: "stage/autopilot-flight", params: {route: "A"} }
@@ -179,7 +144,7 @@ s_cti_data_collection_full:
     - { action: "http", endpoint: "stage/return-to-land" }
     - { action: "sleep", sec: 15 }
 
-    # 4. 시나리오 S3: DoS & Advanced Injection 공격 수집
+    # 4. 시나리오 S3 실행
     - { action: "http", endpoint: "stage/boot" }
     - { action: "sleep", sec: 15 }
     - { action: "http", endpoint: "stage/arm-and-takeoff", params: {alt: 10} }
@@ -187,13 +152,14 @@ s_cti_data_collection_full:
     - { action: "attack", name: "wifi-deauth-attack", duration_sec: 30, params: {use_seeker: false} }
     - { action: "attack", name: "geofencing-attack", duration_sec: 30, params: {use_seeker: false} }
     - { action: "attack", name: "gps-offset-glitching", duration_sec: 30, params: {use_seeker: false} }
+    - { action: "attack", name: "flight-termination", duration_sec: 30, params: {use_seeker: false} }
     - { action: "attack", name: "denial-of-takeoff", duration_sec: 30, params: {use_seeker: false} }
     - { action: "attack", name: "return-to-home-point-override", duration_sec: 30, params: {use_seeker: false} }
     - { action: "attack", name: "waypoint-injection", duration_sec: 30, params: {use_seeker: false} }
     - { action: "http", endpoint: "stage/return-to-land" }
     - { action: "sleep", sec: 15 }
 
-    # 5. 시나리오 S4: Exfiltration & Advanced Attacks 수집
+    # 5. 시나리오 S4 실행
     - { action: "http", endpoint: "stage/boot" }
     - { action: "sleep", sec: 15 }
     - { action: "http", endpoint: "stage/autopilot-flight", params: {route: "B"} }
@@ -207,6 +173,6 @@ s_cti_data_collection_full:
     - { action: "http", endpoint: "stage/return-to-land" }
     - { action: "sleep", sec: 15 }
     
-    # 6. ML 파이프라인 실행 (시나리오 종료 시 dvd_scenario_runner.py의 finally 블록에서 자동 실행)
+    # 6. ML 파이프라인 실행을 위한 후처리 단계
+    # dvd_scenario_runner.py의 finally 블록에서 ML 파이프라인이 호출됩니다.
     - { action: "http", endpoint: "stage/post_analysis" }
-    # --> 이 시나리오 실행이 끝날 때 run_cti_ml_pipeline()이 호출됨
