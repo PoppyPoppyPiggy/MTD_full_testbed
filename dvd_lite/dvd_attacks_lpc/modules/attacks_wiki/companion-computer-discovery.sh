@@ -1,79 +1,59 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
-# --- Process Command Line Arguments ---
-# Example: Assign first arg to INTENSITY, default 'medium'
-# INTENSITY="${1:-medium}"
-# Example: Assign second arg to DURATION_SECONDS, default '30'
-# DURATION_SECONDS="${2:-30}"
-# echo "Parameters: Intensity=$INTENSITY, Duration=$DURATION_SECONDS"
-# Add more parameter processing as needed for the specific script
-# ------------------------------------
+# Attack: Companion Computer Discovery (Nmap Scan, MTD-aware)
+# Target Service: COMPANION_HTTP (Default Port 8080 assumed for context)
 
-# Auto-generated from: /home/kali/MTD_full_testbed/Damn-Vulnerable-Drone.wiki/Companion-Computer-Discovery.md
-# Created: 2025-09-14 13:46:03
-# NOTE: 설명/서사는 제거되었고, 코드블록/프롬프트 명령만 포함됩니다.
-
-# MTD_INTERFACE_START
-# =======================================================================
-# MTD-aware Target Acquisition (from Orchestrator Environment)
-# =======================================================================
-# 이 스크립트는 attack_orchestrator.py에 의해 TARGET_IP와 TARGET_PORT 환경 변수가
-# 설정될 것을 기대하고 실행됩니다.
-
+# --- MTD_INTERFACE_START (Mandatory dynamic target acquisition) ---
+# Orchestrator가 TARGET_IP, TARGET_PORT, TARGET_SERVICE를 주입해야 합니다.
 if [[ -z "${TARGET_IP:-}" || -z "${TARGET_PORT:-}" ]]; then
     echo "ERROR: TARGET_IP and TARGET_PORT environment variables are not set." >&2
-    echo "This script must be run via the attack_orchestrator.py" >&2
+    echo "Attack aborted. Must be run via attack_orchestrator.py with MTD state resolution." >&2
     exit 1
 fi
 
-echo "[INFO] Attack target acquired from orchestrator: ${TARGET_IP}:${TARGET_PORT}"
-# MTD_INTERFACE_END
+# 서비스 타입별 기본 포트 설정 (이 공격은 포트를 직접 사용하지 않지만, 컨텍스트를 위해 설정)
+case "${TARGET_SERVICE:-COMPANION_HTTP}" in
+    COMPANION_HTTP)
+        TARGET_PORT="${TARGET_PORT:-8080}"
+        ;;
+    *)
+        : # 다른 서비스는 Orchestrator가 포트 값을 넣어준다고 가정
+        ;;
+esac
 
-set -euo pipefail
+echo "[INFO] Target acquired: ${TARGET_IP}:${TARGET_PORT} (service=${TARGET_SERVICE:-UNKNOWN})"
+# --- MTD_INTERFACE_END ---
 
-# 기준 경로 (요구사항)
+# --- Common Log/BASE Setup ---
 export BASE="${BASE:-$PWD}"
-
-# 공통 로그 연결(선택사항) - 존재 시 로드
-if [[ -f "$BASE/00_env.sh" ]]; then . "$BASE/00_env.sh"; else
-  DVD_LOG="${DVD_LOG:-$BASE/attack_output/dvd.log}"; mkdir -p "$(dirname "$DVD_LOG")"
-  log(){ echo "[`date +%F_%T`] $*"; }; export -f log
+if [[ -f "$BASE/00_env.sh" ]]; then
+    . "$BASE/00_env.sh"
+else
+    DVD_LOG="${DVD_LOG:-$BASE/attack_output/dvd.log}"
+    mkdir -p "$(dirname "$DVD_LOG")"
+    log(){ echo "[$(date +%F_%T)] $*"; }
+    export -f log
 fi
 
 log "[ATTACK] id=companion-computer-discovery src=Companion-Computer-Discovery.md"
-log "[BLOCK 1] type=shell"
+
+log "[BLOCK 1] type=shell (Local Interface Status)"
+# 공격자가 속한 시스템의 네트워크 정보 확인 (탐색의 기본 단계)
 ip addr show
 
-log "[BLOCK 2] type=shell"
-nmap -sn ${TARGET_IP}/24 --exclude ${TARGET_IP},${TARGET_IP}
+log "[BLOCK 2] type=shell (Dynamic Subnet Discovery - ARP/Ping Scan)"
+# Orchestrator가 제공한 TARGET_IP를 기반으로 해당 서브넷(/24) 내의 활성 호스트를 탐색합니다.
+# TARGET_IP에서 첫 세 옥텟을 추출하여 네트워크 CIDR을 만듭니다. (예: 10.13.0.10 -> 10.13.0.0/24)
+# awk 사용이 불가능한 환경을 고려하여, bash native string manipulation을 사용합니다.
+TARGET_NETWORK="${TARGET_IP%.*}.0/24"
+log "Scanning network ${TARGET_NETWORK} derived from ${TARGET_IP}..."
+# -sn: Ping Scan - 호스트가 활성화되어 있는지 확인
+sudo nmap -sn "${TARGET_NETWORK}" --exclude "${TARGET_IP}"
 
-log "[BLOCK 3] type=shell"
-nmap ${TARGET_IP}
+log "[BLOCK 3] type=shell (Target Detailed Port Scan)"
+# 현재 타겟으로 지정된 Companion Computer의 주요 포트를 스캔합니다.
+sudo nmap "${TARGET_IP}"
 
-log "[BLOCK 4] type=shell"
-Starting Nmap 7.94SVN ( https://nmap.org ) at 2024-08-02 19:00 EDT
-Nmap scan report for ${TARGET_IP}
-Host is up (0.000066s latency).
-Not shown: 997 closed tcp ports (conn-refused)
-PORT     STATE SERVICE
-22/tcp   open  ssh
-554/tcp  open  rtsp
-3000/tcp open  ppp
-Nmap done: 1 IP address (1 host up) scanned in 0.07 seconds
-
-log "[BLOCK 5] type=shell"
-nmap -sn 192.168.13.0/24 --exclude 192.168.13.10
-
-log "[BLOCK 6] type=shell"
-nmap 192.168.13.1
-
-log "[BLOCK 7] type=shell"
-Starting Nmap 7.94SVN ( https://nmap.org ) at 2024-08-02 19:00 EDT
-Nmap scan report for 192.168.13.1
-Host is up (0.000066s latency).
-Not shown: 997 closed tcp ports (conn-refused)
-PORT     STATE SERVICE
-22/tcp   open  ssh
-554/tcp  open  rtsp
-3000/tcp open  ppp
-Nmap done: 1 IP address (1 host up) scanned in 0.07 seconds
+log "[BLOCK 4] type=control (Discovery Completed)"
+# 탐지 공격은 여기서 완료됩니다.

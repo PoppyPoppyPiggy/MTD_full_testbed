@@ -1,291 +1,374 @@
 #!/usr/bin/env python3
+import docker
 import time
 import json
 import os
 import logging
-from pymavlink import mavutil
-from datetime import datetime
+from datetime import datetime, timezone
 import threading
+import pathlib
 
 # 로깅 설정
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
-logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)-7s] %(name)s: %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
+logger = logging.getLogger("DVDContainerMonitor")
 
-# 환경 변수 또는 기본값 설정
-# ⭐️ [수정] cti_agent.py가 읽는 'bus_telemetry.log'로 경로 수정
-# 프로젝트 루트(dvd_attacks_lpc)의 'bus' 폴더를 바라보도록 동적 경로 설정
-BUS_LOG_PATH = os.environ.get('BUS_LOG_PATH', os.path.join(os.path.dirname(__file__), '..', 'bus', 'bus_telemetry.log'))
-MAVLINK_SOURCE = os.environ.get('MAVLINK_SOURCE', 'udp:0.0.0.0:14550') # MAVLink 연결 주소
-CONNECTION_TIMEOUT = int(os.environ.get('MAVLINK_CONNECTION_TIMEOUT', 15)) # 연결 시도 타임아웃 (초)
-HEARTBEAT_TIMEOUT = int(os.environ.get('MAVLINK_HEARTBEAT_TIMEOUT', 30)) # 하트비트 최대 대기 시간 (초)
-RECONNECT_DELAY = int(os.environ.get('MAVLINK_RECONNECT_DELAY', 5)) # 재연결 시도 간격 (초)
+# --- 로그 파일 경로 설정 ---
+script_dir = pathlib.Path(__file__).parent.resolve()
+bus_dir_name = os.environ.get('BUS_DIR', '../bus')
+bus_dir_path = (script_dir / bus_dir_name).resolve()
+# ⭐️ [수정] cti_agent.py가 읽는 'bus_container_telemetry.log'로 파일명 변경
+BUS_LOG_FILENAME = 'bus_container_telemetry.log'
+BUS_LOG_PATH = bus_dir_path / BUS_LOG_FILENAME
+# --- 경로 설정 끝 ---
 
-# 모니터링할 MAVLink 메시지 타입 확장 (RL, MTD, 공격 탐지에 필요할 만한 정보 추가)
-TARGET_MESSAGES = [
-    # 기본 상태 정보
-    'HEARTBEAT',            # 시스템 상태, 모드, 타입 등
-    'SYS_STATUS',           # 배터리 전압/전류, 통신 오류 등
-    'SYSTEM_TIME',          # 시스템 시간 동기화 정보
-    'ATTITUDE',             # Roll, Pitch, Yaw
-    'GLOBAL_POSITION_INT',  # 위도, 경도, 고도 (WGS84, 정수형)
-    'LOCAL_POSITION_NED',   # 로컬 NED 좌표계 위치/속도
-    'VFR_HUD',              # 고도, 속도, Heading, Climb rate 등 HUD 표시 정보
-    'GPS_RAW_INT',          # GPS 상태 (fix type, 위성 수 등)
-    'GPS_STATUS',           # 상세 GPS 위성 정보 (SNR 등) - 빈도가 낮을 수 있음
-
-    # 센서 정보
-    'SCALED_IMU',           # 가속도, 자이로 (스케일링됨)
-    'RAW_IMU',              # 원시 IMU 데이터
-    'SCALED_PRESSURE',      # 기압 센서 정보
-    'SENSOR_OFFSETS',       # 센서 오프셋 정보
-
-    # 제어 및 액추에이터 정보
-    'SERVO_OUTPUT_RAW',     # 서보/모터 출력 값
-    'RC_CHANNELS',          # RC 수신기 입력 값 (조종기 입력)
-    'RC_CHANNELS_RAW',      # 원시 RC 채널 값
-    'ATTITUDE_TARGET',      # 목표 자세 (자동 조종 시)
-    'POSITION_TARGET_LOCAL_NED', # 목표 위치 (자동 조종 시)
-
-    # 임무 및 상태 관련
-    'MISSION_CURRENT',      # 현재 수행 중인 임무 번호
-    'NAV_CONTROLLER_OUTPUT',# 항법 제어기 출력 (목표/현재 고도, 속도 등)
-    'COMMAND_ACK',          # 명령 수신 확인 (오류 확인 가능)
-    'STATUSTEXT',           # 시스템 메시지, 경고, 오류 (중요 이벤트 감지)
-
-    # 파라미터 변경 감지
-    'PARAM_VALUE',          # 파라미터 값 수신/변경 시 (요청 또는 변경 시 발생)
-
-    # 확장/사용자 정의 (필요 시)
-    # 'HIGH_LATENCY2',        # 장거리 통신용 요약 정보
-]
+MONITOR_INTERVAL = int(os.environ.get('DVD_CONTAINER_MONITOR_INTERVAL', 10)) # 초 단위
+# 모니터링할 컨테이너 이름 패턴 (docker-compose.yml 서비스 이름 기반)
+# 환경 변수 또는 기본값 사용
+CONTAINER_NAME_PATTERNS_STR = os.environ.get(
+    'DVD_MONITORED_CONTAINERS', # DockerEventMonitor와 동일한 환경 변수 사용
+    'flight-controller-lite,companion-computer-lite,ground-control-station-lite,'
+    'simulator-lite,decoy-gateway,attacker,deception_manager,observer,rl-agent,'
+    'seeker,virtual-drone'
+)
+CONTAINER_NAME_PATTERNS = [name.strip() for name in CONTAINER_NAME_PATTERNS_STR.split(',') if name.strip()]
 
 # 스레드 종료 플래그
-terminate_flag = threading.Event()
+stop_event = threading.Event()
 
-def connect_mavlink(source):
-    """
-    MAVLink 연결을 시도하고 connection 객체를 반환합니다.
-    연결 실패 시 None을 반환합니다.
-    """
+# Docker 클라이언트 초기화 함수
+def init_docker_client():
+    """Docker 클라이언트를 초기화하고 연결을 확인합니다."""
     try:
-        logger.info(f"{source}에 MAVLink 연결 시도 중 (타임아웃: {CONNECTION_TIMEOUT}초)...")
-        # source_system 파라미터 추가 시 특정 시스템 ID로 연결 가능 (기본값 255)
-        connection = mavutil.mavlink_connection(source, autoreconnect=True, heartbeat_timeout=HEARTBEAT_TIMEOUT)
-        # 첫 하트비트 대기 (타임아웃 설정)
-        logger.info("첫 하트비트 수신 대기 중...")
-        connection.wait_heartbeat(timeout=CONNECTION_TIMEOUT)
-        logger.info(f"MAVLink 연결 성공! Target System ID: {connection.target_system}, Component ID: {connection.target_component}")
-        return connection
+        client = docker.from_env()
+        client.ping()
+        logger.info("Docker 데몬에 성공적으로 연결되었습니다.")
+        return client
+    except docker.errors.DockerException as e:
+        logger.critical(f"Docker 데몬 연결 실패: {e}")
+        logger.critical("Docker가 실행 중이고 접근 권한이 있는지 확인하세요.")
+        return None
     except Exception as e:
-        logger.error(f"MAVLink 연결 실패: {e}")
+        logger.critical(f"Docker 클라이언트 초기화 중 예상치 못한 오류: {e}", exc_info=True)
         return None
 
-def log_to_bus(message_type, data):
-    """
-    지정된 형식으로 MAVLink 메시지 데이터를 bus 로그 파일에 기록합니다.
-    """
-    # to_dict() 결과에서 바이트 문자열 처리
-    sanitized_data = {}
-    for key, value in data.items():
-        if isinstance(value, bytes):
-            try:
-                # UTF-8 디코딩 시도, 실패 시 repr() 사용
-                sanitized_data[key] = value.decode('utf-8', errors='replace')
-            except UnicodeDecodeError:
-                 sanitized_data[key] = repr(value) # 바이트 문자열 표현으로 저장
-        elif key == 'mavpackettype': # mavpackettype은 불필요하므로 제외
-            continue
-        else:
-            sanitized_data[key] = value
+def get_container_details(container):
+    """주어진 컨테이너의 상세 정보를 추출합니다 (리소스 통계 제외)."""
+    details = {}
+    container_name = getattr(container, 'name', 'N/A')
+    try:
+        container.reload() # 최신 상태 반영
+        attrs = container.attrs
+        if not attrs:
+            logger.warning(f"컨테이너 '{container_name}'의 속성(attrs)을 가져올 수 없습니다.")
+            return None
 
-    current_time = time.time()
+        config = attrs.get('Config', {})
+        state = attrs.get('State', {})
+        network_settings = attrs.get('NetworkSettings', {})
+        ports_dict = network_settings.get('Ports', {})
+
+        port_mappings = {}
+        if ports_dict:
+            for container_port_proto, host_bindings in ports_dict.items():
+                if host_bindings:
+                    port_mappings[container_port_proto] = [f"{binding.get('HostIp', 'N/A')}:{binding.get('HostPort', 'N/A')}" for binding in host_bindings]
+
+        details = {
+            'id': container.short_id,
+            'name': container_name,
+            'status': state.get('Status', 'unknown'),
+            'running': state.get('Running', False),
+            'paused': state.get('Paused', False),
+            'restarting': state.get('Restarting', False),
+            'oom_killed': state.get('OOMKilled', False),
+            'pid': state.get('Pid', 0),
+            'exit_code': state.get('ExitCode', None),
+            'error': state.get('Error', ''),
+            'started_at': state.get('StartedAt', None),
+            'finished_at': state.get('FinishedAt', None),
+            'image': config.get('Image', 'N/A'),
+            'labels': config.get('Labels', {}),
+            'created': attrs.get('Created', None),
+            'port_mappings': port_mappings,
+        }
+
+        # 네트워크 정보 추가
+        networks = network_settings.get('Networks', {})
+        details['networks'] = {}
+        for net_name, net_info in networks.items():
+            if net_info:
+                details['networks'][net_name] = {
+                    'ip_address': net_info.get('IPAddress'),
+                    'mac_address': net_info.get('MacAddress'),
+                }
+
+    except docker.errors.NotFound:
+        logger.warning(f"컨테이너 '{container_name}'를 찾는 중 NotFound 오류 (삭제됨?).")
+        return None
+    except docker.errors.APIError as api_err:
+        logger.error(f"컨테이너 '{container_name}' 상세 정보 추출 중 Docker API 오류: {api_err}")
+        return {'id': getattr(container, 'short_id', 'N/A'), 'name': container_name, 'status': 'api_error', 'error_message': str(api_err)}
+    except Exception as e:
+        logger.error(f"컨테이너 '{container_name}' 상세 정보 추출 중 예외: {e}", exc_info=True)
+        return {'id': getattr(container, 'short_id', 'N/A'), 'name': container_name, 'status': 'error', 'error_message': str(e)}
+    return details
+
+def get_container_stats(container):
+    """주어진 컨테이너의 리소스 사용 통계를 스트림에서 한번 읽어옵니다."""
+    stats = {}
+    container_name = getattr(container, 'name', 'N/A')
+    try:
+        # stream=False: 현재 시점 통계 한번만 가져옴
+        stat_result = container.stats(stream=False)
+
+        if not isinstance(stat_result, dict):
+            logger.error(f"컨테이너 '{container_name}' 에서 예기치 않은 통계 데이터 타입 수신: {type(stat_result)}")
+            return {'error_message': f'Unexpected stats data type: {type(stat_result)}'}
+
+        stat_data = stat_result # dict 타입이므로 바로 사용
+
+        # --- 통계 데이터 추출 및 계산 ---
+        cpu_stats = stat_data.get('cpu_stats', {})
+        precpu_stats = stat_data.get('precpu_stats', {})
+        memory_stats = stat_data.get('memory_stats', {})
+        pids_stats = stat_data.get('pids_stats', {})
+        blkio_stats_data = stat_data.get('blkio_stats', {})
+        networks_data = stat_data.get('networks', {})
+
+        # CPU 사용량 계산
+        cpu_percent = None
+        if cpu_stats and precpu_stats and 'cpu_usage' in cpu_stats and 'system_cpu_usage' in cpu_stats \
+                and 'cpu_usage' in precpu_stats and 'system_cpu_usage' in precpu_stats:
+            cpu_delta = cpu_stats['cpu_usage']['total_usage'] - precpu_stats['cpu_usage']['total_usage']
+            system_cpu_delta = cpu_stats['system_cpu_usage'] - precpu_stats['system_cpu_usage']
+
+            online_cpus = cpu_stats.get('online_cpus')
+            if online_cpus is None: # online_cpus가 없으면 코어 수 계산 시도
+                percpu = cpu_stats['cpu_usage'].get('percpu_usage')
+                number_cpus = len(percpu) if isinstance(percpu, list) else 0
+            else:
+                number_cpus = online_cpus
+
+            if system_cpu_delta > 0 and cpu_delta >= 0 and number_cpus > 0:
+                cpu_percent = round((cpu_delta / system_cpu_delta) * number_cpus * 100.0, 2)
+            elif cpu_delta >= 0 and number_cpus > 0: # system_cpu_delta가 0이하인 경우
+                 cpu_percent = 0.0 # 0%로 간주
+            else:
+                logger.debug(f"CPU % calc error: sys_delta={system_cpu_delta}, cpu_delta={cpu_delta}, cpus={number_cpus}")
+        else:
+             logger.debug(f"컨테이너 '{container_name}' CPU 통계 필드 부족.")
+
+        # 메모리 사용량 계산
+        mem_usage = memory_stats.get('usage')
+        mem_limit = memory_stats.get('limit')
+        mem_percent = None
+        if isinstance(mem_usage, int) and isinstance(mem_limit, int) and mem_limit > 0:
+            # cache 제외 계산 (cgroup v1/v2 고려)
+            mem_stats_inner = memory_stats.get('stats', {})
+            inactive_file = mem_stats_inner.get('total_inactive_file', mem_stats_inner.get('inactive_file', 0)) # v1 우선
+            cache = mem_stats_inner.get('cache', 0)
+            # 좀 더 일반적인 계산: usage - inactive_file (파일 캐시 포함된 값)
+            # usage_without_cache = mem_usage - inactive_file if isinstance(inactive_file, int) else mem_usage
+            # 또는 usage - cache (순수 페이지 캐시만 제외) - 이 방식이 더 일반적일 수 있음
+            usage_actual = mem_usage - cache if isinstance(cache, int) else mem_usage
+
+            mem_percent = round((max(0, usage_actual) / mem_limit) * 100.0, 2)
+        elif isinstance(mem_limit, int) and mem_limit <= 0:
+             logger.debug(f"컨테이너 '{container_name}' 메모리 제한 없음.")
+        else:
+             logger.debug(f"컨테이너 '{container_name}' 메모리 값 오류: usage={mem_usage}, limit={mem_limit}")
+
+
+        # 네트워크 IO 집계
+        net_io = {'rx_bytes': 0, 'tx_bytes': 0} # 필요한 필드만
+        if networks_data and isinstance(networks_data, dict):
+            for if_name, data in networks_data.items():
+                if isinstance(data, dict):
+                    net_io['rx_bytes'] += data.get('rx_bytes', 0)
+                    net_io['tx_bytes'] += data.get('tx_bytes', 0)
+
+        # 디스크 IO 집계
+        blkio_stats_list = blkio_stats_data.get('io_service_bytes_recursive', [])
+        disk_read_bytes = 0
+        disk_write_bytes = 0
+        if isinstance(blkio_stats_list, list):
+            for item in blkio_stats_list:
+                if isinstance(item, dict):
+                    op = item.get('op','').lower()
+                    value = item.get('value', 0)
+                    if op == 'read': disk_read_bytes += value
+                    elif op == 'write': disk_write_bytes += value
+
+        # 최종 통계 데이터 구성
+        stats = {
+            'read_time': stat_data.get('read'),
+            'cpu_percent': cpu_percent, # ⭐️ cti_agent가 사용할 'cpu_load_pct' (이름은 다르지만)
+            'memory_usage_bytes': mem_usage,
+            'memory_limit_bytes': mem_limit,
+            'memory_percent': mem_percent,
+            'network_rx_bytes': net_io['rx_bytes'],
+            'network_tx_bytes': net_io['tx_bytes'],
+            'disk_read_bytes': disk_read_bytes,
+            'disk_write_bytes': disk_write_bytes,
+            'pids': pids_stats.get('current')
+        }
+
+    except KeyError as e:
+        logger.warning(f"컨테이너 '{container_name}' 통계 파싱 중 키 누락: {e}")
+        stats['error_message'] = f"Missing key in stats data: {e}"
+        if 'stat_data' in locals(): logger.debug(f"Problematic stats data: {stat_data}")
+    except docker.errors.NotFound:
+        logger.warning(f"통계 수집 중 컨테이너 '{container_name}' 없음 (삭제됨?).")
+        stats['error_message'] = "Container not found during stats"
+    except docker.errors.APIError as api_err:
+        logger.error(f"컨테이너 '{container_name}' 통계 수집 중 API 오류: {api_err}")
+        stats['error_message'] = f"Docker API error: {api_err}"
+    except Exception as e:
+        logger.error(f"컨테이너 '{container_name}' 통계 가져오기 중 예외: {e}", exc_info=True)
+        stats['error_message'] = str(e)
+    return stats
+
+
+def log_to_bus(message_type, data):
+    """지정된 형식으로 메시지를 bus 로그 파일에 기록합니다."""
+    current_time_dt = datetime.now(timezone.utc)
+    current_time_unix = current_time_dt.timestamp()
+
     log_entry = {
-        "timestamp": datetime.utcfromtimestamp(current_time).isoformat() + "Z", # ⭐️ UTC 시간으로 변경
-        "ts": current_time, # ⭐️ ML 에이전트가 사용할 Unix timestamp 추가
-        "source": "dvd_telemetry_monitor",
-        "type": f"mavlink_{message_type.lower()}", # 타입을 소문자로 통일
-        "data": sanitized_data
+        "timestamp": current_time_dt.isoformat().replace('+00:00', 'Z'),
+        "ts": current_time_unix, # ⭐️ ML 에이전트가 사용할 Unix timestamp 추가
+        "source": "dvd_container_monitor",
+        "type": message_type,
+        "data": data
     }
     try:
-        # ⭐️ 로그 파일 디렉토리 자동 생성
-        os.makedirs(os.path.dirname(BUS_LOG_PATH), exist_ok=True)
-        with open(BUS_LOG_PATH, 'a') as f:
-            f.write(json.dumps(log_entry) + '\n')
+        BUS_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        with open(BUS_LOG_PATH, 'a', encoding='utf-8') as f:
+            f.write(json.dumps(log_entry, ensure_ascii=False) + '\n')
     except IOError as e:
-        logger.error(f"Bus 로그 파일 '{BUS_LOG_PATH}'에 쓰기 실패: {e}")
+        logger.error(f"Bus 로그 파일 '{BUS_LOG_PATH}' 쓰기 실패: {e}")
     except Exception as e:
-        logger.error(f"로그 기록 중 예상치 못한 오류 발생: {e}")
+        logger.error(f"로그 기록 중 예상치 못한 오류 발생: {e}", exc_info=True)
 
-def request_data_stream(conn, stream_id, frequency_hz, start_stop=1):
-    """
-    특정 데이터 스트림을 요청하는 함수.
-    Args:
-        conn: MAVLink connection 객체
-        stream_id: 요청할 MAV_DATA_STREAM ID (mavutil.mavlink.MAV_DATA_STREAM_*)
-        frequency_hz: 요청 빈도 (Hz)
-        start_stop: 1이면 시작, 0이면 중지
-    """
-    try:
-        if hasattr(conn, 'mav') and conn.mav is not None:
-             conn.mav.request_data_stream_send(
-                 conn.target_system,
-                 conn.target_component,
-                 stream_id,
-                 frequency_hz,
-                 start_stop
-             )
-             logger.debug(f"MAV_DATA_STREAM {stream_id} 요청 (Freq: {frequency_hz}Hz, Start/Stop: {start_stop})")
-        else:
-            logger.warning("MAVLink 연결이 유효하지 않아 데이터 스트림을 요청할 수 없습니다.")
-    except Exception as e:
-        logger.error(f"데이터 스트림 요청 중 오류 발생: {e}")
+def monitor_containers(client):
+    """주기적으로 대상 Docker 컨테이너 상태 및 통계를 모니터링하고 로그를 기록합니다."""
+    logger.info(f"모니터링 대상 컨테이너 이름: {CONTAINER_NAME_PATTERNS}")
+    while not stop_event.is_set():
+        start_time = time.monotonic()
+        logger.info("컨테이너 상태 및 통계 확인 시작...")
 
+        all_containers_data = {}
+        monitored_count = 0
 
-def setup_data_streams(conn):
-    """
-    필요한 데이터 스트림들을 설정합니다. (ArduPilot/PX4 및 버전에 따라 ID가 다를 수 있음)
-    """
-    logger.info("필요한 데이터 스트림 설정 요청 중...")
-    # 예시: ArduPilot 기준 (자주 사용되는 스트림 위주)
-    # 실제 환경과 필요한 데이터에 맞게 조정 필요
-    request_data_stream(conn, mavutil.mavlink.MAV_DATA_STREAM_RAW_SENSORS, 5) # IMU, 기압 등
-    request_data_stream(conn, mavutil.mavlink.MAV_DATA_STREAM_EXTENDED_STATUS, 2) # GPS, 배터리, CPU 부하 등
-    request_data_stream(conn, mavutil.mavlink.MAV_DATA_STREAM_RC_CHANNELS, 5) # RC 채널 값
-    request_data_stream(conn, mavutil.mavlink.MAV_DATA_STREAM_POSITION, 5) # 위치 정보 (Global, Local)
-    request_data_stream(conn, mavutil.mavlink.MAV_DATA_STREAM_EXTRA1, 5) # 자세(Attitude) 정보
-    request_data_stream(conn, mavutil.mavlink.MAV_DATA_STREAM_EXTRA2, 2) # VFR_HUD 정보
-    request_data_stream(conn, mavutil.mavlink.MAV_DATA_STREAM_EXTRA3, 2) # AHRS, 하드웨어 상태 등
-    # 모든 스트림 요청 (과부하 주의)
-    # request_data_stream(conn, mavutil.mavlink.MAV_DATA_STREAM_ALL, 1)
-
-
-def mavlink_receive_loop(connection):
-    """MAVLink 메시지를 수신하고 처리하는 루프"""
-    last_heartbeat_time = time.time()
-    while not terminate_flag.is_set():
         try:
-            # 메시지 수신 (blocking=True, timeout 설정)
-            # timeout을 짧게 설정하여 종료 플래그를 더 자주 확인할 수 있도록 함
-            msg = connection.recv_match(type=TARGET_MESSAGES, blocking=True, timeout=1.0)
+            # all=True 로 모든 컨테이너 가져오기
+            containers = client.containers.list(all=True)
+            target_containers = []
 
-            if msg is None:
-                # 타임아웃 발생 시 하트비트 확인
-                current_time = time.time()
-                if current_time - last_heartbeat_time > HEARTBEAT_TIMEOUT:
-                     logger.warning(f"하트비트가 {HEARTBEAT_TIMEOUT}초 이상 수신되지 않았습니다. 연결 상태 확인 필요.")
-                     # 연결 강제 종료 및 재연결 로직 트리거
-                     raise ConnectionError("Heartbeat timeout")
-                continue # 다음 메시지 대기
+            # 이름 기준으로 대상 컨테이너 필터링
+            for container in containers:
+                 if container.name in CONTAINER_NAME_PATTERNS:
+                     target_containers.append(container)
 
-            msg_type = msg.get_type()
+            logger.debug(f"확인 대상 컨테이너 {len(target_containers)}개 발견.")
 
-            # 하트비트 메시지 수신 시 마지막 수신 시간 업데이트
-            if msg_type == 'HEARTBEAT':
-                last_heartbeat_time = time.time()
-                # logger.debug(f"Heartbeat 수신: type={msg.type}, autopilot={msg.autopilot}, base_mode={msg.base_mode}, custom_mode={msg.custom_mode}, system_status={msg.system_status}")
+            for container in target_containers:
+                 container_name = container.name
+                 logger.debug(f"Processing container: {container_name} ({container.short_id})")
 
-            msg_data = msg.to_dict()
+                 details = get_container_details(container)
+                 if details is None: # NotFound 등 상세 정보 가져오기 실패
+                      continue
+                 if details.get('status') == 'api_error': # API 오류 시 로그만 남기고 통계 시도 안 함
+                      logger.error(f"컨테이너 '{container_name}' 상세 정보 가져오기 실패 (API 오류): {details.get('error_message')}")
+                      all_containers_data[container_name] = details # 오류 정보 포함하여 기록
+                      continue
 
-            # ⭐️ ML 데이터 처리를 위한 데이터 정제 (cti_agent.py의 기대 형식에 맞춤)
-            log_data = {}
-            if msg_type == 'GLOBAL_POSITION_INT':
-                log_data['lat'] = msg_data.get('lat') / 1e7 # 1e7로 나눠서 도(degree) 단위로
-                log_data['lon'] = msg_data.get('lon') / 1e7
-                log_data['alt_m'] = msg_data.get('alt') / 1000.0 # mm -> m
-                log_data['relative_alt_m'] = msg_data.get('relative_alt') / 1000.0 # mm -> m
-                log_data['vx'] = msg_data.get('vx') / 100.0 # cm/s -> m/s
-                log_data['vy'] = msg_data.get('vy') / 100.0
-                log_data['vz'] = msg_data.get('vz') / 100.0
-            elif msg_type == 'ATTITUDE':
-                log_data['pitch_deg'] = msg_data.get('pitch') * 180.0 / 3.1415926535 # rad -> deg
-                log_data['roll_deg'] = msg_data.get('roll') * 180.0 / 3.1415926535
-                log_data['yaw_deg'] = msg_data.get('yaw') * 180.0 / 3.1415926535
-            elif msg_type == 'VFR_HUD':
-                log_data['groundspeed_ms'] = msg_data.get('groundspeed') # m/s
-            elif msg_type == 'SYS_STATUS':
-                log_data['battery_v'] = msg_data.get('voltage_battery') / 1000.0 # mV -> V
-                log_data['battery_pct'] = msg_data.get('battery_remaining') # %
-            elif msg_type == 'HEARTBEAT':
-                log_data['mode'] = mavutil.mode_string_v10(msg) # 모드 문자열
-            elif msg_type == 'SCALED_IMU':
-                log_data['xacc'] = msg_data.get('xacc') / 1000.0 # mg -> g (cti_agent.py 기대치 확인 필요)
-                log_data['yacc'] = msg_data.get('yacc') / 1000.0
-                log_data['zacc'] = msg_data.get('zacc') / 1000.0
+                 # 실행 중인 컨테이너만 통계 수집
+                 if details.get('running'):
+                     stats = get_container_stats(container)
+                     if 'error_message' in stats:
+                         logger.warning(f"컨테이너 '{container_name}' 통계 수집 실패: {stats['error_message']}")
+                     # 통계 정보(오류 포함)를 상세 정보에 추가
+                     details['stats'] = stats
+                     
+                     # ⭐️ [수정] cti_agent.py를 위해 개별 컨테이너 로그도 기록
+                     # cti_agent.py는 cpu_load_pct를 기대하므로 매핑
+                     individual_log_data = {
+                         'container_name': container_name,
+                         'cpu_load_pct': stats.get('cpu_percent'), # ⭐️ 'cpu_load_pct'로 매핑
+                         'memory_pct': stats.get('memory_percent'),
+                         'network_rx_bytes': stats.get('network_rx_bytes'),
+                         'network_tx_bytes': stats.get('network_tx_bytes'),
+                         'disk_read_bytes': stats.get('disk_read_bytes'),
+                         'disk_write_bytes': stats.get('disk_write_bytes'),
+                         'running': True
+                     }
+                     log_to_bus("container_telemetry", individual_log_data)
+                     
+                 else:
+                     details['stats'] = None # 실행 중 아닐 때는 stats=None
+                     # ⭐️ [수정] 실행 중이 아닌 컨테이너 정보도 로깅 (필요 시)
+                     individual_log_data = {
+                         'container_name': container_name,
+                         'running': False
+                     }
+                     log_to_bus("container_telemetry", individual_log_data)
+
+                 all_containers_data[container_name] = details
+                 monitored_count += 1
+
+            # ⭐️ [수정] 전체 요약 로그는 다른 타입으로 로깅 (중복 방지)
+            if all_containers_data:
+                logger.info(f"총 {monitored_count}개 컨테이너 정보 수집 완료. 요약 로깅...")
+                log_to_bus("container_stats_summary", all_containers_data)
             else:
-                 log_data = msg_data # 기타 메시지는 원본 사용
+                logger.info(f"모니터링 대상 컨테이너를 찾을 수 없습니다: {CONTAINER_NAME_PATTERNS}")
 
-            # 너무 많은 로그 방지를 위해 특정 메시지는 DEBUG 레벨로 로깅 (예: RAW_IMU)
-            if msg_type in ['RAW_IMU', 'SCALED_IMU', 'SERVO_OUTPUT_RAW']:
-                 logger.debug(f"수신 메시지 [{msg_type}]: {log_data}")
-            else:
-                 logger.info(f"수신 메시지 [{msg_type}]: {log_data}")
-
-            log_to_bus(msg_type, log_data) # 정제된 데이터 로깅
-
-        except ConnectionError as ce: # 하트비트 타임아웃 또는 연결 관련 오류
-            logger.error(f"MAVLink 연결 오류: {ce}. 재연결 시도...")
-            break # 내부 루프 종료하여 외부에서 재연결 시도
-        except mavutil.mavlink.MAVError as me:
-            logger.error(f"MAVLink 프로토콜 오류: {me}")
-            # 프로토콜 오류는 연결 자체의 문제일 수 있으므로 재연결 시도
-            break
+        except docker.errors.APIError as e:
+            logger.error(f"Docker API 오류 발생: {e}. 다음 주기에 재시도.")
         except Exception as e:
-            # 예상치 못한 오류 발생 시 로깅 후 계속 시도 (연결 문제는 아닐 수 있음)
-            logger.error(f"메시지 수신/처리 중 예상치 못한 오류 발생: {e}", exc_info=True)
-            # 짧은 지연 후 계속 진행
-            time.sleep(0.1)
+            logger.error(f"모니터링 루프 중 예외 발생: {e}", exc_info=True)
+
+        # 다음 모니터링까지 대기
+        elapsed_time = time.monotonic() - start_time
+        sleep_time = max(0.1, MONITOR_INTERVAL - elapsed_time)
+        logger.info(f"사이클 완료 ({elapsed_time:.2f}초 소요). {sleep_time:.2f}초 후 다음 확인...")
+        interrupted = stop_event.wait(sleep_time)
+        if interrupted:
+            logger.info("종료 신호 수신. 모니터링 루프 종료.")
+            break
 
 
 def main():
-    """
-    MAVLink 연결을 관리하고, 텔레메트리 데이터를 수신하여 로그를 기록합니다.
-    연결이 끊어지면 주기적으로 재연결을 시도합니다.
-    """
-    logger.info(f"DVD 텔레메트리 모니터 시작. 로그 경로: {BUS_LOG_PATH}")
-    connection = None
+    """메인 함수: Docker 클라이언트 초기화 및 모니터링 실행."""
+    logger.info("DVD Container Monitor starting...")
+    logger.info(f"Monitoring interval: {MONITOR_INTERVAL}s")
+    logger.info(f"Container name patterns: {CONTAINER_NAME_PATTERNS}")
+    logger.info(f"Logging to: {BUS_LOG_PATH}")
 
-    while not terminate_flag.is_set():
-        if connection is None or not getattr(connection, 'mav', None) or connection.socket is None:
-            connection = connect_mavlink(MAVLINK_SOURCE)
-            if connection is None:
-                logger.warning(f"{RECONNECT_DELAY}초 후 MAVLink 재연결 시도...")
-                terminate_flag.wait(RECONNECT_DELAY) # 종료 신호 대기하며 sleep
-                continue # 루프 처음으로 돌아가 재연결 시도
-            else:
-                 # 연결 성공 시 데이터 스트림 설정
-                 setup_data_streams(connection)
-                 last_heartbeat_time = time.time() # 연결 직후 하트비트 시간 초기화
+    try:
+        BUS_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    except Exception as dir_err:
+        logger.critical(f"로그 디렉토리 생성 실패 '{BUS_LOG_PATH.parent}': {dir_err}")
+        return
 
-        # 메시지 수신 루프 실행
-        mavlink_receive_loop(connection)
+    client = init_docker_client()
+    if client is None:
+        logger.critical("Docker 연결 실패. 종료.")
+        return
 
-        # mavlink_receive_loop가 종료되면 연결 문제 발생으로 간주
-        logger.warning("MAVLink 수신 루프 종료됨. 연결 정리 및 재연결 시도.")
-        if connection:
-            try:
-                connection.close()
-            except Exception as close_err:
-                logger.error(f"MAVLink 연결 종료 중 오류: {close_err}")
-        connection = None
-        logger.info(f"{RECONNECT_DELAY}초 후 재연결 시도...")
-        terminate_flag.wait(RECONNECT_DELAY) # 종료 신호 대기하며 sleep
-
-    # 종료 시 최종 정리
-    if connection:
-        try:
-            connection.close()
-            logger.info("MAVLink 연결 종료됨.")
-        except Exception as e:
-            logger.error(f"종료 시 MAVLink 연결 종료 중 오류: {e}")
-    logger.info("DVD 텔레메트리 모니터 종료.")
+    try:
+        monitor_containers(client)
+    except KeyboardInterrupt:
+        logger.info("KeyboardInterrupt 수신. 모니터 중단...")
+        stop_event.set()
+    except Exception as main_err:
+        logger.critical(f"메인 루프에서 처리되지 않은 예외: {main_err}", exc_info=True)
+        stop_event.set() # 예외 발생 시에도 종료 시도
+    finally:
+        logger.info("DVD Container Monitor finished.")
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        logger.info("사용자에 의해 모니터링 중단 신호 수신...")
-        terminate_flag.set() # 모든 스레드에 종료 신호 전달
-    finally:
-        # main 함수가 정상 종료되거나 예외 발생 시에도 종료 메시지 로깅
-        logger.info("프로그램 종료 처리 완료.")
+    main()

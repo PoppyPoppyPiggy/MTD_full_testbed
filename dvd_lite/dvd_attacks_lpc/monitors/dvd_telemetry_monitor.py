@@ -4,21 +4,17 @@ import json
 import os
 import logging
 from pymavlink import mavutil
-from datetime import datetime, timezone # [수정] timezone 추가
+from datetime import datetime
 import threading
 
 # 로깅 설정
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# [수정] BASE_DIR 정의
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
 # 환경 변수 또는 기본값 설정
-# [수정] 모든 로그를 단일 '../bus/bus.log' 파일로 통합합니다.
-DEFAULT_BUS_LOG_PATH = os.path.abspath(os.path.join(BASE_DIR, '../bus/bus.log'))
-BUS_LOG_PATH = os.environ.get('BUS_LOG_PATH', DEFAULT_BUS_LOG_PATH) 
-
+# ⭐️ [수정] cti_agent.py가 읽는 'bus_telemetry.log'로 경로 수정
+# 프로젝트 루트(dvd_attacks_lpc)의 'bus' 폴더를 바라보도록 동적 경로 설정
+BUS_LOG_PATH = os.environ.get('BUS_LOG_PATH', os.path.join(os.path.dirname(__file__), '..', 'bus', 'bus_telemetry.log'))
 MAVLINK_SOURCE = os.environ.get('MAVLINK_SOURCE', 'udp:0.0.0.0:14550') # MAVLink 연결 주소
 CONNECTION_TIMEOUT = int(os.environ.get('MAVLINK_CONNECTION_TIMEOUT', 15)) # 연결 시도 타임아웃 (초)
 HEARTBEAT_TIMEOUT = int(os.environ.get('MAVLINK_HEARTBEAT_TIMEOUT', 30)) # 하트비트 최대 대기 시간 (초)
@@ -60,7 +56,7 @@ TARGET_MESSAGES = [
     'PARAM_VALUE',          # 파라미터 값 수신/변경 시 (요청 또는 변경 시 발생)
 
     # 확장/사용자 정의 (필요 시)
-    # 'HIGH_LATENCY2',      # 장거리 통신용 요약 정보
+    # 'HIGH_LATENCY2',        # 장거리 통신용 요약 정보
 ]
 
 # 스레드 종료 플래그
@@ -96,22 +92,22 @@ def log_to_bus(message_type, data):
                 # UTF-8 디코딩 시도, 실패 시 repr() 사용
                 sanitized_data[key] = value.decode('utf-8', errors='replace')
             except UnicodeDecodeError:
-                sanitized_data[key] = repr(value) # 바이트 문자열 표현으로 저장
+                 sanitized_data[key] = repr(value) # 바이트 문자열 표현으로 저장
         elif key == 'mavpackettype': # mavpackettype은 불필요하므로 제외
             continue
         else:
             sanitized_data[key] = value
 
+    current_time = time.time()
     log_entry = {
-        # [수정] DataBuilder와 CTI Agent가 'ts' 필드를 사용할 수 있도록 POSIX 타임스탬프 추가
-        "timestamp": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
-        "ts": time.time(),
+        "timestamp": datetime.utcfromtimestamp(current_time).isoformat() + "Z", # ⭐️ UTC 시간으로 변경
+        "ts": current_time, # ⭐️ ML 에이전트가 사용할 Unix timestamp 추가
         "source": "dvd_telemetry_monitor",
         "type": f"mavlink_{message_type.lower()}", # 타입을 소문자로 통일
         "data": sanitized_data
     }
     try:
-        # [수정] 로그 디렉토리 존재 확인
+        # ⭐️ 로그 파일 디렉토리 자동 생성
         os.makedirs(os.path.dirname(BUS_LOG_PATH), exist_ok=True)
         with open(BUS_LOG_PATH, 'a') as f:
             f.write(json.dumps(log_entry) + '\n')
@@ -140,7 +136,7 @@ def request_data_stream(conn, stream_id, frequency_hz, start_stop=1):
              )
              logger.debug(f"MAV_DATA_STREAM {stream_id} 요청 (Freq: {frequency_hz}Hz, Start/Stop: {start_stop})")
         else:
-             logger.warning("MAVLink 연결이 유효하지 않아 데이터 스트림을 요청할 수 없습니다.")
+            logger.warning("MAVLink 연결이 유효하지 않아 데이터 스트림을 요청할 수 없습니다.")
     except Exception as e:
         logger.error(f"데이터 스트림 요청 중 오류 발생: {e}")
 
@@ -176,9 +172,9 @@ def mavlink_receive_loop(connection):
                 # 타임아웃 발생 시 하트비트 확인
                 current_time = time.time()
                 if current_time - last_heartbeat_time > HEARTBEAT_TIMEOUT:
-                    logger.warning(f"하트비트가 {HEARTBEAT_TIMEOUT}초 이상 수신되지 않았습니다. 연결 상태 확인 필요.")
-                    # 연결 강제 종료 및 재연결 로직 트리거
-                    raise ConnectionError("Heartbeat timeout")
+                     logger.warning(f"하트비트가 {HEARTBEAT_TIMEOUT}초 이상 수신되지 않았습니다. 연결 상태 확인 필요.")
+                     # 연결 강제 종료 및 재연결 로직 트리거
+                     raise ConnectionError("Heartbeat timeout")
                 continue # 다음 메시지 대기
 
             msg_type = msg.get_type()
@@ -190,13 +186,41 @@ def mavlink_receive_loop(connection):
 
             msg_data = msg.to_dict()
 
+            # ⭐️ ML 데이터 처리를 위한 데이터 정제 (cti_agent.py의 기대 형식에 맞춤)
+            log_data = {}
+            if msg_type == 'GLOBAL_POSITION_INT':
+                log_data['lat'] = msg_data.get('lat') / 1e7 # 1e7로 나눠서 도(degree) 단위로
+                log_data['lon'] = msg_data.get('lon') / 1e7
+                log_data['alt_m'] = msg_data.get('alt') / 1000.0 # mm -> m
+                log_data['relative_alt_m'] = msg_data.get('relative_alt') / 1000.0 # mm -> m
+                log_data['vx'] = msg_data.get('vx') / 100.0 # cm/s -> m/s
+                log_data['vy'] = msg_data.get('vy') / 100.0
+                log_data['vz'] = msg_data.get('vz') / 100.0
+            elif msg_type == 'ATTITUDE':
+                log_data['pitch_deg'] = msg_data.get('pitch') * 180.0 / 3.1415926535 # rad -> deg
+                log_data['roll_deg'] = msg_data.get('roll') * 180.0 / 3.1415926535
+                log_data['yaw_deg'] = msg_data.get('yaw') * 180.0 / 3.1415926535
+            elif msg_type == 'VFR_HUD':
+                log_data['groundspeed_ms'] = msg_data.get('groundspeed') # m/s
+            elif msg_type == 'SYS_STATUS':
+                log_data['battery_v'] = msg_data.get('voltage_battery') / 1000.0 # mV -> V
+                log_data['battery_pct'] = msg_data.get('battery_remaining') # %
+            elif msg_type == 'HEARTBEAT':
+                log_data['mode'] = mavutil.mode_string_v10(msg) # 모드 문자열
+            elif msg_type == 'SCALED_IMU':
+                log_data['xacc'] = msg_data.get('xacc') / 1000.0 # mg -> g (cti_agent.py 기대치 확인 필요)
+                log_data['yacc'] = msg_data.get('yacc') / 1000.0
+                log_data['zacc'] = msg_data.get('zacc') / 1000.0
+            else:
+                 log_data = msg_data # 기타 메시지는 원본 사용
+
             # 너무 많은 로그 방지를 위해 특정 메시지는 DEBUG 레벨로 로깅 (예: RAW_IMU)
             if msg_type in ['RAW_IMU', 'SCALED_IMU', 'SERVO_OUTPUT_RAW']:
-                logger.debug(f"수신 메시지 [{msg_type}]: {msg_data}")
+                 logger.debug(f"수신 메시지 [{msg_type}]: {log_data}")
             else:
-                logger.info(f"수신 메시지 [{msg_type}]: {msg_data}")
+                 logger.info(f"수신 메시지 [{msg_type}]: {log_data}")
 
-            log_to_bus(msg_type, msg_data)
+            log_to_bus(msg_type, log_data) # 정제된 데이터 로깅
 
         except ConnectionError as ce: # 하트비트 타임아웃 또는 연결 관련 오류
             logger.error(f"MAVLink 연결 오류: {ce}. 재연결 시도...")
@@ -217,16 +241,7 @@ def main():
     MAVLink 연결을 관리하고, 텔레메트리 데이터를 수신하여 로그를 기록합니다.
     연결이 끊어지면 주기적으로 재연결을 시도합니다.
     """
-    logger.info("DVD 텔레메트리 모니터 시작.")
-    logger.info(f"Logging to: {BUS_LOG_PATH}") # [추가] 로그 경로 로깅
-
-    # [추가] 로그 디렉토리 생성
-    try:
-        os.makedirs(os.path.dirname(BUS_LOG_PATH), exist_ok=True)
-    except Exception as dir_err:
-        logger.critical(f"로그 디렉토리 생성 실패 '{os.path.dirname(BUS_LOG_PATH)}': {dir_err}")
-        return
-
+    logger.info(f"DVD 텔레메트리 모니터 시작. 로그 경로: {BUS_LOG_PATH}")
     connection = None
 
     while not terminate_flag.is_set():
@@ -237,9 +252,9 @@ def main():
                 terminate_flag.wait(RECONNECT_DELAY) # 종료 신호 대기하며 sleep
                 continue # 루프 처음으로 돌아가 재연결 시도
             else:
-                # 연결 성공 시 데이터 스트림 설정
-                setup_data_streams(connection)
-                last_heartbeat_time = time.time() # 연결 직후 하트비트 시간 초기화
+                 # 연결 성공 시 데이터 스트림 설정
+                 setup_data_streams(connection)
+                 last_heartbeat_time = time.time() # 연결 직후 하트비트 시간 초기화
 
         # 메시지 수신 루프 실행
         mavlink_receive_loop(connection)

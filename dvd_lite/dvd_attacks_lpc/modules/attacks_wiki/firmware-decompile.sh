@@ -1,72 +1,69 @@
 #!/usr/bin/env bash
+set -euo pipefail
 
-# --- Process Command Line Arguments ---
-# Example: Assign first arg to INTENSITY, default 'medium'
-# INTENSITY="${1:-medium}"
-# Example: Assign second arg to DURATION_SECONDS, default '30'
-# DURATION_SECONDS="${2:-30}"
-# echo "Parameters: Intensity=$INTENSITY, Duration=$DURATION_SECONDS"
-# Add more parameter processing as needed for the specific script
-# ------------------------------------
+# Attack: Firmware Decompile (Binary Extraction & Analysis, MTD-aware)
+# Target Service: DRONE_MAVLINK (Assumed context for environment validation)
 
-# Auto-generated from: /home/kali/MTD_full_testbed/Damn-Vulnerable-Drone.wiki/Firmware-Decompile.md
-# Created: 2025-09-14 13:46:03
-# NOTE: 설명/서사는 제거되었고, 코드블록/프롬프트 명령만 포함됩니다.
-
-# MTD_INTERFACE_START
-# =======================================================================
-# MTD-aware Target Acquisition (from Orchestrator Environment)
-# =======================================================================
-# 이 스크립트는 attack_orchestrator.py에 의해 TARGET_IP와 TARGET_PORT 환경 변수가
-# 설정될 것을 기대하고 실행됩니다.
-
-if [[ -z "${TARGET_IP:-}" || -z "${TARGET_PORT:-}" ]]; then
-    echo "ERROR: TARGET_IP and TARGET_PORT environment variables are not set." >&2
-    echo "This script must be run via the attack_orchestrator.py" >&2
+# --- MTD_INTERFACE_START (Mandatory dynamic target acquisition) ---
+# Orchestrator가 TARGET_IP, TARGET_PORT, TARGET_SERVICE를 주입해야 합니다.
+if [[ -z "${TARGET_IP:-}" ]]; then
+    echo "ERROR: TARGET_IP environment variable is not set." >&2
+    echo "Attack aborted. Must be run via attack_orchestrator.py with MTD state resolution." >&2
     exit 1
 fi
 
-echo "[INFO] Attack target acquired from orchestrator: ${TARGET_IP}:${TARGET_PORT}"
-# MTD_INTERFACE_END
+# 이 공격은 네트워크 포트와 무관하지만, 표준화를 위해 MAVLink 포트 컨텍스트를 사용합니다.
+TARGET_PORT="${TARGET_PORT:-14550}"
 
-set -euo pipefail
+echo "[INFO] Attack context validated (Target IP: ${TARGET_IP})"
+# --- MTD_INTERFACE_END ---
 
-# 기준 경로 (요구사항)
+# --- Common Log/BASE Setup ---
 export BASE="${BASE:-$PWD}"
-
-# 공통 로그 연결(선택사항) - 존재 시 로드
-if [[ -f "$BASE/00_env.sh" ]]; then . "$BASE/00_env.sh"; else
-  DVD_LOG="${DVD_LOG:-$BASE/attack_output/dvd.log}"; mkdir -p "$(dirname "$DVD_LOG")"
-  log(){ echo "[`date +%F_%T`] $*"; }; export -f log
+if [[ -f "$BASE/00_env.sh" ]]; then
+    . "$BASE/00_env.sh"
+else
+    DVD_LOG="${DVD_LOG:-$BASE/attack_output/dvd.log}"
+    mkdir -p "$(dirname "$DVD_LOG")"
+    log(){ echo "[$(date +%F_%T)] $*"; }
+    export -f log
 fi
 
 log "[ATTACK] id=firmware-decompile src=Firmware-Decompile.md"
-log "[BLOCK 1] type=shell"
-docker exec -it flight-controller bash
 
-log "[BLOCK 2] type=shell"
-find / -name "arducopter" 2>/dev/null
+log "[BLOCK 1] type=shell (Find ArduCopter Binary Path)"
+# Flight Controller 컨테이너 내부에서 arducopter 바이너리 경로를 찾습니다.
+# 컨테이너 이름 'flight-controller'는 정적 이름이라고 가정합니다.
+sudo docker exec flight-controller find / -name "arducopter" 2>/dev/null
 
-log "[BLOCK 3] type=shell"
-/home/ardupilot/ArduCopter/build/sitl/bin/arducopter
+log "[BLOCK 2] type=shell (Extract Binary from Container)"
+# 찾은 바이너리를 공격자 시스템으로 복사합니다.
+# 경로: /home/ardupilot/ArduCopter/build/sitl/bin/arducopter (일반적인 SITL 경로)
+sudo docker cp flight-controller:/home/ardupilot/ArduCopter/build/sitl/bin/arducopter ./arducopter.bin
+log "Extracted firmware binary to ./arducopter.bin"
 
-log "[BLOCK 4] type=shell"
-docker cp ardupilot:/home/ardupilot/ArduCopter/build/sitl/bin/arducopter ./arducopter.bin
+log "[BLOCK 3] type=shell (Analyze Binary Format)"
+# 파일 포맷 확인 (ELF, 아키텍처 등)
+file ./arducopter.bin
 
-log "[BLOCK 5] type=shell"
-file arducopter.bin
+log "[BLOCK 4] type=shell (Extract Strings for Reconnaissance)"
+# 바이너리에서 문자열을 추출하여 파일로 저장합니다.
+strings ./arducopter.bin > arducopter.strings
+log "Extracted strings to arducopter.strings"
 
-log "[BLOCK 6] type=shell"
-ELF 64-bit LSB executable, x86-64, dynamically linked
+log "[BLOCK 5] type=shell (Generate Assembly Disassembly)"
+# objdump를 사용하여 어셈블리 코드를 추출합니다.
+objdump -D -M intel ./arducopter.bin > arducopter.asm
+log "Generated disassembly to arducopter.asm"
 
-log "[BLOCK 7] type=shell"
-strings arducopter.bin | less
+log "[BLOCK 6] type=shell (Download Official Firmware for Comparison)"
+# 외부에서 공식 APJ(ArduPilot Journal) 파일을 다운로드합니다.
+wget -q -O arducopter.apj https://firmware.ardupilot.org/Copter/stable/Pixhawk1/arducopter.apj
+log "Downloaded official firmware arducopter.apj"
 
-log "[BLOCK 8] type=shell"
-objdump -D -M intel arducopter.bin > arducopter.asm
+log "[BLOCK 7] type=shell (Extract APJ Contents via Binwalk)"
+# binwalk를 사용하여 APJ 파일의 내부 구조를 분석 및 추출합니다.
+sudo binwalk -e ./arducopter.apj
 
-log "[BLOCK 9] type=shell"
-wget https://firmware.ardupilot.org/Copter/stable/Pixhawk1/arducopter.apj
-
-log "[BLOCK 10] type=shell"
-binwalk -e arducopter.apj
+log "[BLOCK 8] type=control (Decompilation Steps Completed)"
+echo "[INFO] Firmware analysis steps completed. Results stored in local files."

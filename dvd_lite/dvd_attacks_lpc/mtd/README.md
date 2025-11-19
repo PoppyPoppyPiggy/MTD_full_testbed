@@ -1,12 +1,12 @@
-MTD-RL v04 아키텍처: 심층 분석 및 향후 과제
+MTD-RL v05 아키텍처: 심층 분석 및 향후 과제
 
 이 문서는 MTD_full_testbed/mtd/에 통합된 ver_04 (연속 파라미터, 하이브리드) 아키텍처의 핵심 요소들을 분석하고, 사용자의 질문에 답변하며, 현재 코드의 명확한 한계점과 다음 단계를 제시합니다.
 
 1. MTD 고도화를 위한 그래프 분석 (Wandb 기준)
 
-rl_train_v04.py 스크립트는 wandb에 방대한 양의 데이터를 로깅합니다. 이 데이터를 기반으로 생성되는 그래프와, MTD 고도화를 위해 추가로 생성하면 좋을 그래프는 다음과 같습니다.
+rl_train_v05.py 스크립트는 wandb에 방대한 양의 데이터를 로깅합니다. 이 데이터를 기반으로 생성되는 그래프와, MTD 고도화를 위해 추가로 생성하면 좋을 그래프는 다음과 같습니다.
 
-(A) 현재 rl_train_v04.py가 생성하는 그래프
+(A) 현재 rl_train_v05.py가 생성하는 그래프
 
 wandb 대시보드에서 다음 4개 그룹의 그래프를 실시간으로 확인할 수 있습니다.
 
@@ -96,19 +96,19 @@ Y축: Metrics/seeker_ip_change_rate (Seeker 회피율)
 
 2. seeker_level 구현 위치
 
-seeker_level은 v04 아키텍처에서 **"학습 환경의 난이도를 조절하는 핵심 파라미터"**로 작동하며, 다음 위치에 구현되어 있습니다.
+seeker_level은 v05 아키텍처에서 **"학습 환경의 난이도를 조절하는 핵심 파라미터"**로 작동하며, 다음 위치에 구현되어 있습니다.
 
 설정 (Argument):
 
-mtd/rl_train_v04.py에서 --seeker-level <0~4> 인자를 받습니다. (기본값 3)
+mtd/rl_train_v05.py에서 --seeker-level <0~4> 인자를 받습니다. (기본값 3)
 
 전달 (Passing):
 
-rl_train_v04.py -> env = NetworkEnv(cfg)
+rl_train_v05.py -> env = NetworkEnv(cfg)
 
 구현 (Implementation):
 
-파일: mtd/rl_environment_v04.py
+파일: mtd/rl_environment_v05.py
 
 클래스: NetworkEnv의 __init__
 
@@ -116,7 +116,7 @@ rl_train_v04.py -> env = NetworkEnv(cfg)
 
 적용 (Application):
 
-파일: mtd/rl_environment_v04.py
+파일: mtd/rl_environment_v05.py
 
 클래스: SimulatedHeuristicSeeker의 __init__
 
@@ -137,7 +137,7 @@ class SimulatedHeuristicSeeker:
 
 결론: seeker_level은 시뮬레이션된 적의 스캔 빈도, 공격 빈도, IP 변경(블랙리스트 회피) 빈도를 동시에 제어하여 RL 에이전트가 상대할 환경의 난이도를 결정합니다.
 
-3. 학습 명령어 집합 (v04)
+3. 학습 명령어 집합 (v05)
 
 MTD_full_testbed/dvd_lite/dvd_attacks_lpc/ 디렉토리에서 다음 명령어를 실행합니다.
 
@@ -145,11 +145,11 @@ MTD_full_testbed/dvd_lite/dvd_attacks_lpc/ 디렉토리에서 다음 명령어�
 
 코드가 정상적으로 실행되고 export_ver04 폴더가 생성되는지 확인합니다.
 
-python3 mtd/rl_train_v04.py \
+python3 mtd/rl_train_v05.py \
     --updates 5 \
     --batch-size 200 \
     --disable-wandb \
-    --run-name "Debug_Test_v04" \
+    --run-name "Debug_Test_v05" \
     --export-dir "./mtd/rl_models/ver_04_debug"
 
 
@@ -157,15 +157,15 @@ python3 mtd/rl_train_v04.py \
 
 가장 표준적인 학습 명령어입니다.
 
-python3 mtd/rl_train_v04.py \
+python3 mtd/rl_train_v05.py \
     --seeker-level 2 \
     --updates 1500 \
     --batch-size 2048 \
     --minibatch-size 64 \
     --n-epochs 10 \
     --lr 3e-4 \
-    --wandb-project "MTD_RL_v04_Hybrid" \
-    --run-name "PPO_v04_vs_Seeker_L2" \
+    --wandb-project "MTD_RL_v05_Hybrid" \
+    --run-name "PPO_v05_vs_Seeker_L2" \
     --export-dir "./mtd/rl_models/ver_04_L2"
 
 
@@ -173,11 +173,11 @@ python3 mtd/rl_train_v04.py \
 
 더 어렵고 회피적인 적을 상대로 강인한(robust) 정책을 학습합니다.
 
-python3 mtd/rl_train_v04.py \
+python3 mtd/rl_train_v05.py \
     --seeker-level 4 \
     --updates 2500 \
     --batch-size 2048 \
     --minibatch-size 64 \
-    --wandb-project "MTD_RL_v04_Hybrid" \
-    --run-name "PPO_v04_vs_Seeker_L4" \
+    --wandb-project "MTD_RL_v05_Hybrid" \
+    --run-name "PPO_v05_vs_Seeker_L4" \
     --export-dir "./mtd/rl_models/ver_04_L4"
