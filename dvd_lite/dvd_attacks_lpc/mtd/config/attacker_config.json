@@ -1,0 +1,19 @@
+{
+  "targets": {
+    "TARGET_FC": "10.13.0.2",
+    "TARGET_CC": "10.13.0.3",
+    "TARGET_GCS": "10.13.0.4",
+    "TARGET_SIM": "10.13.0.5",
+    "TARGET_DECOY": "10.13.0.7"
+  },
+  "ports": {
+    "PORT_MAVLINK": "14550",
+    "PORT_SITL": "5760",
+    "PORT_RTSP": "554",
+    "PORT_WEB": "3000",
+    "PORT_ROS": "11311"
+  },
+  "interfaces": {
+    "TARGET_CC_WIFI": "192.168.13.1"
+  }
+}
