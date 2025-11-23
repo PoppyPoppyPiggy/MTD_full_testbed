@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Auto-generated from: /home/kali/MTD_full_testbed/Damn-Vulnerable-Drone.wiki/GPS-Spoofing.md
-# Created: 2025-11-23 15:43:26
+# Created: 2025-11-23 16:46:38
 # NOTE: 설명/서사는 제거되었고, 코드블록/프롬프트 명령만 포함됩니다.
 set -euo pipefail
 
@@ -114,5 +114,5 @@ if __name__ == "__main__":
 PY
 
 log "[BLOCK 2] type=shell"
-sudo python3 gps-spoofing.py 10.13.0.6:14550
+sudo python3 gps-spoofing.py ${ATTACKER_SRC}:${PORT_MAVLINK}
 

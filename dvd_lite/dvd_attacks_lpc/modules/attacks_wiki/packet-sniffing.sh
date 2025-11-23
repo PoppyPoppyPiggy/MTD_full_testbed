@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Auto-generated from: /home/kali/MTD_full_testbed/Damn-Vulnerable-Drone.wiki/Packet-Sniffing.md
-# Created: 2025-11-23 15:43:26
+# Created: 2025-11-23 16:46:38
 # NOTE: 설명/서사는 제거되었고, 코드블록/프롬프트 명령만 포함됩니다.
 set -euo pipefail
 
@@ -31,7 +31,7 @@ f.CAMERA_IMAGE_CAPTURED_capture_result = ProtoField.new("capture_result (MAV_BOO
 
 log "[BLOCK 5] type=shell"
 local udp_dissector_table = DissectorTable.get("udp.port")
-udp_dissector_table:add(14550, mavlink_proto)
+udp_dissector_table:add(${PORT_MAVLINK}, mavlink_proto)
 udp_dissector_table:add(14580, mavlink_proto)
 udp_dissector_table:add(18570, mavlink_proto)
 
@@ -58,7 +58,7 @@ f.CAMERA_IMAGE_CAPTURED_capture_result = ProtoField.new("capture_result (MAV_BOO
 
 log "[BLOCK 11] type=shell"
 local udp_dissector_table = DissectorTable.get("udp.port")
-udp_dissector_table:add(14550, mavlink_proto)
+udp_dissector_table:add(${PORT_MAVLINK}, mavlink_proto)
 udp_dissector_table:add(14580, mavlink_proto)
 udp_dissector_table:add(18570, mavlink_proto)
 

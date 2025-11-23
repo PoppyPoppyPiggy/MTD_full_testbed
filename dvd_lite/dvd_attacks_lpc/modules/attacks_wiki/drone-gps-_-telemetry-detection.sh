@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Auto-generated from: /home/kali/MTD_full_testbed/Damn-Vulnerable-Drone.wiki/Drone-GPS-&-Telemetry-Detection.md
-# Created: 2025-11-23 15:43:26
+# Created: 2025-11-23 16:46:38
 # NOTE: 설명/서사는 제거되었고, 코드블록/프롬프트 명령만 포함됩니다.
 set -euo pipefail
 
@@ -15,40 +15,40 @@ fi
 
 log "[ATTACK] id=drone-gps-_-telemetry-detection src=Drone-GPS-&-Telemetry-Detection.md"
 log "[BLOCK 1] type=shell"
-(ip.src == 10.13.0.3) && (mavlink_proto.msgid == "HEARTBEAT")
+(ip.src == ${TARGET_CC}) && (mavlink_proto.msgid == "HEARTBEAT")
 
 log "[BLOCK 2] type=shell"
-(ip.src == 10.13.0.3) && (mavlink_proto.msgid == "SYS_STATUS")
+(ip.src == ${TARGET_CC}) && (mavlink_proto.msgid == "SYS_STATUS")
 
 log "[BLOCK 3] type=shell"
-(ip.src == 10.13.0.3) && (mavlink_proto.msgid == "GPS_RAW_INT")
+(ip.src == ${TARGET_CC}) && (mavlink_proto.msgid == "GPS_RAW_INT")
 
 log "[BLOCK 4] type=shell"
-(ip.src == 10.13.0.3) && (mavlink_proto.msgid == "GLOBAL_POSITION_INT")
+(ip.src == ${TARGET_CC}) && (mavlink_proto.msgid == "GLOBAL_POSITION_INT")
 
 log "[BLOCK 5] type=shell"
-(ip.src == 10.13.0.3) && (mavlink_proto.msgid == "ATTITUDE")
+(ip.src == ${TARGET_CC}) && (mavlink_proto.msgid == "ATTITUDE")
 
 log "[BLOCK 6] type=shell"
-(ip.src == 10.13.0.3) && (mavlink_proto.msgid == "ALTITUDE")
+(ip.src == ${TARGET_CC}) && (mavlink_proto.msgid == "ALTITUDE")
 
 log "[BLOCK 7] type=shell"
-(ip.src == 10.13.0.3) && (mavlink_proto.msgid == "BATTERY_STATUS")
+(ip.src == ${TARGET_CC}) && (mavlink_proto.msgid == "BATTERY_STATUS")
 
 log "[BLOCK 8] type=shell"
-(ip.src == 10.13.0.3) && (mavlink_proto.msgid == "VFR_HUD")
+(ip.src == ${TARGET_CC}) && (mavlink_proto.msgid == "VFR_HUD")
 
 log "[BLOCK 9] type=shell"
-(ip.src == 10.13.0.3) && (mavlink_proto.msgid == "STATUSTEXT")
+(ip.src == ${TARGET_CC}) && (mavlink_proto.msgid == "STATUSTEXT")
 
 log "[BLOCK 10] type=shell"
-(ip.src == 10.13.0.3) && (mavlink_proto.msgid == "MISSION_CURRENT")
+(ip.src == ${TARGET_CC}) && (mavlink_proto.msgid == "MISSION_CURRENT")
 
 log "[BLOCK 11] type=shell"
-(ip.src == 10.13.0.3) && (mavlink_proto.msgid == "NAV_CONTROLLER_OUTPUT")
+(ip.src == ${TARGET_CC}) && (mavlink_proto.msgid == "NAV_CONTROLLER_OUTPUT")
 
 log "[BLOCK 12] type=shell"
-(ip.src == 10.13.0.3) && (mavlink_proto.msgid == "RADIO_STATUS")
+(ip.src == ${TARGET_CC}) && (mavlink_proto.msgid == "RADIO_STATUS")
 
 log "[BLOCK 13] type=python"
 python3 - <<'PY'

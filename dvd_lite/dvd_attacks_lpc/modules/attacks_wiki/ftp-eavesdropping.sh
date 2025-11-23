@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Auto-generated from: /home/kali/MTD_full_testbed/Damn-Vulnerable-Drone.wiki/FTP-Eavesdropping.md
-# Created: 2025-11-23 15:43:26
+# Created: 2025-11-23 16:46:38
 # NOTE: 설명/서사는 제거되었고, 코드블록/프롬프트 명령만 포함됩니다.
 set -euo pipefail
 
@@ -15,7 +15,7 @@ fi
 
 log "[ATTACK] id=ftp-eavesdropping src=FTP-Eavesdropping.md"
 log "[BLOCK 1] type=shell"
-tcpdump -i any port 14550 -w mavftp.pcap
+tcpdump -i any port ${PORT_MAVLINK} -w mavftp.pcap
 
 log "[BLOCK 2] type=shell"
 mavlink.message.name == "FILE_TRANSFER_PROTOCOL"

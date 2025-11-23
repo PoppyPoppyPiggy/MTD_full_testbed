@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Auto-generated from: /home/kali/MTD_full_testbed/Damn-Vulnerable-Drone.wiki/Firmware-Modding.md
-# Created: 2025-11-23 15:43:26
+# Created: 2025-11-23 16:46:38
 # NOTE: 설명/서사는 제거되었고, 코드블록/프롬프트 명령만 포함됩니다.
 set -euo pipefail
 
@@ -36,7 +36,7 @@ log "[BLOCK 4] type=shell"
 build/sitl/bin/arducopter
 
 log "[BLOCK 5] type=shell"
-mavproxy.py --master=tcp:127.0.0.1:5760
+mavproxy.py --master=tcp:${TARGET_IP}:${PORT_SITL}
 
 log "[BLOCK 6] type=shell"
 command long 1 1 199 0 0 0 0 0 0 0

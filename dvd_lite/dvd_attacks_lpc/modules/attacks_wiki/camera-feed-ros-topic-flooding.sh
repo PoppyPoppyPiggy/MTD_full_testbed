@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Auto-generated from: /home/kali/MTD_full_testbed/Damn-Vulnerable-Drone.wiki/Camera-Feed-ROS-Topic-Flooding.md
-# Created: 2025-11-23 15:43:26
+# Created: 2025-11-23 16:46:38
 # NOTE: 설명/서사는 제거되었고, 코드블록/프롬프트 명령만 포함됩니다.
 set -euo pipefail
 
@@ -21,7 +21,7 @@ log "[BLOCK 2] type=shell"
 docker run -it --network=simulator --ip=10.13.0.10 --name ros_noetic_container ros:noetic-ros-base bash
 
 log "[BLOCK 3] type=shell"
-export ROS_MASTER_URI=http://10.13.0.5:11311
+export ROS_MASTER_URI=http://${TARGET_SIM}:${PORT_ROS}
 export ROS_IP=10.13.0.10
 source /opt/ros/noetic/setup.bash
 
