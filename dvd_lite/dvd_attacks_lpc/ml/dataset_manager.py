@@ -1,179 +1,262 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-CTI Dataset Manager v4.2 (Stable)
-- processed_data의 최신 features_batch_*.csv 자동 탐색
-- 훈련/테스트 분할 (계층적) 및 저장
+Dataset Manager v4.3
+- CTI Feature CSV (features_batch_*.csv) -> train/test 분할
+- 클래스 수가 적어서 stratify가 실패하더라도, fallback 분할로 파이프라인이 죽지 않도록 개선
 """
 
-import os
-import sys
 import argparse
-import pathlib
-from typing import Optional, List, Dict
+import glob
+import logging
+import math
+import os
+from datetime import datetime
+from typing import Optional, Tuple
 
 import numpy as np
 import pandas as pd
 from sklearn.model_selection import train_test_split
 
-# --- Path Configuration ---
-ML_DIR = os.path.dirname(os.path.realpath(__file__))
-PROJECT_ROOT = os.path.dirname(ML_DIR)
-
-PROCESSED_DATA_DIR = os.path.join(ML_DIR, "processed_data")
-OUTPUT_DIR = os.path.join(ML_DIR, "output")
-
-
-class DatasetManager:
-    """data_builder.py가 import 해서 쓰는 간단 저장기"""
-    def __init__(self, output_dir: str):
-        self.output_dir = output_dir
-        os.makedirs(self.output_dir, exist_ok=True)
-
-    def save_dataframe(self, df: pd.DataFrame, filename: str) -> None:
-        if not isinstance(df, pd.DataFrame):
-            print("❌ [DatasetManager Error] df가 DataFrame이 아닙니다.", file=sys.stderr)
-            return
-        try:
-            path = os.path.join(self.output_dir, filename)
-            df.to_csv(path, index=False)
-        except Exception as e:
-            print(f"❌ [DatasetManager Error] 저장 실패({filename}): {e}", file=sys.stderr)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s - %(levelname)s - %(message)s"
+)
+log = logging.getLogger(__name__)
 
 
-def find_latest_features_file(directory: str) -> Optional[str]:
-    """processed_data에서 최신 features_batch_*.csv 찾기"""
-    try:
-        d = pathlib.Path(directory)
-        if not d.is_dir():
-            print(f"❌ [오류] 디렉토리 없음: {directory}", file=sys.stderr)
-            return None
-        files = sorted(
-            (f for f in d.glob("features_batch_*.csv") if f.is_file()),
-            key=lambda f: f.stat().st_mtime,
-            reverse=True,
-        )
-        if not files:
-            print(f"❌ [오류] '{directory}'에 features_batch_*.csv 없음", file=sys.stderr)
-            return None
-        print(f"[*] 최신 특징 데이터 파일 발견: {files[0].name}")
-        return str(files[0])
-    except Exception as e:
-        print(f"❌ [오류] 최신 파일 검색 실패: {e}", file=sys.stderr)
+def find_latest_features_csv(processed_dir: str) -> Optional[str]:
+    pattern = os.path.join(processed_dir, "features_batch_*.csv")
+    candidates = glob.glob(pattern)
+    if not candidates:
         return None
+    candidates.sort()
+    return candidates[-1]
+
+
+def load_dataset(input_path: str) -> pd.DataFrame:
+    log.info("[*] 원본 데이터셋 로드: %s", input_path)
+    df = pd.read_csv(input_path)
+    log.info("[*] 로드 완료: %d 샘플, %d 컬럼", len(df), len(df.columns))
+    return df
+
+
+def describe_labels(df: pd.DataFrame, label_col: str = "label"):
+    if label_col not in df.columns:
+        raise ValueError(f"'{label_col}' 컬럼이 데이터셋에 없습니다.")
+
+    counts = df[label_col].value_counts().sort_index()
+    total = counts.sum()
+
+    log.info("[*] 고유 레이블 %d종: %s", len(counts.index), list(counts.index))
+    log.info("[*] 전체 레이블 분포(분할 전):")
+    for lbl, cnt in counts.items():
+        pct = cnt / total * 100.0
+        log.info("  - label %s: %d (%.4f%%)", lbl, cnt, pct)
+
+    return counts
+
+
+def filter_rare_classes(
+    df: pd.DataFrame,
+    label_col: str,
+    min_samples_per_class: int
+) -> Tuple[pd.DataFrame, pd.Series]:
+    """
+    min_samples_per_class 미만인 레이블은 rare로 보고 드롭.
+    (지금 단계에서는 '버리거나 나중에 별도 처리'하는 쪽이 현실적)
+    """
+    counts = df[label_col].value_counts()
+    rare_labels = counts[counts < min_samples_per_class].index.tolist()
+
+    if rare_labels:
+        log.warning(
+            "⚠ 희소(rare) 클래스 감지: %s (각 count < %d)",
+            rare_labels, min_samples_per_class
+        )
+        log.warning(
+            "  -> 현재 버전에서는 이 레이블 샘플은 train/test 분할에서 제외합니다."
+        )
+        df_filtered = df[~df[label_col].isin(rare_labels)].copy()
+    else:
+        df_filtered = df.copy()
+
+    return df_filtered, counts
+
+
+def split_dataset(
+    df: pd.DataFrame,
+    label_col: str,
+    test_size: float,
+    random_state: int
+):
+    """
+    우선 stratify=y로 시도해보고,
+    실패(ValueError)하면 stratify=None으로 fallback.
+    """
+
+    # 숫자형 특징만 선별 (label 제외)
+    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    if label_col in num_cols:
+        num_cols.remove(label_col)
+
+    if not num_cols:
+        raise RuntimeError("숫자형 특징 컬럼이 없습니다. data_builder 단계를 확인하세요.")
+
+    X = df[num_cols].values
+    y = df[label_col].values
+
+    log.info("[*] 최종 학습 피처 수(숫자형만): %d", len(num_cols))
+    log.info("[*] train/test 분할 (test_size=%.2f, stratify=y) 시도...", test_size)
+
+    try:
+        X_train, X_test, y_train, y_test = train_test_split(
+            X,
+            y,
+            test_size=test_size,
+            random_state=random_state,
+            stratify=y,
+        )
+        log.info("✅ 계층분할(stratify=y) 성공.")
+    except ValueError as e:
+        log.error("❌ 계층분할 실패: %s", e)
+        log.warning("  -> stratify 없이 단순 분할로 fallback 합니다.")
+        X_train, X_test, y_train, y_test = train_test_split(
+            X,
+            y,
+            test_size=test_size,
+            random_state=random_state,
+            stratify=None,
+        )
+        log.info("✅ fallback 분할(stratify=None) 성공.")
+
+    return X_train, X_test, y_train, y_test, num_cols
+
+
+def save_splits(
+    X_train, X_test, y_train, y_test,
+    feature_names,
+    output_dir: str
+):
+    os.makedirs(output_dir, exist_ok=True)
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    train_path = os.path.join(output_dir, f"train_dataset_{ts}.csv")
+    test_path = os.path.join(output_dir, f"test_dataset_{ts}.csv")
+
+    df_train = pd.DataFrame(X_train, columns=feature_names)
+    df_train["label"] = y_train
+
+    df_test = pd.DataFrame(X_test, columns=feature_names)
+    df_test["label"] = y_test
+
+    df_train.to_csv(train_path, index=False)
+    df_test.to_csv(test_path, index=False)
+
+    log.info("✅ train 데이터셋 저장: %s (rows=%d)", train_path, len(df_train))
+    log.info("✅ test  데이터셋 저장: %s (rows=%d)", test_path, len(df_test))
 
 
 def main():
-    parser = argparse.ArgumentParser(description="CTI Dataset Manager v4.2")
-    parser.add_argument("--input", default=None, help="입력 CSV 경로(미지정 시 processed_data 최신 파일 자동 사용)")
-    parser.add_argument("--test-size", type=float, default=0.2, help="테스트셋 비율 (0~1)")
-    parser.add_argument("--random-state", type=int, default=42, help="재현을 위한 시드")
+    parser = argparse.ArgumentParser(
+        description="CTI Dataset Manager v4.3 - train/test 분할 스크립트"
+    )
+    parser.add_argument(
+        "--input",
+        type=str,
+        default=None,
+        help="입력 CSV (features_batch_*.csv). 미지정 시 processed_data에서 최신 파일 자동 검색"
+    )
+    parser.add_argument(
+        "--processed-dir",
+        type=str,
+        default="./processed_data",
+        help="features_batch_*.csv가 저장된 디렉터리 (기본: ./processed_data)"
+    )
+    parser.add_argument(
+        "--output-dir",
+        type=str,
+        default="./datasets",
+        help="train/test CSV를 저장할 디렉터리 (기본: ./datasets)"
+    )
+    parser.add_argument(
+        "--label-col",
+        type=str,
+        default="label",
+        help="레이블 컬럼명 (기본: label)"
+    )
+    parser.add_argument(
+        "--test-size",
+        type=float,
+        default=0.2,
+        help="테스트 데이터 비율 (기본: 0.2)"
+    )
+    parser.add_argument(
+        "--min-samples-per-class",
+        type=int,
+        default=2,
+        help="이 값 미만인 클래스는 rare로 보고 분할에서 제외 (기본: 2)"
+    )
+    parser.add_argument(
+        "--random-state",
+        type=int,
+        default=42,
+        help="train/test 분할용 랜덤 시드"
+    )
+
     args = parser.parse_args()
 
-    print("🚀 [Dataset Manager v4.2] 데이터셋 분할 시작.")
+    log.info("🚀 [Dataset Manager v4.3] 데이터셋 분할 시작.")
 
-    input_path = args.input
-    if input_path is None:
-        print(f"[*] --input 미지정. '{PROCESSED_DATA_DIR}'에서 최신 파일 검색...")
-        input_path = find_latest_features_file(PROCESSED_DATA_DIR)
-
-    if input_path is None or not os.path.exists(input_path):
-        if input_path:
-            print(f"❌ 오류: 입력 파일 없음: {input_path}")
-        print("    먼저 data_builder.py로 특징 데이터셋을 생성하세요.")
-        sys.exit(1)
-
-    # 1) 로드
-    try:
-        df = pd.read_csv(input_path)
-        print(f"[*] 원본 데이터셋 로드 완료: {df.shape[0]} 샘플, {df.shape[1]} 특징")
-    except Exception as e:
-        print(f"❌ 오류: 로드 실패 ({input_path}): {e}", file=sys.stderr)
-        sys.exit(1)
-
-    # 2) 라벨 확인
-    if "label" not in df.columns:
-        print("❌ 오류: 'label' 컬럼이 없습니다. data_builder 설정을 확인하세요.")
-        sys.exit(1)
-
-    # 3) 무한대/NaN 정리
-    if np.isinf(df.select_dtypes(include=np.number).values).any():
-        print("[!] 경고: 무한대 값 존재 → NaN으로 전환")
-        df.replace([np.inf, -np.inf], np.nan, inplace=True)
-
-    # 4) 불리언/카테고리 정리
-    bool_cols = df.select_dtypes(include=["bool"]).columns.tolist()
-    if bool_cols:
-        df[bool_cols] = df[bool_cols].astype("int64")
-
-    # 5) NaN 일괄 처리(라벨 제외 전체)
-    nan_cols = df.columns[df.isnull().any()].tolist()
-    if nan_cols:
-        print(f"[!] 경고: NaN 포함 컬럼: {nan_cols} → 0으로 대체")
-        df.fillna(0, inplace=True)
-
-    # 6) X/y 분리
-    y = df["label"].astype("int64")
-    # 숫자형만 선택해서 X 구성
-    X = df.drop(columns=["label"], errors="ignore").select_dtypes(include=[np.number])
-
-    if X.empty:
-        print("❌ 오류: 숫자형 학습 피처가 없습니다. one-hot/전처리 파이프를 확인하세요.")
-        sys.exit(1)
-
-    print(f"[*] 최종 학습 피처 수(숫자형만): {X.shape[1]}")
-
-    # 7) 레이블 유효성
-    unique_labels = sorted(y.unique().tolist())
-    if len(unique_labels) < 2:
-        print(f"❌ 오류: 고유 레이블이 1개({unique_labels})뿐입니다. stratify 분할 불가.")
-        print("    정상(0) + 최소 하나 이상 공격 라벨 필요.")
-        print("\n현재 레이블 분포:\n", y.value_counts())
-        sys.exit(1)
+    # 1) 입력 파일 결정
+    if args.input is None:
+        inp = find_latest_features_csv(args.processed_dir)
+        if inp is None:
+            log.critical("❌ processed_dir(%s)에 features_batch_*.csv가 없습니다.", args.processed_dir)
+            raise SystemExit(1)
+        log.info("[*] --input 미지정. '%s'에서 최신 파일 검색 -> %s", args.processed_dir, inp)
+        input_path = inp
     else:
-        print(f"[*] 고유 레이블 {len(unique_labels)}종: {unique_labels}")
-        print("\n[*] 전체 레이블 분포(분할 전):")
-        print(y.value_counts(normalize=True).sort_index().apply(lambda x: f"{x:.4%}"))
+        input_path = args.input
 
-    # 8) 분할(계층적)
-    print(f"[*] 분할 진행: train {(1-args.test_size):.0%} / test {args.test_size:.0%}")
-    try:
-        X_train, X_test, y_train, y_test = train_test_split(
-            X, y,
-            test_size=args.test_size,
-            random_state=args.random_state,
-            stratify=y
-        )
-    except ValueError as e:
-        if "The least populated class" in str(e):
-            print(f"❌ 오류: 계층분할 실패(소수 클래스 샘플 부족): {e}")
-            cnt = y.value_counts()
-            print("\n현재 레이블 분포:\n", cnt)
-            print(f"\n테스트 비율 {args.test_size*100:.1f}%면 각 클래스 최소 {int(np.floor(1/args.test_size))}개 이상 필요")
-        else:
-            print(f"❌ 오류: 데이터 분할 중 예외: {e}", file=sys.stderr)
-        sys.exit(1)
+    # 2) 데이터 로드 및 레이블 분포 출력
+    df_raw = load_dataset(input_path)
+    counts = describe_labels(df_raw, label_col=args.label_col)
 
-    # 9) 저장
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    train_path = os.path.join(OUTPUT_DIR, "train_dataset.csv")
-    test_path  = os.path.join(OUTPUT_DIR, "test_dataset.csv")
-    try:
-        pd.concat([X_train, y_train], axis=1).to_csv(train_path, index=False)
-        pd.concat([X_test,  y_test ], axis=1).to_csv(test_path,  index=False)
-    except Exception as e:
-        print(f"❌ 오류: 저장 실패: {e}", file=sys.stderr)
-        sys.exit(1)
+    # 3) 희소 클래스 필터링 (선택적 - 기본값 min=2)
+    if args.min_samples_per_class > 1:
+        df, _ = filter_rare_classes(df_raw, args.label_col, args.min_samples_per_class)
+        if len(df) < len(df_raw):
+            log.warning(
+                "⚠ 희소 클래스 제거 후 남은 샘플 수: %d (원래 %d)",
+                len(df), len(df_raw)
+            )
+    else:
+        df = df_raw
 
-    print("\n" + "="*60)
-    print("✅ 데이터셋 분할 및 저장 완료!")
-    print(f"  - 훈련: {train_path} ({len(X_train)} 샘플)")
-    print(f"  - 테스트: {test_path} ({len(X_test)} 샘플)")
-    print("\n[훈련 레이블 분포]")
-    print(y_train.value_counts(normalize=True).sort_index().apply(lambda x: f"{x:.4%}"))
-    print("\n[테스트 레이블 분포]")
-    print(y_test.value_counts(normalize=True).sort_index().apply(lambda x: f"{x:.4%}"))
-    print("="*60)
+    # 4) train/test 분할
+    min_required = math.ceil(1.0 / args.test_size)
+    log.info(
+        "[*] 테스트 비율 %.1f%% 기준 '이론상' 각 클래스 최소 필요 샘플 수 ≈ %d개",
+        args.test_size * 100.0,
+        min_required
+    )
+
+    X_train, X_test, y_train, y_test, feature_names = split_dataset(
+        df,
+        label_col=args.label_col,
+        test_size=args.test_size,
+        random_state=args.random_state,
+    )
+
+    # 5) 저장
+    save_splits(
+        X_train, X_test, y_train, y_test,
+        feature_names,
+        args.output_dir
+    )
+
+    log.info("✅ [Dataset Manager v4.3] 완료.")
 
 
 if __name__ == "__main__":

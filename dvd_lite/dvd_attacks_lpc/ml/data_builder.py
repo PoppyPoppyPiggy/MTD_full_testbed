@@ -122,10 +122,10 @@ class DataBuilder:
         self._last_log_timestamp: Optional[datetime] = None
 
     # ----------------------------
-    # 로그 파서
+    # (예전) 로그 파서 – 현재는 iter_bus_logs가 직접 JSON 파싱
     # ----------------------------
     def parse_log_entry(self, line: str) -> Optional[Dict[str, Any]]:
-        """bus.log의 한 줄(JSON)을 dict로 파싱 + timestamp 표준화."""
+        """이전 버전 호환용. (지금은 iter_bus_logs 에서 바로 json.loads 사용 권장)"""
         try:
             log_entry = json.loads(line)
             ts_str = log_entry.get("timestamp")
@@ -135,7 +135,6 @@ class DataBuilder:
                 log_entry["timestamp_dt"] = datetime.fromtimestamp(float(ts_posix))
             elif ts_str:
                 try:
-                    # ISO8601(Z 표기 지원)
                     log_entry["timestamp_dt"] = datetime.fromisoformat(ts_str.replace("Z", "+00:00"))
                 except ValueError:
                     try:
@@ -148,7 +147,6 @@ class DataBuilder:
                 logger.warning("Log entry missing 'timestamp' and 'ts'. Using current time.")
                 log_entry["timestamp_dt"] = datetime.now()
 
-            # 원본 문자열 보존
             log_entry["timestamp_str"] = ts_str if ts_str else log_entry["timestamp_dt"].isoformat()
             return log_entry
 
@@ -160,150 +158,142 @@ class DataBuilder:
             return None
 
     # ----------------------------
-    # 피처 추출
+    # bus.log 이터레이터 (새로운 공통 진입점)
+    # ----------------------------
+    def iter_bus_logs(self):
+        """
+        bus.log 파일을 순차적으로 읽어 JSON dict 를 yield.
+        - 잘못된 JSON 라인은 건너뜀.
+        """
+        if not os.path.exists(self.bus_log_path):
+            logger.warning(f"bus.log not found: {self.bus_log_path}")
+            return
+
+        with open(self.bus_log_path, "r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    yield json.loads(line)
+                except json.JSONDecodeError:
+                    logger.debug(f"Skipping malformed JSON: {line}")
+                except Exception as e:
+                    logger.error(f"Error parsing bus.log line: {e}")
+
+    # ----------------------------
+    # 피처 추출 (새 버전)
     # ----------------------------
     def extract_features(self, log_entry: Dict[str, Any]) -> Dict[str, Any]:
         """
-        모니터링/이벤트 레코드로부터 피처를 생성.
-        레이블 할당은 process_logs_batch()의 상태머신에서 수행.
+        하나의 bus 로그 엔트리(JSON dict)에서 ML용 feature를 추출한다.
+        - source / type / event_type 등을 공통적으로 처리해서,
+          attack_orchestrator, network_traffic_monitor, qos_monitor 등에서 오는
+          데이터를 일관된 형태로 만든다.
         """
-        features: Dict[str, Any] = {
-            "timestamp": log_entry["timestamp_str"],
-            "ts": log_entry.get("ts", log_entry["timestamp_dt"].timestamp()),
-        }
-
         source = log_entry.get("source", "unknown")
-        log_type = log_entry.get("type", "unknown")
+        # ✅ type -> event_type 순으로 fallback
+        log_type = log_entry.get("type") or log_entry.get("event_type") or "unknown"
         data = log_entry.get("data", {}) or {}
 
-        # 1) 네트워크 모니터
-        if source == "network_traffic_monitor" and log_type == "network_packet":
-            features["net_protocol"] = data.get("transport_protocol", data.get("protocol", "unknown")).lower()
-            features["net_src_ip"] = data.get("ip_src", data.get("ipv6_src"))
-            features["net_dst_ip"] = data.get("ip_dst", data.get("ipv6_dst"))
-            features["net_src_port"] = data.get("tcp_srcport", data.get("udp_srcport"))
-            features["net_dst_port"] = data.get("tcp_dstport", data.get("udp_dstport"))
-            features["net_pkt_len"] = data.get("length")
-            # TCP/ARP 세부
-            if features["net_protocol"] == "tcp":
-                features["net_tcp_flags"] = data.get("tcp_flags")
-            elif features["net_protocol"] == "arp":
-                features["net_arp_opcode"] = data.get("arp_opcode")
+        features: Dict[str, Any] = {
+            "source": source,
+            "log_type": log_type,
+        }
 
-        # 2) 텔레메트리(MAVLink)
-        elif source == "dvd_telemetry_monitor" and log_type.startswith("mavlink_"):
-            msg_name = log_type.replace("mavlink_", "").upper()
-            features["mav_msg_name"] = msg_name
-            payload = data
+        # ---- attack_orchestrator 이벤트 (레이블링에 중요) ----
+        if source == "attack_orchestrator":
+            # 예: {"attack_name": "...", "scenario": "...", ...}
+            attack_name = data.get("attack_name")
+            scenario = data.get("scenario")
+            features["attack_name"] = attack_name
+            features["scenario"] = scenario
 
-            if msg_name == "HEARTBEAT":
-                features["mav_hb_type"] = payload.get("type")
-                features["mav_hb_autopilot"] = payload.get("autopilot")
-                features["mav_hb_status"] = payload.get("system_status")
+        # ---- scenario_runner 메타 이벤트 (선택) ----
+        elif source == "scenario_runner":
+            features["attack_name"] = data.get("attack_name")
+            features["scenario"] = data.get("scenario")
+            features["runner_event"] = log_type
 
-            elif msg_name == "GLOBAL_POSITION_INT":
-                features["mav_gps_lat"] = payload.get("lat")
-                features["mav_gps_lon"] = payload.get("lon")
-                features["mav_gps_alt"] = payload.get("alt")
-                features["mav_gps_rel_alt"] = payload.get("relative_alt")
-                features["mav_gps_vx"] = payload.get("vx")
-                features["mav_gps_vy"] = payload.get("vy")
-                features["mav_gps_vz"] = payload.get("vz")
-                features["mav_gps_hdg"] = payload.get("hdg")
-
-            elif msg_name == "ATTITUDE":
-                features["mav_att_roll"] = payload.get("roll")
-                features["mav_att_pitch"] = payload.get("pitch")
-                features["mav_att_yaw"] = payload.get("yaw")
-                features["mav_att_rollspeed"] = payload.get("rollspeed")
-
-            elif msg_name == "SYS_STATUS":
-                features["mav_sys_voltage"] = payload.get("voltage_battery")
-                features["mav_sys_current"] = payload.get("current_battery")
-                features["mav_sys_load"] = payload.get("load")
-                features["mav_sys_errors"] = payload.get("errors_count1")
-
-        # 3) 컨테이너 모니터
-        elif source == "dvd_container_monitor" and log_type == "container_stats_details":
-            features["cont_name"] = data.get("name")
-            features["cont_status"] = data.get("status")
-            features["cont_restarting"] = bool(data.get("restarting", False))
-            features["cont_exit_code"] = data.get("exit_code")
-
-            stats = data.get("stats") or {}
-            # 도커 placeholder(읽을 수 없는 통계) 감지
-            is_placeholder = stats.get("read_time") in (None, "", "0001-01-01T00:00:00Z")
-
-            if not is_placeholder:
-                features["cont_cpu_usage_pct"] = _safe_float(stats.get("cpu_percent"))
-                features["cont_mem_usage_mb"] = _bytes_to_mb(stats.get("memory_usage_bytes"))
-                features["cont_mem_limit_mb"] = _bytes_to_mb(stats.get("memory_limit_bytes"))
-                features["cont_mem_pct"] = _safe_float(stats.get("memory_percent"))
-                # 누적 카운터류는 None이면 0
-                features["cont_net_rx_bytes"] = stats.get("network_rx_bytes") or 0
-                features["cont_net_tx_bytes"] = stats.get("network_tx_bytes") or 0
-                features["cont_disk_read_bytes"] = stats.get("disk_read_bytes") or 0
-                features["cont_disk_write_bytes"] = stats.get("disk_write_bytes") or 0
-                features["cont_pids"] = stats.get("pids") if stats.get("pids") is not None else 0
+        # ---- network_traffic_monitor ----
+        elif source == "network_traffic_monitor":
+            # network_packet / network_traffic_batch 둘 다 올 수 있음
+            if log_type in ("network_packet", "network_traffic_batch"):
+                if isinstance(data, dict):
+                    features.update({
+                        "pkt_length": data.get("length"),
+                        "pkt_proto": data.get("protocol"),
+                        "pkt_src_port": data.get("src_port"),
+                        "pkt_dst_port": data.get("dst_port"),
+                        "pkt_tcp_flags": data.get("tcp_flags"),
+                        "pkt_arp_op": data.get("arp_op"),
+                    })
             else:
-                # 재시작/중지 직후 등 유효 통계 없음
-                features["cont_cpu_usage_pct"] = None
-                features["cont_mem_usage_mb"] = None
-                features["cont_mem_limit_mb"] = None
-                features["cont_mem_pct"] = None
-                features["cont_net_rx_bytes"] = 0
-                features["cont_net_tx_bytes"] = 0
-                features["cont_disk_read_bytes"] = 0
-                features["cont_disk_write_bytes"] = 0
-                features["cont_pids"] = 0
+                # 기타 타입은 최소한 길이/프로토콜만
+                features["pkt_length"] = data.get("length")
+                features["pkt_proto"] = data.get("protocol")
 
-        # 4) QoS 모니터
-        elif source == "qos_monitor" and log_type == "system_qos":
-            rates = data.get("system_resources_rates", {}) or {}
-            quality = data.get("network_quality", {}) or {}
-            cumulative = data.get("system_resources_cumulative", {}) or {}
+        # ---- dvd_telemetry_monitor ----
+        elif source == "dvd_telemetry_monitor":
+            # 예: mavlink_global_position_int, mavlink_attitude 등
+            features.update({
+                "lat": data.get("lat"),
+                "lon": data.get("lon"),
+                "alt_m": data.get("alt_m"),
+                "relative_alt_m": data.get("relative_alt_m"),
+                "vx": data.get("vx"),
+                "vy": data.get("vy"),
+                "vz": data.get("vz"),
+                "pitch_deg": data.get("pitch_deg"),
+                "roll_deg": data.get("roll_deg"),
+                "yaw_deg": data.get("yaw_deg"),
+                "groundspeed_ms": data.get("groundspeed_ms"),
+                "battery_v": data.get("battery_v"),
+                "battery_pct": data.get("battery_pct"),
+                "mode": data.get("mode"),
+            })
 
-            features["qos_cpu_overall_pct"] = cumulative.get("cpu_percent_overall")
-            features["qos_mem_pct"] = cumulative.get("memory_percent")
-            features["qos_disk_read_bps"] = rates.get("disk_read_bps")
-            features["qos_disk_write_bps"] = rates.get("disk_write_bps")
-            features["qos_net_sent_bps"] = rates.get("net_sent_bps")
-            features["qos_net_recv_bps"] = rates.get("net_recv_bps")
-            features["qos_ping_rtt_ms"] = quality.get("avg_rtt_ms")
-            features["qos_ping_loss_pct"] = quality.get("packet_loss_percent")
+        # ---- dvd_container_monitor ----
+        elif source == "dvd_container_monitor":
+            # container_telemetry
+            features.update({
+                "container_name": data.get("container_name"),
+                "cpu_load_pct": data.get("cpu_load_pct"),
+                "memory_pct": data.get("memory_pct"),
+                "net_rx_bytes": data.get("network_rx_bytes"),
+                "net_tx_bytes": data.get("network_tx_bytes"),
+                "disk_read_bytes": data.get("disk_read_bytes"),
+                "disk_write_bytes": data.get("disk_write_bytes"),
+                "container_running": data.get("running"),
+            })
 
-        # 5) Docker 이벤트
-        elif source == "docker_event_monitor" and log_type == "docker_event":
-            features["docker_cont_name"] = data.get("name")
-            features["docker_event_status"] = data.get("status")
-            if data.get("status") == "health_status":
-                features["docker_health_status"] = data.get("health_status")
+        # ---- qos_monitor ----
+        elif source == "qos_monitor":
+            features.update({
+                "avg_rtt_ms": data.get("avg_rtt_ms"),
+                "packet_loss_pct": data.get("packet_loss_pct"),
+                "ping_target": data.get("ping_target"),
+                "cpu_load_pct": data.get("cpu_load_pct"),
+                "mem_percent": (data.get("system_resources_cumulative") or {}).get("memory_percent"),
+                "disk_read_bps": (data.get("system_resources_rates") or {}).get("disk_read_bps"),
+                "disk_write_bps": (data.get("system_resources_rates") or {}).get("disk_write_bps"),
+                "net_sent_bps": (data.get("system_resources_rates") or {}).get("net_sent_bps"),
+                "net_recv_bps": (data.get("system_resources_rates") or {}).get("net_recv_bps"),
+            })
 
-        # 숫자형 통일 캐스팅(가능한 항목만)
-        numeric_cols = [
-            "ts", "net_src_port", "net_dst_port", "net_pkt_len", "net_arp_opcode",
-            "mav_hb_type", "mav_hb_autopilot", "mav_hb_status",
-            "mav_gps_lat", "mav_gps_lon", "mav_gps_alt", "mav_gps_rel_alt",
-            "mav_gps_vx", "mav_gps_vy", "mav_gps_vz", "mav_gps_hdg",
-            "mav_att_roll", "mav_att_pitch", "mav_att_yaw", "mav_att_rollspeed",
-            "mav_sys_voltage", "mav_sys_current", "mav_sys_load", "mav_sys_errors",
-            "cont_cpu_usage_pct", "cont_mem_usage_mb", "cont_mem_limit_mb", "cont_mem_pct",
-            "cont_net_rx_bytes", "cont_net_tx_bytes", "cont_disk_read_bytes", "cont_disk_write_bytes", "cont_pids",
-            "qos_cpu_overall_pct", "qos_mem_pct", "qos_disk_read_bps", "qos_disk_write_bps",
-            "qos_net_sent_bps", "qos_net_recv_bps", "qos_ping_rtt_ms", "qos_ping_loss_pct"
-        ]
-        for col in numeric_cols:
-            if col in features:
-                try:
-                    features[col] = float(features[col]) if features[col] is not None else None
-                except (ValueError, TypeError):
-                    logger.warning(f"Could not convert '{col}' value '{features[col]}' to float. Set to None.")
-                    features[col] = None
+        # ---- docker_event_monitor ----
+        elif source == "docker_event_monitor":
+            features.update({
+                "docker_status": data.get("status"),
+                "docker_name": data.get("name"),
+                "docker_health": data.get("health_status"),
+            })
 
+        # 기타/unknown source 는 최소 정보만 남겨둠
         return features
 
     # ----------------------------
-    # 후처리 (결측/범주 등)
+    # (구버전) 후처리 – 지금은 사용 안 하지만 남겨둠
     # ----------------------------
     def _post_process_dataframe(self, df: pd.DataFrame) -> pd.DataFrame:
         if df.empty:
@@ -311,7 +301,6 @@ class DataBuilder:
 
         logger.info(f"Shape before post-processing: {df.shape}")
 
-        # 레이블/공격명 기본값
         if "label" in df.columns:
             df["label"] = df["label"].fillna(0)
         else:
@@ -321,7 +310,6 @@ class DataBuilder:
         else:
             df["attack_name"] = "normal"
 
-        # 채움 전략
         fill_zeros = [
             c for c in df.columns
             if ("count" in c or "bytes" in c or c.endswith("_id") or c.endswith("_status")
@@ -329,7 +317,6 @@ class DataBuilder:
         ]
         fill_neg_one = [c for c in df.columns if c.endswith("port")]
 
-        # 나머지 숫자형(통계/QoS/GPS 등)은 0으로
         numeric_cols = df.select_dtypes(include="number").columns.tolist()
         remaining_numeric = list(
             set(numeric_cols).difference(set(["ts", "label"] + fill_zeros + fill_neg_one))
@@ -345,7 +332,6 @@ class DataBuilder:
             if c in df.columns:
                 df[c] = df[c].fillna(0)
 
-        # 범주형 처리(원-핫, 과도한 cardinality 억제)
         categorical_cols = [
             "net_protocol", "mav_msg_name", "cont_name", "cont_status",
             "docker_cont_name", "docker_event_status", "docker_health_status", "net_tcp_flags"
@@ -360,7 +346,6 @@ class DataBuilder:
                 except Exception as e:
                     logger.error(f"One-hot encoding failed for '{col}': {e}")
 
-        # IP 주소 열은 분석/학습 전에 제거 예정(경고만)
         ip_cols = [c for c in df.columns if c.endswith("_ip")]
         if ip_cols:
             logger.warning(f"IP address columns {ip_cols} found. They may be dropped in later stages.")
@@ -371,92 +356,64 @@ class DataBuilder:
         return df
 
     # ----------------------------
-    # 배치 처리
+    # 배치 처리 (새 버전)
     # ----------------------------
     def process_logs_batch(self) -> Optional[pd.DataFrame]:
         """
-        bus.log 전체를 일괄 처리하여 피처 CSV 생성.
-        attack_orchestrator의 attack_started/attack_stopped로 상태를 추적하여 레이블링.
+        bus.log 전체를 읽어서 feature + label 이 들어간 DataFrame을 만든다.
+        - attack_orchestrator 의 attack_started / attack_stopped 를 상태머신으로 읽어,
+          각 구간에 label (정수)을 붙인다.
         """
-        extracted: list[Dict[str, Any]] = []
+        records: list[Dict[str, Any]] = []
+
+        current_attack_name: Optional[str] = None
+        current_label: int = 0  # 0 = normal
+
         logger.info(f"Starting batch processing of: {self.bus_log_path}")
 
-        current_attack_label = 0
-        current_attack_name = "normal"
+        for log_entry in self.iter_bus_logs():
+            source = log_entry.get("source")
+            # ✅ type -> event_type 순으로 읽기
+            log_type = log_entry.get("type") or log_entry.get("event_type")
+            data = log_entry.get("data", {}) or {}
 
-        try:
-            with open(self.bus_log_path, "r", encoding="utf-8", errors="ignore") as f:
-                for i, line in enumerate(f):
-                    log_entry = self.parse_log_entry(line)
-                    if not log_entry:
-                        continue
+            # --- 1) 상태머신: 공격 시작/종료 이벤트 처리 ---
+            if source == "attack_orchestrator":
+                attack_name = data.get("attack_name")
+                if log_type == "attack_started" and attack_name:
+                    current_label = self.event_mapping.get(attack_name, 0)
+                    current_attack_name = attack_name
+                elif log_type == "attack_stopped" and attack_name:
+                    current_label = 0
+                    current_attack_name = None
 
-                    source = log_entry.get("source")
-                    log_type = log_entry.get("type")
-                    if source == "attack_orchestrator":
-                        data = log_entry.get("data", {}) or {}
-                        attack_name = data.get("attack_name")
+            # --- 2) feature 추출 ---
+            features = self.extract_features(log_entry)
+            features["label"] = current_label
+            features["current_attack_name"] = current_attack_name
 
-                        if log_type == "attack_started" and attack_name:
-                            current_attack_label = self.event_mapping.get(attack_name, 0)
-                            current_attack_name = attack_name
-                            if current_attack_label == 0:
-                                logger.warning(f"Attack '{attack_name}' not in mapping. Label=0.")
-                            logger.info(
-                                f"Attack STATE CHANGE: '{attack_name}'(Label:{current_attack_label}) START @ {log_entry['timestamp_str']}"
-                            )
-                        elif log_type == "attack_stopped":
-                            stopped_name = attack_name or "unknown"
-                            logger.info(
-                                f"Attack STATE CHANGE: '{stopped_name}' STOP @ {log_entry['timestamp_str']}"
-                            )
-                            current_attack_label = 0
-                            current_attack_name = "normal"
-                        # 오케스트레이터 로그는 피처화하지 않음
-                        continue
+            # timestamp/ts 유지 (없으면 None)
+            features["ts"] = log_entry.get("ts")
+            features["timestamp"] = log_entry.get("timestamp")
 
-                    try:
-                        feats = self.extract_features(log_entry)
-                        if feats:
-                            feats["label"] = current_attack_label
-                            feats["attack_name"] = current_attack_name
-                            extracted.append(feats)
-                        # 진행 로그
-                        if (i + 1) % 50000 == 0:
-                            logger.info(f"Processed {i+1} lines... (state: {current_attack_name})")
-                    except Exception as e_feat:
-                        logger.error(
-                            f"Error extracting features at line {i+1}: {e_feat}",
-                            exc_info=True
-                        )
+            records.append(features)
 
-        except FileNotFoundError:
-            logger.error(f"Log file not found: {self.bus_log_path}")
-            return None
-        except Exception as e:
-            logger.error(f"Error during log reading: {e}", exc_info=True)
+        if not records:
+            logger.warning("bus.log 에서 레코드를 하나도 읽지 못했습니다.")
             return None
 
-        if not extracted:
-            logger.warning("No data extracted from log file.")
-            return None
+        df = pd.DataFrame.from_records(records)
 
-        logger.info(f"Creating DataFrame from {len(extracted)} records.")
-        df = pd.DataFrame(extracted)
-        df = self._post_process_dataframe(df)
+        # NaN / inf 정리
+        df.replace([float("inf"), float("-inf")], float("nan"), inplace=True)
+        df.fillna(0, inplace=True)
 
-        if df.empty:
-            logger.warning("DataFrame is empty after post-processing.")
-            return None
-
-        # 저장
-        timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-        out_name = f"features_batch_{timestamp_str}.csv"
-        try:
-            self.dataset_manager.save_dataframe(df, out_name)
-            logger.info(f"Saved processed batch data to {os.path.join(self.output_dir, out_name)}")
-        except Exception as e:
-            logger.error(f"Failed to save processed data: {e}", exc_info=True)
+        # 출력 경로 저장 (dataset_manager와 호환되도록 타임스탬프 붙임)
+        os.makedirs(self.output_dir, exist_ok=True)
+        ts_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+        output_path = os.path.join(self.output_dir, f"features_batch_{ts_str}.csv")
+        df.to_csv(output_path, index=False)
+        logger.info(f"배치 feature 데이터 저장 완료: {output_path}")
 
         return df
 

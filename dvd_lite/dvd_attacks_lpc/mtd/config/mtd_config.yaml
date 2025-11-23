@@ -1,0 +1,40 @@
+nat_backend:
+  mode: iptables
+  nat_table: nat
+  prerouting_chain: PREROUTING
+  mtd_chain: MTD_SERVICE_CHAIN
+
+service:
+  public_host_ip: "127.0.0.1"
+  public_port: 14550
+  protocol: "udp"
+
+actions:
+  - id: 0
+    name: "Redirect_Real_1"
+    type: "DNAT"
+    target: "10.13.0.2:14550"
+    params:
+      role: "real"
+
+  - id: 1
+    name: "Redirect_Real_2"
+    type: "DNAT"
+    target: "10.13.0.3:14550"
+    params:
+      role: "real"
+
+  - id: 2
+    name: "Redirect_Decoy_1"
+    type: "DNAT"
+    target: "10.13.0.10:14550"
+    params:
+      role: "decoy"
+
+state_file: "mtd/shared_state/mtd_state.json"
+metrics_log: "mtd/shared_state/mtd_metrics.jsonl"
+cti_status_file: "mtd/shared_state/cti_status.json"
+
+rl:
+  observation_dim: 16
+  log_dir: "mtd/shared_state/rl_logs"

@@ -37,29 +37,39 @@ logging.basicConfig(
 )
 logger = logging.getLogger("AttackOrchestrator")
 
-BUS_LOG_PATH = pathlib.Path(DEFAULT_BUS_LOG_PATH)
+# BUS_LOG_PATH 전역 (AttackOrchestrator.__init__ 에서 override 가능)
+BUS_LOG_PATH = DEFAULT_BUS_LOG_PATH
 
-
-# ---------------------------------------------------------------------------
-# 공용 유틸
-# ---------------------------------------------------------------------------
 
 def log_to_bus(event_type: str, data: Dict):
-    """bus/bus.log 에 JSON 라인 기록"""
+    """
+    bus/bus.log 에 JSON 라인 기록.
+    - DataBuilder는 log_entry["type"] 필드를 기준으로 상태머신/레이블링을 수행하므로,
+      반드시 "type" 필드를 채워야 한다.
+    - event_type 필드는 호환/디버깅용으로 그대로 유지.
+    """
+    try:
+        os.makedirs(os.path.dirname(BUS_LOG_PATH), exist_ok=True)
+    except Exception as e:
+        logger.error(f"bus 디렉토리 생성 실패: {e}")
+
     entry = {
         "timestamp": datetime.now(timezone.utc)
         .isoformat(timespec="milliseconds")
         .replace("+00:00", "Z"),
         "source": "attack_orchestrator",
+        # ✅ DataBuilder가 보는 필드
+        "type": event_type,
+        # (옵션) 호환용 – 나중에 분석할 때 event_type도 그대로 볼 수 있게 유지
         "event_type": event_type,
         "data": data,
     }
+
     try:
-        BUS_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
         with open(BUS_LOG_PATH, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
     except Exception as e:
-        logger.error(f"[BUS LOG ERROR] {e}", exc_info=True)
+        logger.error(f"bus.log 쓰기 실패: {e}", exc_info=True)
 
 
 def read_mtd_state(mtd_state_file: pathlib.Path) -> Dict:
