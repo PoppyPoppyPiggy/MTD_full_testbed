@@ -1,28 +1,41 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-import os
-import pandas as pd
-import joblib
-import json
 import argparse
+import json
+import os
 import sys
-from sklearn.ensemble import RandomForestClassifier
-from sklearn.metrics import classification_report, confusion_matrix, accuracy_score, f1_score, precision_score, recall_score
+
+import joblib
+import matplotlib
 import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 import seaborn as sns
-import numpy as np # numpy 임포트 추가
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import (
+    accuracy_score,
+    classification_report,
+    confusion_matrix,
+    f1_score,
+    precision_score,
+    recall_score,
+)
 
 # --- Path Configuration ---
 ML_DIR = os.path.dirname(os.path.realpath(__file__))
 PROJECT_ROOT = os.path.dirname(ML_DIR)
-OUTPUT_DIR = os.path.join(ML_DIR, 'output')
+OUTPUT_DIR = os.path.join(ML_DIR, "output")
 
 # --- Matplotlib 백엔드 설정 (GUI 없을 때 오류 방지) ---
-import matplotlib
 try:
-    matplotlib.use('Agg') # 'Agg' 백엔드 사용
+    matplotlib.use("Agg")  # 'Agg' 백엔드 사용
 except ImportError:
-    print("Matplotlib 'Agg' 백엔드를 설정할 수 없습니다. GUI 환경이 필요할 수 있습니다.")
+    print(
+        "Matplotlib 'Agg' 백엔드를 설정할 수 없습니다. GUI 환경이 필요할 수 있습니다."
+    )
+
+# Ensure output directory exists for all artifacts
+os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 
 def plot_confusion_matrix(y_true, y_pred, labels, filepath):
