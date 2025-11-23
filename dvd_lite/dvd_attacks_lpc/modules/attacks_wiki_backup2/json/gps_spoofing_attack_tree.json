@@ -1,0 +1,414 @@
+{
+    "attack_tree": {
+      "name": "GPS Spoofing Attack",
+      "attack_id": "DVD-GPS-001", 
+      "description": "Spoofing drone GPS position data to mislead Ground Control Station and manipulate navigation",
+      "attack_type": "Protocol Tampering",
+      "target_systems": ["Ground Control Station", "Flight Controller", "GPS Navigation System", "MAVLink Protocol"],
+      "attack_goal": "Control drone navigation through position manipulation",
+      "risk_level": "Critical",
+      "probability": "Medium",
+      "technical_difficulty": "Medium", 
+      "detection_difficulty": "High",
+      "business_impact": "Critical",
+      "overall_risk_score": 9.0,
+      
+      "prerequisites": {
+        "network_access": "MAVLink network connectivity",
+        "tools_required": ["Python 3", "pymavlink", "scapy", "nmap", "SDR equipment (optional)"],
+        "knowledge_required": ["MAVLink protocol", "GPS coordinate systems", "Python scripting", "RF fundamentals"],
+        "privileges_required": "sudo for packet injection",
+        "optional_hardware": ["HackRF One", "USRP", "BladeRF"]
+      },
+      
+      "attack_phases": {
+        "reconnaissance": {
+          "tactic_id": "TA0043",
+          "tactic_name": "Reconnaissance", 
+          "objective": "Gather intelligence on target drone GPS and navigation systems",
+          "techniques": [
+            {
+              "technique_id": "T1046",
+              "technique_name": "Network Service Discovery",
+              "description": "Identify MAVLink UDP port 14550 and associated services",
+              "implementation": "nmap -sU -p 14550 <target_range>",
+              "success_criteria": "MAVLink ports and services discovered",
+              "impact_level": "Low",
+              "detection_signatures": ["Port scan patterns", "Service enumeration"],
+              "evasion_methods": ["Stealth scanning", "Service fingerprinting"]
+            },
+            {
+              "technique_id": "T1040", 
+              "technique_name": "Network Sniffing",
+              "description": "Capture GPS-related MAVLink messages for pattern analysis",
+              "implementation": "Wireshark filtering for GPS_RAW_INT, GLOBAL_POSITION_INT, HEARTBEAT, ATTITUDE",
+              "success_criteria": "GPS message patterns and coordinates collected",
+              "impact_level": "Low",
+              "detection_signatures": ["Network monitoring", "Packet capture tools"],
+              "evasion_methods": ["Passive monitoring", "Distributed capture"],
+              "target_messages": [
+                "GPS_RAW_INT (ID: 24)",
+                "GLOBAL_POSITION_INT (ID: 33)", 
+                "HEARTBEAT (ID: 0)",
+                "ATTITUDE (ID: 30)"
+              ]
+            },
+            {
+              "technique_id": "T1590.005",
+              "technique_name": "Gather Victim Network Info: IP Addresses", 
+              "description": "Identify QGroundControl and MAVProxy IP addresses",
+              "implementation": "Network mapping and service detection",
+              "success_criteria": "GCS endpoints identified",
+              "impact_level": "Low",
+              "detection_signatures": ["Network reconnaissance", "IP scanning"],
+              "evasion_methods": ["Passive network analysis"],
+              "target_endpoints": [
+                "QGroundControl: 10.13.0.6:14550",
+                "MAVProxy WiFi: 192.168.13.14:14550",
+                "MAVProxy Bridge: 10.13.0.4:14550"
+              ]
+            }
+          ]
+        },
+        
+        "initial_access": {
+          "tactic_id": "TA0001",
+          "tactic_name": "Initial Access",
+          "objective": "Establish access to drone communication systems",
+          "techniques": [
+            {
+              "technique_id": "T1200",
+              "technique_name": "Hardware Additions",
+              "description": "Deploy RF/SDR equipment for signal-level GPS spoofing",
+              "implementation": "HackRF/USRP/BladeRF setup for L1 band transmission",
+              "success_criteria": "RF transmission capability established",
+              "impact_level": "Medium",
+              "detection_signatures": ["RF emissions", "New hardware signatures"],
+              "evasion_methods": ["Low-power transmission", "Frequency hopping"],
+              "optional": true,
+              "rf_specifications": {
+                "frequency": "1575.42 MHz (L1 band)",
+                "modulation": "BPSK",
+                "power": "Variable (below FCC limits)",
+                "bandwidth": "2.046 MHz"
+              }
+            },
+            {
+              "technique_id": "T1133",
+              "technique_name": "External Remote Services",
+              "description": "Access drone network through wireless communication",
+              "implementation": "WiFi network connection or direct MAVLink access",
+              "success_criteria": "Network connectivity to drone systems",
+              "impact_level": "Medium", 
+              "detection_signatures": ["Authentication events", "Network access logs"],
+              "evasion_methods": ["Credential theft", "Network exploitation"]
+            }
+          ]
+        },
+        
+        "execution": {
+          "tactic_id": "TA0002",
+          "tactic_name": "Execution",
+          "objective": "Execute GPS spoofing attack components",
+          "techniques": [
+            {
+              "technique_id": "T1059.006",
+              "technique_name": "Command & Scripting Interpreter: Python",
+              "description": "Execute GPS spoofing Python script",
+              "implementation": "sudo python3 gps-spoofing.py <target_ip:port>",
+              "success_criteria": "Script execution with continuous GPS message generation",
+              "impact_level": "Medium",
+              "detection_signatures": ["Python process execution", "Script execution patterns"],
+              "evasion_methods": ["Process masquerading", "Compiled binaries"]
+            },
+            {
+              "technique_id": "T1106", 
+              "technique_name": "Native API",
+              "description": "Use MAVLink API for GPS message generation",
+              "implementation": "create_gps_raw_int(), create_global_position_int(), create_heartbeat(), create_attitude()",
+              "success_criteria": "Valid spoofed GPS messages generated",
+              "impact_level": "High",
+              "detection_signatures": ["MAVLink library usage", "Message structure analysis"],
+              "evasion_methods": ["Custom protocol implementation"]
+            },
+            {
+              "technique_id": "T1053.003",
+              "technique_name": "Scheduled Task/Job: Cron", 
+              "description": "Maintain continuous GPS message transmission",
+              "implementation": "while True loop for persistent message injection",
+              "success_criteria": "Sustained GPS spoofing operation",
+              "impact_level": "Medium",
+              "detection_signatures": ["Persistent processes", "Regular message patterns"],
+              "evasion_methods": ["Randomized timing", "Process resurrection"]
+            }
+          ]
+        },
+        
+        "command_and_control": {
+          "tactic_id": "TA0011",
+          "tactic_name": "Command and Control",
+          "objective": "Use compromised GPS system for drone control",
+          "techniques": [
+            {
+              "technique_id": "T1090.001",
+              "technique_name": "Internal Proxy",
+              "description": "Use GPS spoofing as internal control proxy",
+              "implementation": "Route control commands through spoofed GPS coordinates",
+              "success_criteria": "Drone navigation controlled via GPS manipulation",
+              "impact_level": "High",
+              "detection_signatures": ["Unusual routing patterns", "Proxy indicators"],
+              "evasion_methods": ["Legitimate-appearing coordinates"]
+            },
+            {
+              "technique_id": "T1572",
+              "technique_name": "Protocol Tunneling",
+              "description": "Tunnel control commands through MAVLink GPS messages",
+              "implementation": "Embed control data in GPS coordinate fields",
+              "success_criteria": "Covert control channel established",
+              "impact_level": "High",
+              "detection_signatures": ["Protocol anomalies", "Data exfiltration patterns"],
+              "evasion_methods": ["Steganographic encoding", "Natural coordinate patterns"]
+            }
+          ]
+        },
+        
+        "impact": {
+          "tactic_id": "TA0040",
+          "tactic_name": "Impact",
+          "objective": "Manipulate drone position and navigation systems",
+          "techniques": [
+            {
+              "technique_id": "T1565.003",
+              "technique_name": "Runtime Data Manipulation",
+              "description": "Real-time manipulation of GPS position, altitude, and speed",
+              "implementation": "Dynamic lat/lon/alt field modification during flight",
+              "success_criteria": "Drone position display manipulated in real-time",
+              "impact_level": "Critical",
+              "detection_signatures": ["Position jump anomalies", "Impossible speed calculations"],
+              "evasion_methods": ["Gradual coordinate shifts", "Realistic movement patterns"],
+              "manipulated_coordinates": {
+                "latitude": 473566100,
+                "longitude": 854619300, 
+                "altitude": 1500,
+                "relative_altitude": 1500000
+              }
+            },
+            {
+              "technique_id": "T1565.002",
+              "technique_name": "Transmitted Data Manipulation", 
+              "description": "Forge HEARTBEAT and ATTITUDE messages for system consistency",
+              "implementation": "Spoof drone identity and orientation data",
+              "success_criteria": "Consistent drone system state maintained",
+              "impact_level": "Critical",
+              "detection_signatures": ["Message inconsistencies", "Identity conflicts"],
+              "evasion_methods": ["Proper message sequencing", "Authentic system parameters"],
+              "forged_messages": [
+                {
+                  "message_name": "HEARTBEAT",
+                  "message_id": 0,
+                  "fields": ["type", "autopilot", "base_mode", "system_status"]
+                },
+                {
+                  "message_name": "ATTITUDE", 
+                  "message_id": 30,
+                  "fields": ["roll", "pitch", "yaw", "rollspeed", "pitchspeed", "yawspeed"]
+                }
+              ]
+            },
+            {
+              "technique_id": "T1489",
+              "technique_name": "Service Stop",
+              "description": "Block or replace authentic GPS data streams",
+              "implementation": "Overwhelm authentic signals with stronger spoofed signals",
+              "success_criteria": "Authentic GPS data replaced by spoofed data",
+              "impact_level": "Critical",
+              "detection_signatures": ["Signal strength anomalies", "Source conflicts"],
+              "evasion_methods": ["Gradual signal takeover", "Synchronized replacement"]
+            }
+          ]
+        },
+        
+        "defense_evasion": {
+          "tactic_id": "TA0005",
+          "tactic_name": "Defense Evasion",
+          "objective": "Avoid detection by security systems and operators",
+          "techniques": [
+            {
+              "technique_id": "T1036.005",
+              "technique_name": "Masquerade: Match Legitimate Name or Location",
+              "description": "Mimic legitimate MAVLink message formats and structures",
+              "implementation": "Standard MAVLink protocol compliance",
+              "success_criteria": "Messages appear legitimate to monitoring systems",
+              "impact_level": "Medium",
+              "detection_signatures": ["Protocol validation failures", "Format anomalies"],
+              "evasion_methods": ["Perfect protocol adherence", "Authentic message timing"]
+            },
+            {
+              "technique_id": "T1027",
+              "technique_name": "Obfuscated Files or Information",
+              "description": "Gradual coordinate changes to avoid detection",
+              "implementation": "Progressive GPS coordinate modification",
+              "success_criteria": "Position changes appear natural and undetectable",
+              "impact_level": "Medium", 
+              "detection_signatures": ["Sudden position jumps", "Impossible trajectories"],
+              "evasion_methods": ["Realistic movement simulation", "Physics-based transitions"]
+            },
+            {
+              "technique_id": "T1070.006",
+              "technique_name": "Timestomp",
+              "description": "Manipulate time fields to disrupt log analysis",
+              "implementation": "time_usec and time_boot_ms field manipulation",
+              "success_criteria": "Temporal analysis disrupted",
+              "impact_level": "Medium",
+              "detection_signatures": ["Time inconsistencies", "Timestamp anomalies"],
+              "evasion_methods": ["Synchronized time sources", "Gradual time drift"]
+            }
+          ]
+        }
+      },
+      
+      "attack_flow": [
+        "reconnaissance.T1046",
+        "reconnaissance.T1040",
+        "reconnaissance.T1590.005", 
+        "initial_access.T1200",
+        "initial_access.T1133",
+        "execution.T1059.006",
+        "execution.T1106",
+        "execution.T1053.003",
+        "command_and_control.T1090.001",
+        "command_and_control.T1572",
+        "impact.T1565.003",
+        "impact.T1565.002", 
+        "impact.T1489",
+        "defense_evasion.T1036.005",
+        "defense_evasion.T1027",
+        "defense_evasion.T1070.006"
+      ],
+      
+      "attack_vectors": [
+        {
+          "vector_name": "Protocol-Level Spoofing",
+          "description": "MAVLink message injection via network access",
+          "complexity": "Medium",
+          "effectiveness": "High",
+          "detection_difficulty": "Medium"
+        },
+        {
+          "vector_name": "RF Signal Spoofing", 
+          "description": "L1 band GPS signal generation using SDR",
+          "complexity": "High",
+          "effectiveness": "Very High",
+          "detection_difficulty": "High"
+        },
+        {
+          "vector_name": "Hybrid Spoofing",
+          "description": "Combined protocol and RF-level attack",
+          "complexity": "Very High", 
+          "effectiveness": "Critical",
+          "detection_difficulty": "Very High"
+        }
+      ],
+      
+      "success_metrics": {
+        "primary_goals": [
+          "GCS displays spoofed GPS coordinates",
+          "Drone navigation controlled by attacker",
+          "Authentic GPS signals replaced"
+        ],
+        "secondary_goals": [
+          "Attack remains undetected",
+          "System appears to function normally",
+          "No alert triggers activated"
+        ]
+      },
+      
+      "spoofing_techniques": [
+        {
+          "technique": "Generative Spoofing",
+          "description": "Generate completely fake satellite constellation signals",
+          "implementation": "SDR-based signal generation",
+          "effectiveness": "Very High",
+          "complexity": "High"
+        },
+        {
+          "technique": "Forwarding/Meaconing", 
+          "description": "Capture and rebroadcast modified authentic signals",
+          "implementation": "Signal capture with time delay and modification",
+          "effectiveness": "High",
+          "complexity": "Medium"
+        },
+        {
+          "technique": "Intermediate Spoofing",
+          "description": "Gradually take control by initially mimicking then modifying",
+          "implementation": "Progressive signal takeover",
+          "effectiveness": "Very High",
+          "complexity": "Very High"
+        }
+      ],
+      
+      "mitigation_strategies": [
+        {
+          "mitigation_id": "M1041",
+          "mitigation_name": "Encrypt Sensitive Information",
+          "description": "Implement MAVLink 2.0 signing and GPS authentication",
+          "effectiveness": "High"
+        },
+        {
+          "mitigation_id": "M1030", 
+          "mitigation_name": "Network Segmentation",
+          "description": "Isolate drone networks from external access",
+          "effectiveness": "High"
+        },
+        {
+          "mitigation_id": "M1047",
+          "mitigation_name": "Network Monitoring",
+          "description": "Monitor for GPS spoofing indicators and anomalies",
+          "effectiveness": "Medium"
+        },
+        {
+          "mitigation_id": "M1038",
+          "mitigation_name": "Execution Prevention", 
+          "description": "Prevent unauthorized script execution",
+          "effectiveness": "Medium"
+        }
+      ],
+      
+      "detection_methods": [
+        {
+          "method": "Multi-Sensor Fusion",
+          "description": "Cross-validate GPS with IMU, visual, and other sensors",
+          "accuracy": "High",
+          "implementation": "Real-time sensor correlation algorithms"
+        },
+        {
+          "method": "Signal Authentication",
+          "description": "Verify GPS signal authenticity and integrity",
+          "accuracy": "Very High", 
+          "implementation": "Cryptographic signal verification"
+        },
+        {
+          "method": "Behavioral Analysis",
+          "description": "Detect impossible flight patterns and position jumps",
+          "accuracy": "Medium",
+          "implementation": "Machine learning anomaly detection"
+        },
+        {
+          "method": "RF Spectrum Monitoring",
+          "description": "Monitor L1 band for spoofing signals",
+          "accuracy": "High",
+          "implementation": "SDR-based spectrum analysis"
+        }
+      ],
+      
+      "consequences": [
+        "Complete loss of accurate position information",
+        "Potential drone hijacking and theft", 
+        "Mission failure and operational disruption",
+        "Safety risks from navigation errors",
+        "Potential collision with obstacles or aircraft",
+        "Loss of return-to-home capability",
+        "Compromise of critical infrastructure surveillance"
+      ]
+    }
+  }

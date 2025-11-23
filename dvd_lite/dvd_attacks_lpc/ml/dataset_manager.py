@@ -3,7 +3,7 @@
 """
 Dataset Manager v4.3
 - CTI Feature CSV (features_batch_*.csv) -> train/test 분할
-- 클래스 수가 적어서 stratify가 실패하더라도, fallback 분할로 파이프라인이 죽지 않도록 개선
+- 경로 인자(--processed-dir) 추가로 DataBuilder와의 경로 불일치 해결
 """
 
 import argparse
@@ -26,11 +26,13 @@ log = logging.getLogger(__name__)
 
 
 def find_latest_features_csv(processed_dir: str) -> Optional[str]:
+    """지정된 경로에서 가장 최신 CSV 파일을 찾습니다."""
     pattern = os.path.join(processed_dir, "features_batch_*.csv")
     candidates = glob.glob(pattern)
     if not candidates:
         return None
-    candidates.sort()
+    # 수정 시간 기준 정렬하여 가장 최근 파일 반환
+    candidates.sort(key=os.path.getmtime)
     return candidates[-1]
 
 
@@ -63,8 +65,7 @@ def filter_rare_classes(
     min_samples_per_class: int
 ) -> Tuple[pd.DataFrame, pd.Series]:
     """
-    min_samples_per_class 미만인 레이블은 rare로 보고 드롭.
-    (지금 단계에서는 '버리거나 나중에 별도 처리'하는 쪽이 현실적)
+    min_samples_per_class 미만인 레이블은 rare로 보고 제거합니다.
     """
     counts = df[label_col].value_counts()
     rare_labels = counts[counts < min_samples_per_class].index.tolist()
@@ -92,7 +93,7 @@ def split_dataset(
 ):
     """
     우선 stratify=y로 시도해보고,
-    실패(ValueError)하면 stratify=None으로 fallback.
+    실패(ValueError - 클래스 샘플 부족 등)하면 stratify=None으로 fallback.
     """
 
     # 숫자형 특징만 선별 (label 제외)
@@ -141,8 +142,13 @@ def save_splits(
     os.makedirs(output_dir, exist_ok=True)
     ts = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    train_path = os.path.join(output_dir, f"train_dataset_{ts}.csv")
-    test_path = os.path.join(output_dir, f"test_dataset_{ts}.csv")
+    # 고정된 파일명 (Trainer가 쉽게 찾기 위함)
+    train_path = os.path.join(output_dir, "train_dataset.csv")
+    test_path = os.path.join(output_dir, "test_dataset.csv")
+    
+    # 백업용 파일명
+    train_backup = os.path.join(output_dir, f"train_dataset_{ts}.csv")
+    test_backup = os.path.join(output_dir, f"test_dataset_{ts}.csv")
 
     df_train = pd.DataFrame(X_train, columns=feature_names)
     df_train["label"] = y_train
@@ -150,8 +156,13 @@ def save_splits(
     df_test = pd.DataFrame(X_test, columns=feature_names)
     df_test["label"] = y_test
 
+    # 메인 저장
     df_train.to_csv(train_path, index=False)
     df_test.to_csv(test_path, index=False)
+    
+    # 백업 저장
+    df_train.to_csv(train_backup, index=False)
+    df_test.to_csv(test_backup, index=False)
 
     log.info("✅ train 데이터셋 저장: %s (rows=%d)", train_path, len(df_train))
     log.info("✅ test  데이터셋 저장: %s (rows=%d)", test_path, len(df_test))
@@ -165,19 +176,19 @@ def main():
         "--input",
         type=str,
         default=None,
-        help="입력 CSV (features_batch_*.csv). 미지정 시 processed_data에서 최신 파일 자동 검색"
+        help="입력 CSV. 미지정 시 processed-dir에서 최신 파일 자동 검색"
     )
     parser.add_argument(
         "--processed-dir",
         type=str,
         default="./processed_data",
-        help="features_batch_*.csv가 저장된 디렉터리 (기본: ./processed_data)"
+        help="features_batch_*.csv가 저장된 디렉터리"
     )
     parser.add_argument(
         "--output-dir",
         type=str,
-        default="./datasets",
-        help="train/test CSV를 저장할 디렉터리 (기본: ./datasets)"
+        default="./output",
+        help="train/test CSV를 저장할 디렉터리"
     )
     parser.add_argument(
         "--label-col",
@@ -195,7 +206,7 @@ def main():
         "--min-samples-per-class",
         type=int,
         default=2,
-        help="이 값 미만인 클래스는 rare로 보고 분할에서 제외 (기본: 2)"
+        help="이 값 미만인 클래스는 rare로 보고 분할에서 제외"
     )
     parser.add_argument(
         "--random-state",
@@ -207,14 +218,18 @@ def main():
     args = parser.parse_args()
 
     log.info("🚀 [Dataset Manager v4.3] 데이터셋 분할 시작.")
+    
+    # 절대 경로 변환
+    proc_dir = os.path.abspath(args.processed_dir)
+    out_dir = os.path.abspath(args.output_dir)
 
     # 1) 입력 파일 결정
     if args.input is None:
-        inp = find_latest_features_csv(args.processed_dir)
+        inp = find_latest_features_csv(proc_dir)
         if inp is None:
-            log.critical("❌ processed_dir(%s)에 features_batch_*.csv가 없습니다.", args.processed_dir)
+            log.critical("❌ processed_dir(%s)에 features_batch_*.csv가 없습니다.", proc_dir)
             raise SystemExit(1)
-        log.info("[*] --input 미지정. '%s'에서 최신 파일 검색 -> %s", args.processed_dir, inp)
+        log.info("[*] --input 미지정. '%s'에서 최신 파일 검색 -> %s", proc_dir, inp)
         input_path = inp
     else:
         input_path = args.input
@@ -223,7 +238,7 @@ def main():
     df_raw = load_dataset(input_path)
     counts = describe_labels(df_raw, label_col=args.label_col)
 
-    # 3) 희소 클래스 필터링 (선택적 - 기본값 min=2)
+    # 3) 희소 클래스 필터링
     if args.min_samples_per_class > 1:
         df, _ = filter_rare_classes(df_raw, args.label_col, args.min_samples_per_class)
         if len(df) < len(df_raw):
@@ -253,7 +268,7 @@ def main():
     save_splits(
         X_train, X_test, y_train, y_test,
         feature_names,
-        args.output_dir
+        out_dir
     )
 
     log.info("✅ [Dataset Manager v4.3] 완료.")

