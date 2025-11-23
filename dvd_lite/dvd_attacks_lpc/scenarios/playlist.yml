@@ -7,6 +7,43 @@
 # --- CTI 수집용 시나리오 (MTD Off, Seeker Off) ---
 # 공격당 duration_sec: 30초 균일 할당
 # ⭐️ [Reconnaissance], [Tampering], [DoS], [Injection], [Exfiltration] 26개 공격 포함
+s_cti_data_collection_core6:
+  description: "CTI 수집 (핵심 6 Attack, 각 120초) - wifi/gps/waypoint/log/exfil/satellite"
+  steps:
+    # 0. 부팅 + 이륙
+    - { action: "http", endpoint: "stage/boot" }
+    - { action: "sleep", sec: 15 }
+    - { action: "http", endpoint: "stage/arm-and-takeoff", params: {alt: 10} }
+    - { action: "sleep", sec: 30 }
+
+    # 1) wifi-deauth-attack (DoS)
+    - { action: "attack", name: "wifi-deauth-attack", duration_sec: 120, params: {use_seeker: false} }
+    - { action: "sleep", sec: 15 }
+
+    # 2) gps-spoofing (navigation tampering)
+    - { action: "attack", name: "gps-spoofing", duration_sec: 120, params: {use_seeker: false} }
+    - { action: "sleep", sec: 15 }
+
+    # 3) waypoint-injection (command injection)
+    - { action: "attack", name: "waypoint-injection", duration_sec: 120, params: {use_seeker: false} }
+    - { action: "sleep", sec: 15 }
+
+    # 4) wifi-client-data-leak (data exfil)
+    - { action: "attack", name: "wifi-client-data-leak", duration_sec: 120, params: {use_seeker: false} }
+    - { action: "sleep", sec: 15 }
+
+    # 5) flight-log-extraction (log exfil)
+    - { action: "attack", name: "flight-log-extraction", duration_sec: 120, params: {use_seeker: false} }
+    - { action: "sleep", sec: 15 }
+
+    # 6) satellite-spoofing (GNSS / advanced)
+    - { action: "attack", name: "satellite-spoofing", duration_sec: 120, params: {use_seeker: false} }
+    - { action: "sleep", sec: 15 }
+
+    # 착륙 + post-analysis
+    - { action: "http", endpoint: "stage/return-to-land" }
+    - { action: "sleep", sec: 15 }
+    - { action: "http", endpoint: "stage/post_analysis" }
 
 s1_cti_recon_tampering:
   description: "CTI 수집 (정찰 & 기본 스푸핑) - 7 Attacks"

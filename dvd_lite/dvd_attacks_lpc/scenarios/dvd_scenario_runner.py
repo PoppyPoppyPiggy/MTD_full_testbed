@@ -539,7 +539,7 @@ def main():
         bus_write("scenario_runner", "scenario_finished", {"name": args.scenario, "duration_sec": duration})
 
         # ⭐️ CTI 데이터 수집용 시나리오 끝나면 ML 파이프라인 자동 실행
-        if args.scenario in ("s_cti_data_collection_full", "s_cti_data_collection_focus8"):
+        if args.scenario in ("s_cti_data_collection_full", "s_cti_data_collection_focus8","s_cti_data_collection_core6"):
             run_cti_ml_pipeline()
 
 
