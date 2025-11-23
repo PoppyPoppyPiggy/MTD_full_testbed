@@ -1,16 +1,57 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# File: dvd_lite/dvd_attacks_lpc/mtd/rl_driven_deception_manager_v05.py
 """
-RL 기반 MTD 의사결정 매니저 (실전 배포용 v05 - Passive CTI)
+RL-driven MTD Decision Manager (Deploy, PPO_v07_SeekerL*)
 
-[2025-11-19 Upgrade 요약]
-- 학습 시 사용한 mtd_scoring.MtdScorer 지표들을 그대로 가져와 테스트베드에서 평가용으로 사용
-- wandb에 eval_metric/*, eval_action/* 형태로 모든 지표를 로깅 (PNG 없이도 대시보드에서 비교 가능)
-- WANDB_PROJECT / WANDB_ENTITY / WANDB_GROUP / WANDB_RUN_NAME / SEEKER_LEVEL 환경변수를 읽어
-  실제 학습 run과 동일한 프로젝트/엔티티 아래에서 비교 가능
-- 블랙리스트 정책은 IptablesController.update_blacklist()를 통해
-  "일정 시간 동안 공격 DROP" 형태로 구현 (테스트베드에서 출발 IP를 바꾸기 어려운 상황 가정)
+- 학습된 PPO_v07_SeekerL0~L3 정책을 테스트베드에서 배포/평가하기 위한 매니저.
+- 입력: CTI + MTD/Seeker 지표 (mtd_scoring, seeker_scoring, cti_status_reader 등에서 수집)
+- 출력: iptables DNAT / 셔플 스크립트 / 블랙리스트 정책 실행
+- ml/cti_agent_demo.py 에서 이 매니저를 불러 周期적으로 step() 호출하는 구조.
+
+[중요 포인트]
+- policy 로딩:
+  - model_dir/
+      ├─ final_policy.pth
+      └─ norm_metadata.json
+- norm_metadata.json 스키마:
+  {
+    "FEATURE_KEYS": [... 16개 ...],
+    "ACTION_PARAM_KEYS": [... 6개 ...],
+    "FEATURE_NORM_METADATA": {
+        "means": [... 16개 ...],
+        "stds":  [... 16개 ...]
+    }
+  }
+
+- FEATURE_KEYS 예시:
+    [
+        "cti_alert_rate",
+        "blacklist_size_ratio",
+        "uptime_ratio",
+        "breach_success_rate",
+        "decoy_lure_rate",
+        "current_exposure_mean",
+        "r_known_ratio",
+        "r_exploited_ratio",
+        "seeker_scan_effort",
+        "seeker_attack_bias",
+        "last_action_dnat_target_focus",
+        "last_action_dnat_decoy_focus",
+        "last_action_shuffle_intensity",
+        "last_action_blacklist_aggression",
+        "last_action_blacklist_duration",
+        "last_action_decoy_ratio"
+    ]
+
+- ACTION_PARAM_KEYS 예시:
+    [
+        "dnat_target_focus",
+        "dnat_decoy_focus",
+        "shuffle_intensity",
+        "blacklist_aggression",
+        "blacklist_duration",
+        "decoy_ratio"
+    ]
 """
 
 import os
@@ -18,152 +59,182 @@ import json
 import logging
 import time
 import random
-from typing import Dict, Any, List, Optional
+from typing import Dict, Any, List
 
+import numpy as np
 import torch
 import torch.nn as nn
-import numpy as np
 
 try:
-    import wandb  # type: ignore
-except ImportError:  # pragma: no cover - 배포 환경에서만 사용
-    wandb = None  # type: ignore
+    import wandb
+except ImportError:
+    wandb = None
 
 
-# --- [1] RL 정책 네트워크 (rl_model_v05.py와 동일 구조 가정) --------------------
+# ---------------------------------------------------------------------
+# 1. PPO_v07 정책 네트워크 정의 (학습 시 사용한 네트워크와 동일한 구조)
+# ---------------------------------------------------------------------
 class MTDPolicyNet(nn.Module):
+    """
+    PPO_v07 학습 시 사용한 Actor-Critic 네트워크와 key 이름을 맞춘 버전.
+
+    state_dict 키 예:
+      - "feature_extractor.0.weight", "feature_extractor.0.bias", ...
+      - "actor_mean.weight", "actor_mean.bias"
+      - "log_std"
+      - "critic.weight", "critic.bias"
+    """
     def __init__(self, obs_dim: int, act_dim: int):
         super().__init__()
-        self.body = nn.Sequential(
+        self.feature_extractor = nn.Sequential(
             nn.Linear(obs_dim, 128),
             nn.Tanh(),
             nn.Linear(128, 128),
             nn.Tanh(),
         )
-        self.actor_mean = nn.Sequential(
-            nn.Linear(128, act_dim),
-            nn.Tanh(),
-        )
-        self.actor_log_std = nn.Parameter(torch.zeros(1, act_dim))
+        self.actor_mean = nn.Linear(128, act_dim)
+        # PPO_v07 학습 모델에서 사용하는 이름: "log_std"
+        self.log_std = nn.Parameter(torch.zeros(act_dim))
+        # critic은 여기서 사용하지 않지만, state_dict 맞추기 위해 정의
+        self.critic = nn.Linear(128, 1)
 
     def forward(self, x: torch.Tensor):
-        body_out = self.body(x)
-        mean = self.actor_mean(body_out)
-        log_std = self.actor_log_std.expand_as(mean)
-        std = torch.exp(log_std)
-        return torch.distributions.normal.Normal(mean, std)
+        """
+        배포 단계에서는 정책(행동)만 필요하지만,
+        state_dict 로딩을 위해 critic까지 함께 정의.
+        """
+        feat = self.feature_extractor(x)
+        mean = self.actor_mean(feat)
+        std = torch.exp(self.log_std)
+        dist = torch.distributions.Normal(mean, std)
+        value = self.critic(feat)
+        return dist, value
 
     def act_greedy(self, obs_vec: np.ndarray) -> np.ndarray:
-        """배포용: 평균(mean)만 사용하는 deterministic policy."""
+        """
+        관측 벡터(obs_vec)를 받아 deterministic mean action 반환.
+        - obs_vec: (obs_dim,) numpy array
+        - return : (act_dim,) numpy array, [-∞, +∞] continuous 값 (PPO raw mean)
+        """
         self.eval()
         with torch.no_grad():
-            x = torch.from_numpy(obs_vec).float().unsqueeze(0)
-            body_out = self.body(x)
-            mean = self.actor_mean(body_out)
+            x = torch.from_numpy(obs_vec).float().unsqueeze(0)  # (1, obs_dim)
+            feat = self.feature_extractor(x)
+            mean = self.actor_mean(feat)  # (1, act_dim)
             return mean.squeeze(0).cpu().numpy()
 
 
-# --- [2] MTD Scorer / Controller / CTI 인터페이스 임포트 -------------------------
+# ---------------------------------------------------------------------
+# 2. MTD Scorer / CTI Status / iptables Controller 로딩 (없으면 Dummy)
+# ---------------------------------------------------------------------
 try:
-    # 학습과 동일한 지표/상태 구성을 위해 필수
-    from mtd.mtd_scoring import MtdScorer  # type: ignore
-    from mtd.controller.iptables_mtd_controller import IptablesController  # type: ignore
-    from mtd.cti_status_reader import CtiAgentStatus  # 사용자가 구현해야 하는 CTI Reader  # type: ignore
+    from mtd.mtd_scoring import MtdScorer  # 너가 만든 학습/배포 공통 지표 모듈
+except Exception as e:
+    print(f"[RL Manager] ImportError 발생(MtdScorer): {e}")
+    print("  -> Dummy MtdScorer 사용 (지표는 전부 상수로 고정됨).")
 
-    from mtd.rl_config_v05 import (  # type: ignore
-        FEATURE_KEYS,
-        OBS_DIM,
-        ACTION_PARAM_KEYS,
-        ACTION_DIM,
-        REAL_TARGETS,
-        DECOY_TARGETS,
-        ALTERNATE_NODE_TARGETS,
-        METRIC_FEATURE_KEYS,
-    )
-except ImportError as e:  # pragma: no cover - 개발/테스트용 더미
-    print(f"[RL Manager v05] ImportError 발생: {e}")
-    print("  -> MtdScorer / IptablesController / CtiAgentStatus / rl_config_v05 더미 클래스로 대체합니다.")
-
-    class MtdScorer:  # type: ignore
-        """테스트용 더미 Scorer. 실제 테스트베드에선 mtd.mtd_scoring.MtdScorer 사용."""
-
+    class MtdScorer:
+        """
+        아주 단순한 데모용 Dummy Scorer.
+        실제 테스트베드에서는 log 기반으로 지표를 계산해야 함.
+        """
         def collect_metrics(self) -> Dict[str, float]:
             return {
-                "S_MTD": 0.5,
-                "R_succ": 0.2,
-                "R_A_norm": 0.3,
-                "C_M": 0.1,
-                "breach_success_rate": 0.2,
-                "decoy_lure_rate": 0.4,
-                "alternate_node_health": 0.9,
-                "system_cost": 0.1,
-                "ttbr": 120.0,
-                "service_uptime_ratio": 0.99,
-                "attack_orchestrator_running": 1.0,
+                "cti_alert_rate": 0.1,
+                "blacklist_size_ratio": 0.0,
+                "uptime_ratio": 1.0,
+                "breach_success_rate": 0.1,
+                "decoy_lure_rate": 0.1,
+                "current_exposure_mean": 10.0,
+                "r_known_ratio": 0.05,
+                "r_exploited_ratio": 0.02,
+                "seeker_scan_effort": 1.0,
+                "seeker_attack_bias": 0.5,
             }
 
-    class IptablesController:  # type: ignore
-        def apply_dnat_redirect(self, ip: str, port: int):
-            print(f"[DUMMY IPTABLES] DNAT -> {ip}:{port}")
+try:
+    from mtd.controller.iptables_mtd_controller import IptablesController
+except Exception as e:
+    print(f"[RL Manager] ImportError 발생(IptablesController): {e}")
+    print("  -> Dummy IptablesController 사용 (iptables 실제 변경 없음).")
+
+    class IptablesController:
+        def __init__(self, *args, **kwargs):
+            self.logger = kwargs.get("logger", logging.getLogger("DummyIptables"))
+
+        def apply_dnat_redirect(self, ip: str, port: int, attacker_ip: str = "10.13.0.200"):
+            self.logger.info(f"[DummyIptables] DNAT: {attacker_ip} -> {ip}:{port}")
 
         def run_script(self, script_name: str):
-            print(f"[DUMMY IPTABLES] run_script: {script_name}")
+            self.logger.info(f"[DummyIptables] RUN SCRIPT: {script_name}")
 
-        def update_blacklist(self, alerts: Dict[str, float], threshold: float, duration_sec: int):
-            print(f"[DUMMY IPTABLES] update_blacklist: threshold={threshold:.2f}, duration={duration_sec}s, alerts={alerts}")
+        def update_blacklist(self, attacker_alerts: Dict[str, float], threshold: float, duration_sec: int):
+            self.logger.info(
+                f"[DummyIptables] UPDATE BL: threshold={threshold:.2f}, duration={duration_sec}, alerts={attacker_alerts}"
+            )
 
-    class CtiAgentStatus:  # type: ignore
+try:
+    from mtd.cti_status_reader import CtiAgentStatus
+except Exception as e:
+    print(f"[RL Manager] ImportError 발생(cti_status_reader): {e}")
+    print("  -> Dummy CtiAgentStatus 사용 (CTI 지표/경보 값 고정).")
+
+    class CtiAgentStatus:
         def get_cti_metrics(self) -> Dict[str, float]:
-            # 예시: CTI agent demo 버전에서 쓸 수 있는 최소 메트릭
+            # 실제 구현에서는 ml/cti_agent.py 또는 bus.log 기반으로 계산
             return {
                 "cti_alert_rate": 0.1,
-                "blacklist_size": 1.0,
-                "seeker_ip_change_rate": 0.0,
+                "blacklist_size_ratio": 0.0,
+                "uptime_ratio": 1.0,
+                "breach_success_rate": 0.1,
+                "decoy_lure_rate": 0.1,
+                "current_exposure_mean": 10.0,
+                "r_known_ratio": 0.05,
+                "r_exploited_ratio": 0.02,
+                "seeker_scan_effort": 1.0,
+                "seeker_attack_bias": 0.5,
             }
 
         def get_current_alerts(self) -> Dict[str, float]:
-            # {"공격자 IP": 공격 위험도}
+            # 예시: 현재 CTI가 탐지한 공격자 IP별 threat score
             return {
-                "10.13.0.200": 0.85,
+                "10.13.0.200": 0.9,
+                "10.13.0.201": 0.3,
             }
 
-    # rl_config_v05 더미 값
-    FEATURE_KEYS = [
-        "breach_success_rate",
-        "decoy_lure_rate",
-        "alternate_node_health",
-        "system_cost",
-        "ttbr",
-        "service_uptime_ratio",
-        "attack_orchestrator_running",
-        "cti_alert_rate",
-        "blacklist_size",
-        "seeker_ip_change_rate",
+# RL-config에서 엔드포인트 목록만 가져다 씀 (없으면 fallback)
+try:
+    from mtd.rl_config_v05 import REAL_TARGETS, DECOY_TARGETS, ALTERNATE_NODE_TARGETS
+except Exception as e:
+    print(f"[RL Manager] ImportError 발생(rl_config_v05): {e}")
+    print("  -> REAL/DECOY/ALT 타깃 목록을 기본값으로 설정합니다.")
+    REAL_TARGETS = [
+        {"name": "Real_1", "ip": "10.13.0.2", "port": 14550},
+        {"name": "Real_2", "ip": "10.13.0.3", "port": 14550},
+        {"name": "Real_3", "ip": "10.13.0.4", "port": 14550},
     ]
-    METRIC_FEATURE_KEYS = FEATURE_KEYS[:]  # 실제 코드와 동일한 순서여야 함
-    OBS_DIM = len(METRIC_FEATURE_KEYS) + 6  # (메트릭 10개 + 직전 action 6개) 예시
-    ACTION_PARAM_KEYS = [
-        "p_DNAT_real",
-        "p_DNAT_decoy",
-        "p_DNAT_alternate",
-        "shuffle_intensity",
-        "blacklist_threshold",
-        "blacklist_duration",
+    DECOY_TARGETS = [
+        {"name": "Decoy_1", "ip": "10.13.0.10", "port": 14550},
+        {"name": "Decoy_2", "ip": "10.13.0.11", "port": 14550},
     ]
-    ACTION_DIM = len(ACTION_PARAM_KEYS)
-    REAL_TARGETS = [{"ip": "10.13.0.2", "port": 14550}]
-    DECOY_TARGETS = [{"ip": "10.13.0.10", "port": 14550}]
-    ALTERNATE_NODE_TARGETS = [{"ip": "10.13.0.20", "port": 14550}]
+    ALTERNATE_NODE_TARGETS = [
+        {"name": "Alt_1", "ip": "10.13.0.20", "port": 14550},
+        {"name": "Alt_2", "ip": "10.13.0.21", "port": 14550},
+    ]
 
 
-# --- [3] RL 의사결정 매니저 ---------------------------------------------------
+# ---------------------------------------------------------------------
+# 3. RLDrivenDeceptionManager (PPO_v07_SeekerL*)
+# ---------------------------------------------------------------------
 class RLDrivenDeceptionManager:
     """
-    MTD Scorer, CTI Agent, Iptables Controller, RL Policy를 연결하는 '전략가'(Commander) 역할.
+    PPO_v07_SeekerL* 정책을 이용해:
+      - MtdScorer → (MTD/Seeker 지표)
+      - CtiAgentStatus → (CTI 지표 + 현재 알림 IP)
+      - IptablesController → (DNAT / 셔플 / 블랙리스트 실제 적용)
 
-    - 학습 시 사용한 v05 정책(mtd_policy_ver_05.pth)을 로드하여
-      테스트베드에서 주기적으로 MTD 행동(DNAT, Shuffle, Blacklist)을 수행.
-    - 각 step 마다 mtd_scoring.MtdScorer 지표 + CTI 지표를 수집해서 wandb에 eval_metric/* 으로 로깅.
+    를 묶어 주는 '전략가(Commander)' 역할 매니저.
+    ml/cti_agent_demo.py 에서 주기적으로 step() 호출.
     """
 
     def __init__(
@@ -171,358 +242,293 @@ class RLDrivenDeceptionManager:
         mtd_scorer: MtdScorer,
         cti_status: CtiAgentStatus,
         iptables_controller: IptablesController,
-        model_dir: Optional[str] = None,
-        logger: Optional[logging.Logger] = None,
+        model_dir: str,
+        logger: logging.Logger = None,
         enable_wandb: bool = False,
-        wandb_project: Optional[str] = None,
-        wandb_group: Optional[str] = None,
-        wandb_entity: Optional[str] = None,
-        seeker_level: Optional[str] = None,
+        wandb_project: str = "mtd_rl_v07_deploy_demo",
+        wandb_group: str = "PPO_v07_SeekerL",
     ):
         self.mtd_scorer = mtd_scorer
         self.cti_status = cti_status
         self.iptables_controller = iptables_controller
 
-        self.logger = logger or logging.getLogger(__name__)
-        self.enable_wandb = bool(enable_wandb and wandb is not None)
-        self.seeker_level = seeker_level or os.getenv("SEEKER_LEVEL", "unknown")
+        self.logger = logger or logging.getLogger("RLDrivenDeceptionManager")
+        self.enable_wandb = enable_wandb and (wandb is not None)
 
-        self._log("RLDrivenDeceptionManager (v05 - Passive CTI) 초기화 시작...")
-
-        # 1. 모델 디렉토리 설정
-        if model_dir is None:
-            model_dir = os.environ.get("MTD_RL_MODEL_DIR", "/opt/mtd/rl_models/ver_05")
         self.model_dir = model_dir
-        self._log(f"  - RL 모델 디렉토리: {model_dir}")
+        self.policy = None
 
-        # 2. 메타파일(.json) 로드
-        meta_path = os.path.join(model_dir, "mtd_policy_ver_05_meta.json")
+        # PPO_v07: norm_metadata.json + final_policy.pth
+        self.logger.info("RLDrivenDeceptionManager (PPO_v07_SeekerL*) 초기화 시작...")
+        self.logger.info(f"  - RL 모델 디렉토리: {model_dir}")
+
+        # 3.1 norm_metadata.json 로드
+        meta_path = os.path.join(model_dir, "norm_metadata.json")
         if not os.path.exists(meta_path):
-            self._log(f"  [치명적 오류] RL 메타 파일 없음: {meta_path}", level="error")
-            raise FileNotFoundError(f"필수 메타 파일이 없습니다: {meta_path}")
+            self.logger.error(f"  [치명적 오류] norm_metadata.json 없음: {meta_path}")
+            raise FileNotFoundError(f"norm_metadata.json not found: {meta_path}")
+
         with open(meta_path, "r", encoding="utf-8") as f:
             meta = json.load(f)
-        self.meta = meta
 
-        # 3. 메타 정보 파싱 (rl_config_v05.py와 동일해야 함)
-        self.version: str = meta.get("version", "unknown_v05")
-        self.feature_keys: List[str] = meta["feature_keys"]
-        feature_norm = meta.get("feature_norm", {"mean": [0.0] * meta["obs_dim"], "std": [1.0] * meta["obs_dim"]})
-        self.feature_mean: np.ndarray = np.array(feature_norm["mean"], dtype=np.float32)
-        self.feature_std: np.ndarray = np.array(feature_norm["std"], dtype=np.float32)
-        self.action_param_keys: List[str] = meta["action_param_keys"]
-        obs_dim: int = meta["obs_dim"]
-        act_dim: int = meta["act_dim"]
+        feature_keys: List[str] = meta["FEATURE_KEYS"]
+        action_param_keys: List[str] = meta["ACTION_PARAM_KEYS"]
+        norm_meta = meta["FEATURE_NORM_METADATA"]
 
-        if obs_dim != OBS_DIM or act_dim != ACTION_DIM:
-            self._log(
-                f"[경고] 메타파일 차원(obs={obs_dim}, act={act_dim})과 rl_config_v05(OBS_DIM={OBS_DIM}, ACTION_DIM={ACTION_DIM}) 불일치!",
-                level="warning",
-            )
+        self.feature_keys: List[str] = feature_keys
+        self.action_param_keys: List[str] = action_param_keys
+        self.feature_mean: np.ndarray = np.array(norm_meta["means"], dtype=np.float32)
+        self.feature_std: np.ndarray = np.array(norm_meta["stds"], dtype=np.float32)
 
-        self._log(f"  - RL 정책 버전: {self.version} (Continuous, Passive CTI)")
-        self._log(f"  - 상태 벡터({obs_dim}D): {self.feature_keys}")
-        self._log(f"  - 행동 파라미터({act_dim}D): {self.action_param_keys}")
+        self.obs_dim: int = len(self.feature_keys)
+        self.act_dim: int = len(self.action_param_keys)
 
-        # 직전 행동 파라미터 (obs에 포함됨)
-        self.current_action_params = np.zeros(act_dim, dtype=np.float32)
+        self.logger.info(f"  - RL 정책 버전: {os.path.basename(model_dir)}")
+        self.logger.info(f"  - 상태 벡터({self.obs_dim}D): {self.feature_keys}")
+        self.logger.info(f"  - 행동 파라미터({self.act_dim}D): {self.action_param_keys}")
 
-        # 4. 정책 네트워크(.pth) 로드
-        ckpt_path = os.path.join(model_dir, meta["model_file"])
+        # FEATURE_KEYS 중 last_action_* 인 것과 metric에 해당하는 것 나누기
+        self.last_action_prefix = "last_action_"
+        self.metric_feature_keys: List[str] = [
+            k for k in self.feature_keys if not k.startswith(self.last_action_prefix)
+        ]
+        self.last_action_feature_keys: List[str] = [
+            k for k in self.feature_keys if k.startswith(self.last_action_prefix)
+        ]
+
+        # 이전 step에서 사용된 행동 파라미터 (초기값: 0)
+        self.current_action_params: np.ndarray = np.zeros(self.act_dim, dtype=np.float32)
+
+        # 3.2 정책 네트워크 로드
+        ckpt_path = os.path.join(model_dir, "final_policy.pth")
         if not os.path.exists(ckpt_path):
-            self._log(f"  [치명적 오류] RL 모델 파일 없음: {ckpt_path}", level="error")
-            raise FileNotFoundError(f"필수 모델 파일이 없습니다: {ckpt_path}")
+            self.logger.error(f"  [치명적 오류] RL 모델 파일 없음: {ckpt_path}")
+            raise FileNotFoundError(f"final_policy.pth not found: {ckpt_path}")
 
-        self.policy = MTDPolicyNet(obs_dim, act_dim)
+        self.policy = MTDPolicyNet(self.obs_dim, self.act_dim)
         try:
             state_dict = torch.load(ckpt_path, map_location="cpu")
-            self.policy.load_state_dict(state_dict)
+            # strict=True로 맞춰도 되지만, 혹시 모를 key mismatch를 방지하려면 strict=False도 가능
+            self.policy.load_state_dict(state_dict, strict=True)
             self.policy.eval()
-            self._log(f"  - RL 모델 가중치 로드 완료: {ckpt_path}")
-        except Exception as e:  # pragma: no cover - IO 문제
+            self.logger.info(f"  - RL 모델 가중치 로드 완료: {ckpt_path}")
+        except Exception as e:
+            self.logger.error(f"  [치명적 오류] RL 모델 로드 실패: {e}")
             self.policy = None
-            self._log(f"  [치명적 오류] RL 모델 로드 실패: {e}", level="error")
 
-        # 5. wandb (Eval 모드) 초기화
+        # 3.3 W&B 초기화 (Eval 모드)
         if self.enable_wandb:
             try:
-                project = wandb_project or os.getenv("WANDB_PROJECT", "mtd_rl_v06_comparison")
-                entity = wandb_entity or os.getenv("WANDB_ENTITY", None)
-                group = wandb_group or os.getenv("WANDB_GROUP", "RL_Deploy_v05")
-                run_name = os.getenv(
-                    "WANDB_RUN_NAME",
-                    f"deploy_MTD_v05_L{self.seeker_level}_{int(time.time())}",
-                )
-
-                wb_config = dict(meta)
-                wb_config.update(
-                    {
-                        "deploy_mode": "testbed",
-                        "seeker_level": self.seeker_level,
-                        "model_dir": model_dir,
-                    }
-                )
-
                 wandb.init(
-                    project=project,
-                    entity=entity,
-                    group=group,
-                    name=run_name,
-                    config=wb_config,
+                    project=wandb_project,
+                    group=wandb_group,
+                    name=f"deploy_{os.path.basename(model_dir)}_{int(time.time())}",
+                    config={"model_dir": model_dir, "feature_keys": self.feature_keys, "action_param_keys": self.action_param_keys},
+                    reinit=True,
                 )
-                self._log(
-                    f"  - W&B 초기화 완료: project={project}, entity={entity}, group={group}, run={run_name}"
-                )
-            except Exception as e:  # pragma: no cover - 네트워크 문제 등
-                self._log(f"  [경고] W&B 초기화 실패: {e}", level="warning")
+                self.logger.info("  - W&B (Eval 모드) 초기화 완료.")
+            except Exception as e:
+                self.logger.warning(f"  [경고] W&B 초기화 실패: {e}")
                 self.enable_wandb = False
 
-        self._log("RLDrivenDeceptionManager (v05) 초기화 완료.")
+        self.logger.info("RLDrivenDeceptionManager 초기화 완료.")
 
-    # ------------------------------------------------------------------
-    # 메인 스텝: 테스트베드에서 일정 주기(예: 30~60초)마다 호출
-    # ------------------------------------------------------------------
+    # -----------------------------------------------------------------
+    # 3.1 메인 Step
+    # -----------------------------------------------------------------
     def step(self) -> Dict[str, Any]:
         """
-        MTD 의사결정 1 사이클 실행.
-
-        1) mtd_scoring.MtdScorer로부터 공격/방어 지표 수집
-        2) CtiAgentStatus로부터 CTI 지표 수집
-        3) (지표 + 직전 행동) -> 정규화된 상태 벡터 생성
-        4) RL Policy로부터 6D 행동 파라미터 결정
-        5) IptablesController를 통해 DNAT / Shuffle / Blacklist 실행
-        6) 모든 지표와 행동 파라미터를 wandb에 eval_metric/*, eval_action/* 으로 로깅
+        1회 MTD 의사결정 사이클 수행.
+        - mtd_scorer / cti_status에서 메트릭 수집
+        - 상태 벡터 구성 및 정규화
+        - 정책 네트워크로부터 행동 mean 추론
+        - [0,1] 범위 파라미터로 매핑하여 컨트롤러에 실행
+        - 결과/지표를 dict로 반환 (필요 시 상위에서 CSV 등으로 저장)
         """
-        self._log("-" * 40)
-
         if self.policy is None:
-            self._log("[오류] 정책망이 로드되지 않아 MTD를 실행할 수 없습니다.", level="error")
+            self.logger.error("[오류] 정책망이 로드되지 않아 MTD를 실행할 수 없습니다.")
             return {}
 
-        # 1. (Scorer/CTI) 현재 전장 상황 메트릭 수집
+        self.logger.info("-" * 60)
+
+        # 1) 메트릭 수집
         metrics_scorer = self.mtd_scorer.collect_metrics()
         metrics_cti = self.cti_status.get_cti_metrics()
         metrics: Dict[str, float] = {**metrics_scorer, **metrics_cti}
 
-        # 2. (Manager) 메트릭 + 직전 행동 -> 정규화 상태 벡터
-        state_vec_normed = self._build_state_from_metrics(metrics)
-
-        # 디버깅용 핵심 지표 로그 (예: S_MTD, R_succ, breach_success_rate 등)
-        s_mtd = metrics.get("S_MTD", 0.0)
-        r_succ = metrics.get("R_succ", metrics.get("breach_success_rate", 0.0))
-        self._log(
-            f"[RL-MTD] 수집 메트릭: S_MTD={s_mtd:.3f}, R_succ={r_succ:.3f}, "
-            f"cti_alert_rate={metrics.get('cti_alert_rate', 0.0):.3f}"
+        # 2) 상태 벡터 구성 + 정규화
+        state_vec = self._build_state_from_metrics(metrics)
+        self.logger.info(
+            f"[RL-MTD] 메트릭 일부: breach_success_rate={metrics.get('breach_success_rate', 0):.3f}, "
+            f"cti_alert_rate={metrics.get('cti_alert_rate', 0):.3f}"
         )
 
-        # 3. (Policy) 상태 -> 행동 평균 결정
-        action_vector_mean = self.policy.act_greedy(state_vec_normed)
-
-        # 4. (Manager) [-1,1] -> [0,1] 스케일링
-        action_params = (action_vector_mean + 1.0) / 2.0
+        # 3) 정책망 추론 (mean action)
+        raw_action = self.policy.act_greedy(state_vec)  # [-∞, +∞]
+        # [-1,+1]로 제한 후 [0,1]로 맵핑 (학습 환경 설정에 맞춰 조정 가능)
+        raw_clipped = np.tanh(raw_action)
+        action_params = (raw_clipped + 1.0) / 2.0  # [0,1]
         self.current_action_params = action_params
 
-        # 5. (Controller) 실제 iptables / 스크립트 / 블랙리스트 조작
+        # 4) 컨트롤러에 실제 MTD 전략 실행
         try:
             self._execute_strategy(action_params)
-        except Exception as e:  # pragma: no cover
-            self._log(f"[오류] MTD 컨트롤러 실행 중 예외 발생: {e}", level="error")
+        except Exception as e:
+            self.logger.error(f"[오류] MTD 컨트롤러 실행 중 예외 발생: {e}", exc_info=True)
 
-        self._log(f"[RL-MTD] 최종 실행 파라미터 (0~1): {np.round(action_params, 3).tolist()}")
+        self.logger.info(
+            f"[RL-MTD] 최종 실행 파라미터 (0.0~1.0): {np.round(action_params, 3).tolist()}"
+        )
 
-        # 6. (Logger) wandb 로깅
-        if self.enable_wandb and wandb is not None and wandb.run is not None:
-            log_data: Dict[str, Any] = {}
-
-            # (1) MTD/CTI 지표: 학습에서 사용한 지표와 동일한 키를 eval_metric/* 로 로깅
+        # 5) W&B 로깅
+        if self.enable_wandb and wandb.run is not None:
+            log_data = {}
             for k, v in metrics.items():
-                try:
-                    log_data[f"eval_metric/{k}"] = float(v)
-                except (TypeError, ValueError):
-                    continue
-
-            # (2) 행동 파라미터
-            for i, key in enumerate(ACTION_PARAM_KEYS):
+                log_data[f"eval_metric/{k}"] = float(v)
+            for i, key in enumerate(self.action_param_keys):
                 log_data[f"eval_action/{key}"] = float(action_params[i])
-
-            # (3) 편의상 seeker_level, version 정보도 함께 로깅
-            log_data["eval_meta/seeker_level"] = self.seeker_level
-            log_data["eval_meta/version"] = self.version
-
             wandb.log(log_data)
 
-        return {"metrics": metrics, "action_params": action_params}
+        return {"metrics": metrics, "action_params": action_params.tolist()}
 
-    # ------------------------------------------------------------------
-    # RL 행동 벡터 -> 실제 iptables / 스크립트 / 블랙리스트 실행
-    # ------------------------------------------------------------------
-    def _execute_strategy(self, action_params: np.ndarray):
-        """6D (0.0~1.0) 파라미터를 실제 컨트롤러 메소드로 변환."""
+    # -----------------------------------------------------------------
+    # 3.2 상태 벡터 구성
+    # -----------------------------------------------------------------
+    def _build_state_from_metrics(self, metrics: Dict[str, float]) -> np.ndarray:
+        """
+        FEATURE_KEYS 순서를 그대로 맞춰서 상태 벡터를 구성한다.
+        - metric feature: metrics 딕셔너리에서 값 가져옴 (없으면 0.0)
+        - last_action_* feature: 현재 self.current_action_params에서 가져옴
 
-        # --- 1. DNAT 전략 (파라미터 0, 1, 2) ---
-        dnat_logits = action_params[0:3]
+        state (numpy): shape (obs_dim,)
+        """
+        vals: List[float] = []
+
+        for key in self.feature_keys:
+            if key.startswith(self.last_action_prefix):
+                # last_action_xxx → action_param_keys에서 대응 index 찾기
+                param_name = key[len(self.last_action_prefix) :]
+                if param_name in self.action_param_keys:
+                    idx = self.action_param_keys.index(param_name)
+                    vals.append(float(self.current_action_params[idx]))
+                else:
+                    # 혹시 모를 mismatch 대비
+                    self.logger.warning(
+                        f"[경고] FEATURE_KEY '{key}'에 대응하는 action_param를 찾을 수 없음. 0.0 사용."
+                    )
+                    vals.append(0.0)
+            else:
+                # metric feature
+                v = metrics.get(key, 0.0)
+                vals.append(float(v))
+
+        state = np.array(vals, dtype=np.float32)  # (obs_dim,)
+        normed_state = (state - self.feature_mean) / (self.feature_std + 1e-8)
+        return normed_state
+
+    # -----------------------------------------------------------------
+    # 3.3 행동 파라미터 → 실제 전략
+    # -----------------------------------------------------------------
+    def _execute_strategy(self, action_params: np.ndarray) -> None:
+        """
+        action_params: [0,1] 범위 6D
+        순서: [dnat_target_focus, dnat_decoy_focus, shuffle_intensity,
+               blacklist_aggression, blacklist_duration, decoy_ratio]
+        """
+
+        # ---- 1) DNAT 전략 (Real/Decoy/Alternate 분기) ----
+        # 두 파라미터를 기반으로 real, decoy, alternate에 대한 "가중치" 구성
+        f_real = float(action_params[0])  # dnat_target_focus
+        f_decoy = float(action_params[1])  # dnat_decoy_focus
+        # 나머지(ALT)는 1 - max(real, decoy) 정도로 직관적 설정
+        f_alt = max(0.0, 1.0 - max(f_real, f_decoy))
+
+        logits = np.array([f_real, f_decoy, f_alt], dtype=np.float32)
         # softmax
-        exp_logits = np.exp(dnat_logits - np.max(dnat_logits))
-        dnat_probs = exp_logits / np.sum(exp_logits + 1e-8)
-        dnat_target_type = np.random.choice(["REAL", "DECOY", "ALTERNATE"], p=dnat_probs)
-        self._log(f"[RL-MTD] DNAT 전략: Probs(R/D/A)={np.round(dnat_probs, 3)} -> 선택={dnat_target_type}")
+        exps = np.exp(logits - np.max(logits))
+        probs = exps / (np.sum(exps) + 1e-8)
 
-        if dnat_target_type == "REAL":
+        choice = np.random.choice(["REAL", "DECOY", "ALT"], p=probs)
+        self.logger.info(f"[RL-MTD] DNAT 전략: Probs(R/D/A)={np.round(probs, 3)} -> 선택={choice}")
+
+        if choice == "REAL":
             target = random.choice(REAL_TARGETS)
-        elif dnat_target_type == "DECOY":
+        elif choice == "DECOY":
             target = random.choice(DECOY_TARGETS)
         else:
             target = random.choice(ALTERNATE_NODE_TARGETS)
 
         self.iptables_controller.apply_dnat_redirect(target["ip"], target["port"])
 
-        # --- 2. 셔플 전략 (파라미터 3) ---
-        shuffle_intensity = float(action_params[3])
+        # ---- 2) 셔플 전략 ----
+        shuffle_intensity = float(action_params[2])  # [0,1]
         if shuffle_intensity > 0.75:
-            self._log(
-                f"[RL-MTD] 셔플 전략: 강도={shuffle_intensity:.3f} > 0.75. 'mtd_service_swap.sh' 실행."
+            self.logger.info(
+                f"[RL-MTD] 셔플 전략: intensity={shuffle_intensity:.3f} > 0.75, 'mtd_service_swap.sh' 실행."
             )
             self.iptables_controller.run_script("mtd_service_swap.sh")
+
+        # ---- 3) 블랙리스트 전략 ----
+        # bl_aggr: [0,1] -> threshold (1.0 ~ 0.1) 역방향
+        bl_aggr = float(action_params[3])
+        bl_dur_param = float(action_params[4])
+
+        bl_threshold = self._map_value(1.0 - bl_aggr, 0.1, 1.0)  # aggression↑ → threshold↓
+        # duration: [0,1] -> [30초, 600초], 0.99↑는 영구
+        if bl_dur_param > 0.99:
+            bl_duration = -1  # 영구
         else:
-            self._log(f"[RL-MTD] 셔플 전략: 강도={shuffle_intensity:.3f} (임계값 이하, 셔플 미실행)")
+            bl_duration = int(self._map_value(bl_dur_param, 30, 600))
 
-        # --- 3. 블랙리스트 전략 (파라미터 4, 5) ---
-        bl_param_threshold = float(action_params[4])
-        bl_param_duration = float(action_params[5])
-
-        # threshold: (val=0 -> 1.0), (val=1 -> 0.1) 역방향 매핑
-        bl_threshold = self._map_value(bl_param_threshold, 1.0, 0.1)
-        # duration: (val=0 -> 300초), (val=1 -> -1[영구]) 선형 매핑
-        bl_duration = int(self._map_value(bl_param_duration, 300.0, -1.0))
-        if bl_param_duration > 0.95:
-            bl_duration = -1  # 거의 1.0이면 영구 차단
-
-        self._log(
-            f"[RL-MTD] 블랙리스트 정책: CTI 경보 > {bl_threshold:.2f} 이면 {bl_duration}s 동안 DROP."
-            " (테스트베드에서는 이 기간 동안 Seeker 트래픽이 차단됨)"
+        self.logger.info(
+            f"[RL-MTD] BLK 정책: score>{bl_threshold:.3f} 이면 duration={bl_duration}초 차단."
         )
 
-        # CTI Agent 가 보고한 현재 경보 목록 (예: {"10.13.0.200": 0.87, ...})
         current_alerts = self.cti_status.get_current_alerts()
-
-        # 실제 iptables DROP 규칙 적용
         self.iptables_controller.update_blacklist(current_alerts, bl_threshold, bl_duration)
 
-    # ------------------------------------------------------------------
-    # 유틸
-    # ------------------------------------------------------------------
-    def _map_value(self, val_0_to_1: float, range_min: float, range_max: float) -> float:
-        """(0.0~1.0) 값을 [range_min, range_max] 범위로 선형 보간."""
-        return range_min + (range_max - range_min) * float(val_0_to_1)
+        # ---- 4) Decoy Ratio 정책 (지금은 로그만 찍고, honeypot/decoy 컨트롤러 연동 시 사용) ----
+        decoy_ratio = float(action_params[5])
+        self.logger.info(f"[RL-MTD] Decoy Ratio 정책 (미사용): decoy_ratio={decoy_ratio:.3f}")
 
-    def _build_state_from_metrics(self, metrics: Dict[str, float]) -> np.ndarray:
+    @staticmethod
+    def _map_value(val_0_to_1: float, v_min: float, v_max: float) -> float:
         """
-        METRIC_FEATURE_KEYS 순서대로 메트릭을 뽑고,
-        직전 행동 파라미터(self.current_action_params)를 붙여서
-        feature_norm(mean/std) 기준으로 정규화한 상태 벡터를 만든다.
+        [0,1] → [v_min, v_max] 선형 맵핑
         """
-        vals_metrics: List[float] = []
-        for key in METRIC_FEATURE_KEYS:
-            val = metrics.get(key)
-            if val is None:
-                self._log(f"[경고] 상태 벡터 키 '{key}'가 메트릭에 없습니다! 0.0으로 대체.", level="warning")
-                val = 0.0
-            vals_metrics.append(float(val))
-
-        state = np.concatenate(
-            [
-                np.array(vals_metrics, dtype=np.float32),
-                self.current_action_params.astype(np.float32),
-            ]
-        )
-
-        if state.shape[0] != self.feature_mean.shape[0]:
-            self._log(
-                f"[경고] 상태 벡터 차원 불일치: state={state.shape[0]}, norm_mean={self.feature_mean.shape[0]}",
-                level="warning",
-            )
-
-        normed_state = (state - self.feature_mean) / (self.feature_std + 1e-8)
-        return normed_state.astype(np.float32)
-
-    def _log(self, msg: str, level: str = "info") -> None:
-        if self.logger:
-            if level == "info":
-                self.logger.info(msg)
-            elif level == "warning":
-                self.logger.warning(msg)
-            elif level == "error":
-                self.logger.error(msg)
-            else:
-                self.logger.debug(msg)
-        else:
-            print(f"[{level.upper()}] {msg}")
+        return v_min + (v_max - v_min) * float(val_0_to_1)
 
 
-# ----------------------------------------------------------------------
-# 단독 실행 테스트용 (실제 배포에선 사용 안 해도 됨)
-# ----------------------------------------------------------------------
-if __name__ == "__main__":  # pragma: no cover
-    print("--- RLDrivenDeceptionManager (v05) 로컬 테스트 ---")
+# ---------------------------------------------------------------------
+# 4. 단독 실행 테스트 (로컬 quick test 용도)
+# ---------------------------------------------------------------------
+if __name__ == "__main__":
     logging.basicConfig(
         level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        format="%(asctime)s [%(levelname)7s] %(name)s - %(message)s",
     )
-    main_logger = logging.getLogger("MTD_RL_Deploy_Test_v05")
+    logger = logging.getLogger("RLDrivenDeceptionManager_MainTest")
 
-    MODEL_DIRECTORY = "./rl_models/ver_05"
-    os.makedirs(MODEL_DIRECTORY, exist_ok=True)
+    # 예시: mtd/rl_models/PPO_v07_SeekerL2 사용
+    model_dir = "./mtd/rl_models/PPO_v07_SeekerL2"
+    logger.info("=== RLDrivenDeceptionManager 단독 테스트 시작 ===")
 
-    try:
-        # rl_config_v05와 동일한 구조의 더미 메타/모델 생성
-        from mtd.rl_config_v05 import (  # type: ignore
-            ACTION_PARAM_KEYS,
-            ACTION_DIM,
-            FEATURE_KEYS,
-            OBS_DIM,
-        )
+    scorer = MtdScorer()
+    cti_status = CtiAgentStatus()
+    ipt = IptablesController(logger=logger)
 
-        fake_meta_path = os.path.join(MODEL_DIRECTORY, "mtd_policy_ver_05_meta.json")
-        fake_meta = {
-            "model_file": "mtd_policy_v05.pth",
-            "version": "ver_05_dummy",
-            "action_space_type": "continuous",
-            "obs_dim": OBS_DIM,
-            "act_dim": ACTION_DIM,
-            "feature_keys": FEATURE_KEYS,
-            "feature_norm": {"mean": [0.0] * OBS_DIM, "std": [1.0] * OBS_DIM},
-            "action_param_keys": ACTION_PARAM_KEYS,
-        }
-        with open(fake_meta_path, "w", encoding="utf-8") as f:
-            json.dump(fake_meta, f, ensure_ascii=False, indent=2)
+    mgr = RLDrivenDeceptionManager(
+        mtd_scorer=scorer,
+        cti_status=cti_status,
+        iptables_controller=ipt,
+        model_dir=model_dir,
+        logger=logger,
+        enable_wandb=False,
+    )
 
-        fake_ckpt_path = os.path.join(MODEL_DIRECTORY, "mtd_policy_v05.pth")
-        dummy_net = MTDPolicyNet(obs_dim=OBS_DIM, act_dim=ACTION_DIM)
-        torch.save(dummy_net.state_dict(), fake_ckpt_path)
-        print(f"[테스트] 더미 v05 모델/메타 파일 생성 완료: {MODEL_DIRECTORY}")
-    except Exception as e:
-        print(f"[테스트] 더미 파일 생성 실패: {e}. 기존 파일이 있다고 가정하고 진행합니다.")
+    for i in range(5):
+        logger.info(f"\n===== Step {i+1} =====")
+        out = mgr.step()
+        time.sleep(2.0)
 
-    try:
-        scorer = MtdScorer()
-        cti_status = CtiAgentStatus()
-        controller_ipt = IptablesController()
-
-        manager = RLDrivenDeceptionManager(
-            mtd_scorer=scorer,
-            cti_status=cti_status,
-            iptables_controller=controller_ipt,
-            model_dir=MODEL_DIRECTORY,
-            logger=main_logger,
-            enable_wandb=False,
-        )
-
-        for i in range(3):
-            print(f"\n===== MTD 의사결정 사이클 {i + 1} =====")
-            result = manager.step()
-            print("Result:", result)
-            time.sleep(2)
-    except FileNotFoundError as e:
-        print(f"\n[테스트 실패] 모델 파일을 찾을 수 없습니다: {e}")
-    except Exception as e:
-        print(f"\n[테스트 실패] 예기치 않은 오류 발생: {e}")
+    logger.info("=== RLDrivenDeceptionManager 단독 테스트 종료 ===")
