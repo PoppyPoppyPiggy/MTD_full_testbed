@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-CTI Dataset Manager v4.2 (Stable)
-- processed_data의 최신 features_batch_*.csv 자동 탐색
-- 훈련/테스트 분할 (계층적) 및 저장
+"""CTI Dataset Manager v4.2 (Stable)
+----------------------------------
+* 자동으로 ``processed_data`` 하위의 최신 ``features_batch_*.csv``를 찾음
+* 계층적(train/test) 분할 후 ``ml/output``에 저장
 """
 
 import os

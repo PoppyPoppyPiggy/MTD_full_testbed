@@ -376,6 +376,75 @@ class EpochScoreAggregator:
         S_MTD = float(R_succ) - alpha * float(C_def)
         metrics["S_MTD"] = S_MTD
 
+        # ------------------------------------------------------------------
+        # 학습/배포 간 지표 명칭 일관성 정리
+        # - 학습 환경(rl_environment_v05)에서는 Defense/..., Attack/..., Time/..., DRS/...로
+        #   네임스페이스가 붙은 flat 키와 group 딕셔너리를 동시에 제공한다.
+        # - 테스트베드 평가(RLDrivenDeceptionManager)에서는 MtdScorer.collect_metrics()의
+        #   반환값을 그대로 eval_metric/* 로깅하므로, 동일한 키 구성을 추가로 제공한다.
+        # ------------------------------------------------------------------
+        defense_dict = {
+            "R_succ": R_succ,
+            "C_def": C_def,
+            "CostPerBlock": CostPerBlock,
+            # 학습 환경에서 사용하던 이름과 맞추기 위한 alias
+            "S_MTD_overall": S_MTD,
+        }
+
+        attack_dict = {
+            "r_exploit_success": r_exploit_success,
+            "r_exploit_block": r_exploit_block,
+            "r_breach_success": r_breach_success,
+            "r_breach_block": r_breach_block,
+            "r_scan": r_scan,
+            "r_find": r_find,
+            "decoy_lure_rate": eta_dec,
+        }
+
+        time_dict = {
+            "TTF_mean": TTF,
+            "TTEB_mean": TTEB,
+            "TTBr_mean": TTBr,
+        }
+
+        drs_dict = {
+            "D_bits": D_bits,
+            # 학습 환경 alias: R_redundancy, S_shuffle
+            "R_redundancy": R_val,
+            "S_shuffle": S_val,
+        }
+
+        # flat prefix 버전 추가 (Defense/R_succ 등)
+        prefixed_metrics = {}
+        for key, val in defense_dict.items():
+            prefixed_metrics[f"Defense/{key}"] = val
+        for key, val in attack_dict.items():
+            prefixed_metrics[f"Attack/{key}"] = val
+        for key, val in time_dict.items():
+            prefixed_metrics[f"Time/{key}"] = val
+        for key, val in drs_dict.items():
+            prefixed_metrics[f"DRS/{key}"] = val
+
+        # 기존 flat 지표와 호환성을 유지하면서 학습용 네임스페이스를 함께 반환
+        metrics.update(
+            {
+                **defense_dict,
+                **attack_dict,
+                **time_dict,
+                **drs_dict,
+                **prefixed_metrics,
+                # 기존 alias 유지
+                "R": metrics.get("R", R_val),
+                "S": metrics.get("S", S_val),
+                "R_redundancy": R_val,
+                "S_shuffle": S_val,
+                "TTF_mean": TTF,
+                "TTEB_mean": TTEB,
+                "TTBr_mean": TTBr,
+                "S_MTD_overall": S_MTD,
+            }
+        )
+
         return metrics
 
 
