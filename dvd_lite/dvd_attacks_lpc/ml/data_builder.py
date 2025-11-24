@@ -2,7 +2,9 @@
 # -*- coding: utf-8 -*-
 """
 파일명: dvd_lite/dvd_attacks_lpc/ml/data_builder.py
-설 명: bus.log를 배치로 읽어 피처를 생성하고 CSV로 저장 (Full Logic Version)
+설 명: bus 로그(들)를 읽어 피처를 생성하고 CSV로 저장 (Full Logic Version)
+      - 단일 파일 또는 디렉토리 내 모든 bus 로그 처리 지원
+      - 타임스탬프 기준 자동 정렬 기능 포함
 """
 
 import os
@@ -11,8 +13,9 @@ import json
 import time
 import logging
 import argparse
+import glob
 from datetime import datetime
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional, Generator
 
 import pandas as pd
 
@@ -32,18 +35,21 @@ logger = logging.getLogger("DataBuilder")
 # 경로 기본값
 # ----------------------------
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DEFAULT_BUS_LOG_PATH = os.path.abspath(os.path.join(BASE_DIR, "../bus/bus.log"))
+DEFAULT_BUS_DIR = os.path.abspath(os.path.join(BASE_DIR, "../bus"))
+DEFAULT_BUS_LOG_PATH = os.path.join(DEFAULT_BUS_DIR, "bus.log")
 DEFAULT_OUTPUT_DIR = os.path.abspath(os.path.join(BASE_DIR, "./processed_data"))
 DEFAULT_MAPPING_FILE = os.path.abspath(os.path.join(BASE_DIR, "event_mapping.json"))
 
 class DataBuilder:
     def __init__(
         self,
-        bus_log_path: str = DEFAULT_BUS_LOG_PATH,
+        bus_log_path: Optional[str] = None,
+        bus_log_dir: Optional[str] = None,
         output_dir: str = DEFAULT_OUTPUT_DIR,
         mapping_file: str = DEFAULT_MAPPING_FILE
     ):
         self.bus_log_path = bus_log_path
+        self.bus_log_dir = bus_log_dir
         self.output_dir = output_dir
         self.event_mapping: Dict[str, int] = {}
 
@@ -59,23 +65,79 @@ class DataBuilder:
         except Exception as e:
             logger.error(f"Error loading event mapping: {e}. Using empty mapping.")
 
-    def iter_bus_logs(self):
-        """bus.log 파일을 순차적으로 읽어 JSON dict 를 yield."""
-        if not os.path.exists(self.bus_log_path):
-            logger.warning(f"bus.log not found: {self.bus_log_path}")
+    def _collect_log_files(self) -> List[str]:
+        """처리할 로그 파일 목록을 수집합니다."""
+        files = []
+        
+        # 1. 단일 파일 지정 시
+        if self.bus_log_path and os.path.isfile(self.bus_log_path):
+            files.append(self.bus_log_path)
+        
+        # 2. 디렉토리 지정 시 (bus_*.log 패턴 검색)
+        if self.bus_log_dir and os.path.isdir(self.bus_log_dir):
+            patterns = [
+                os.path.join(self.bus_log_dir, "bus.log"),
+                os.path.join(self.bus_log_dir, "bus_*.log")
+            ]
+            for pattern in patterns:
+                for fpath in glob.glob(pattern):
+                    if fpath not in files:
+                        files.append(fpath)
+        
+        if not files:
+            logger.warning("No log files found to process.")
+            
+        return files
+
+    def _read_and_sort_logs(self, file_paths: List[str]) -> List[Dict[str, Any]]:
+        """여러 로그 파일을 읽어서 타임스탬프 순으로 정렬하여 반환합니다."""
+        all_logs = []
+        logger.info(f"Reading logs from {len(file_paths)} files...")
+        
+        for fpath in file_paths:
+            try:
+                logger.debug(f"Reading file: {fpath}")
+                with open(fpath, "r", encoding="utf-8", errors="ignore") as f:
+                    for line in f:
+                        line = line.strip()
+                        if not line: continue
+                        try:
+                            entry = json.loads(line)
+                            # ts 필드 확보 (없으면 0.0)
+                            if 'ts' not in entry:
+                                # timestamp 문자열 파싱 시도 (ISO format)
+                                ts_str = entry.get('timestamp')
+                                if ts_str:
+                                    try:
+                                        dt = datetime.fromisoformat(ts_str.replace('Z', '+00:00'))
+                                        entry['ts'] = dt.timestamp()
+                                    except:
+                                        entry['ts'] = 0.0
+                                else:
+                                    entry['ts'] = 0.0
+                            all_logs.append(entry)
+                        except json.JSONDecodeError:
+                            pass
+            except Exception as e:
+                logger.error(f"Error reading file {fpath}: {e}")
+
+        # 타임스탬프 기준 정렬
+        logger.info(f"Sorting {len(all_logs)} log entries...")
+        all_logs.sort(key=lambda x: x.get('ts', 0.0))
+        return all_logs
+
+    def iter_bus_logs(self) -> Generator[Dict[str, Any], None, None]:
+        """수집된 모든 로그를 시간 순서대로 yield합니다."""
+        files = self._collect_log_files()
+        if not files:
             return
 
-        with open(self.bus_log_path, "r", encoding="utf-8", errors="ignore") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    yield json.loads(line)
-                except json.JSONDecodeError:
-                    pass
-                except Exception as e:
-                    logger.error(f"Error parsing bus.log line: {e}")
+        # 메모리에 모두 올려서 정렬하는 방식 (데이터가 아주 크지 않다면 가장 정확함)
+        # 대용량 데이터의 경우 외부 정렬이나 merge sort 방식이 필요할 수 있음
+        sorted_logs = self._read_and_sort_logs(files)
+        
+        for entry in sorted_logs:
+            yield entry
 
     def extract_features(self, log_entry: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -176,14 +238,14 @@ class DataBuilder:
 
     def process_logs_batch(self) -> Optional[pd.DataFrame]:
         """
-        bus.log 전체를 읽어서 feature + label 이 들어간 DataFrame을 만든다.
+        수집된 로그 전체를 읽어서 feature + label 이 들어간 DataFrame을 만든다.
         상태머신을 통해 공격 구간에 라벨을 부여한다.
         """
         records = []
         current_attack_name: Optional[str] = None
         current_label: int = 0  # 0 = normal
 
-        logger.info(f"Starting batch processing of: {self.bus_log_path}")
+        logger.info("Starting batch processing...")
 
         for log_entry in self.iter_bus_logs():
             source = log_entry.get("source")
@@ -196,9 +258,11 @@ class DataBuilder:
                 if log_type == "attack_started" and attack_name:
                     current_label = self.event_mapping.get(attack_name, 0)
                     current_attack_name = attack_name
+                    # logger.debug(f"Attack started: {attack_name} (Label: {current_label})")
                 elif log_type == "attack_stopped":
                     current_label = 0
                     current_attack_name = None
+                    # logger.debug("Attack stopped.")
 
             # --- 2) feature 추출 ---
             features = self.extract_features(log_entry)
@@ -212,7 +276,7 @@ class DataBuilder:
             records.append(features)
 
         if not records:
-            logger.warning("bus.log 에서 레코드를 하나도 읽지 못했습니다.")
+            logger.warning("No records found in log files.")
             return None
 
         df = pd.DataFrame.from_records(records)
@@ -220,7 +284,7 @@ class DataBuilder:
         # NaN / inf 정리
         df.replace([float("inf"), float("-inf")], float("nan"), inplace=True)
         
-        # [수정] FutureWarning 방지: fillna 호출 시 downcasting 동작 명시
+        # FutureWarning 방지: fillna 호출 시 downcasting 동작 명시
         df.fillna(0, inplace=True)
 
         # 출력 경로 저장
@@ -229,22 +293,23 @@ class DataBuilder:
         
         try:
             df.to_csv(output_path, index=False)
-            logger.info(f"배치 feature 데이터 저장 완료: {output_path}")
+            logger.info(f"Batch feature data saved: {output_path}")
         except Exception as e:
-            logger.error(f"CSV 저장 실패: {e}")
+            logger.error(f"Failed to save CSV: {e}")
 
         # Label 분포 로깅
         if "label" in df.columns:
             logger.info("--- Label Distribution ---")
-            logger.info(df["label"].value_counts(normalize=True).sort_index())
+            logger.info(df["label"].value_counts(normalize=False).sort_index()) # 개수로 표시
             logger.info("--------------------------")
 
         return df
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Build features from bus.log")
+    parser = argparse.ArgumentParser(description="Build features from bus logs")
     parser.add_argument("--mode", choices=["batch"], default="batch")
-    parser.add_argument("--log-file", default=DEFAULT_BUS_LOG_PATH)
+    parser.add_argument("--log-file", help="Path to a single log file")
+    parser.add_argument("--log-dir", help="Path to directory containing log files")
     parser.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--mapping-file", default=DEFAULT_MAPPING_FILE)
     parser.add_argument("-v", "--verbose", action="store_true")
@@ -253,8 +318,17 @@ if __name__ == "__main__":
     if args.verbose:
         logger.setLevel(logging.DEBUG)
 
+    # 인자 처리 우선순위: log-file > log-dir > default (DEFAULT_BUS_LOG_PATH)
+    log_file = args.log_file
+    log_dir = args.log_dir
+    
+    # 아무것도 지정 안되면 기본 경로 사용 (단일 파일 모드)
+    if not log_file and not log_dir:
+        log_file = DEFAULT_BUS_LOG_PATH
+
     builder = DataBuilder(
-        bus_log_path=args.log_file,
+        bus_log_path=log_file,
+        bus_log_dir=log_dir,
         output_dir=args.output_dir,
         mapping_file=args.mapping_file
     )

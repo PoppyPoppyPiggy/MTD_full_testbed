@@ -1,6 +1,11 @@
 # Configuration for the MTD Reinforcement Learning Agent and Environment (v06: Refined Metrics & Reward)
+import os
 import numpy as np
 import math
+
+# --- PATH SETTINGS (Added for Environment Compatibility) ---
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MTD_STATE_PATH = os.path.join(BASE_DIR, "shared_state", "mtd_state.json")
 
 # --- ENVIRONMENT CONSTANTS AND PARAMETERS ---
 
@@ -35,10 +40,10 @@ SEEKER_PROB_PARAMS = {
 
 # Cost Weights for Defender (based on user specification - Section 5.1)
 COST_MTD_ACTION = 0.005  # Base cost per MTD policy change
-COST_SHUFFLE = 0.5       # Cost multiplier for shuffle operation
-COST_DECOY = 0.05        # Cost multiplier for decoy ratio
-COST_BL = 0.01           # Cost multiplier for blacklist level
-COST_WEIGHT = 0.5        # Multiplier for total calculated cost term in reward function
+COST_SHUFFLE = 0.5        # Cost multiplier for shuffle operation
+COST_DECOY = 0.05         # Cost multiplier for decoy ratio
+COST_BL = 0.01            # Cost multiplier for blacklist level
+COST_WEIGHT = 0.5         # Multiplier for total calculated cost term in reward function
 
 # Blacklister Mapping (Used in SimulatedBlacklister)
 BLACKLIST_SENSITIVITY_MIN = 0.1
@@ -52,16 +57,16 @@ BLACKLIST_DURATION_MAX_STEPS = 10000
 # NOTE: The first 10 are dynamic metrics, the last 6 are the last actions taken.
 FEATURE_KEYS = [
     # Metrics (10D)
-    "cti_alert_rate",           # (1) CTI passive detection rate (0..1)
-    "blacklist_size_ratio",     # (2) Current Blacklist size / Max size (0..1)
-    "uptime_ratio",             # (3) Overall network uptime/availability (0..1)
-    "breach_success_rate",      # (4) Breach events / Total attack steps (0..1) - Cumulative/Windowed
-    "decoy_lure_rate",          # (5) Decoy attack steps / Total attack steps (0..1) - Cumulative/Windowed
-    "current_exposure_mean",    # (6) LPC: Average steps seeker has been exposed to the current IP
-    "r_known_ratio",            # (7) LPC: Ratio of known IPs (Seeker's knowledge)
-    "r_exploited_ratio",        # (8) LPC: Ratio of exploited IPs
-    "seeker_scan_effort",       # (9) Seeker's current/last known scan effort (0..1)
-    "seeker_attack_bias",       # (10) Seeker's current/last known attack bias (0..1)
+    "cti_alert_rate",            # (1) CTI passive detection rate (0..1)
+    "blacklist_size_ratio",      # (2) Current Blacklist size / Max size (0..1)
+    "uptime_ratio",              # (3) Overall network uptime/availability (0..1)
+    "breach_success_rate",       # (4) Breach events / Total attack steps (0..1) - Cumulative/Windowed
+    "decoy_lure_rate",           # (5) Decoy attack steps / Total attack steps (0..1) - Cumulative/Windowed
+    "current_exposure_mean",     # (6) LPC: Average steps seeker has been exposed to the current IP
+    "r_known_ratio",             # (7) LPC: Ratio of known IPs (Seeker's knowledge)
+    "r_exploited_ratio",         # (8) LPC: Ratio of exploited IPs
+    "seeker_scan_effort",        # (9) Seeker's current/last known scan effort (0..1)
+    "seeker_attack_bias",        # (10) Seeker's current/last known attack bias (0..1)
     # Last Action Parameters (6D)
     "last_action_dnat_target_focus",
     "last_action_dnat_decoy_focus",
@@ -81,6 +86,10 @@ ACTION_PARAM_KEYS = [
     "blacklist_duration",       # Duration of blacklisting (0=min, 1=max)
     "decoy_ratio"               # Proportion of traffic to decoy targets (0=min, 1=max)
 ]
+
+# Derived Dimensions (Used by Agent/Environment)
+STATE_DIM = len(FEATURE_KEYS)
+ACTION_DIM = len(ACTION_PARAM_KEYS)
 
 # State Normalization Metadata (Placeholders - MUST be determined by pre-training or consistent with testbed)
 # The actual normalization should occur based on data collected, but placeholders are included
@@ -121,3 +130,13 @@ LOG_METRICS_TIME_TO_EVENT = [
     "TTEB_mean",          # Time-to-Exploit-Block (Avg Exposure Steps at Exploit Block)
     "TTBr_mean",          # Time-to-Breach (Avg Exposure Steps at Breach Success)
 ]
+
+# --- Legacy/Compatibility Support ---
+# 일부 기존 코드가 class RL_CONFIG를 참조할 경우를 대비한 래퍼
+class RL_CONFIG:
+    FEATURE_KEYS = FEATURE_KEYS
+    ACTION_PARAM_KEYS = ACTION_PARAM_KEYS
+    STATE_DIM = STATE_DIM
+    ACTION_DIM = ACTION_DIM
+    MTD_STATE_PATH = MTD_STATE_PATH
+    # Add other mappings if necessary
