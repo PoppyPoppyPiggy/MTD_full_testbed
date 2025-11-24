@@ -13,13 +13,19 @@ from torch.utils.tensorboard import SummaryWriter
 import wandb
 
 from .rl_model_v05 import PPOAgent
-from .rl_environment_v05 import NetworkEnv, ACTION_PARAM_KEYS, FEATURE_KEYS
+# [FIX] Import module-level constants from rl_config_v05
 from .rl_config_v05 import (
+    RL_CONFIG,
+    FEATURE_KEYS,
+    ACTION_PARAM_KEYS,
+    STATE_DIM,
+    ACTION_DIM,
     LOG_METRICS_DEFENSE,
     LOG_METRICS_ATTACK,
     LOG_METRICS_TIME_TO_EVENT,
     LOG_METRICS_DRS,
 )
+from .rl_environment_v05 import MTDEnvironment
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s")
 logger = logging.getLogger(__name__)
@@ -31,46 +37,41 @@ def _safe_mean(arr):
 
 def calculate_metrics_from_infos(ep_infos):
     """
-    한 에피소드에서 수집한 info 리스트(ep_infos)로부터
-    마지막 step의 Metrics 를 꺼내 wandb/TensorBoard용 flat dict를 만든다.
-    - 환경쪽에서 info["Metrics"]는
-      1) flat 키 ("Defense/R_succ" 형태)와
-      2) nested dict("Defense": {...}) 를 동시에 넣어놓음.
+    Extract Metrics from the list of info collected in an episode
+    and create a flat dict for wandb/TensorBoard.
     """
     if not ep_infos:
         return {}
 
-    final_m = ep_infos[-1].get("Metrics", {})
-    metrics = {}
+    # Simple aggregation
+    mtd_count = sum([1 for info in ep_infos if info.get("applied_mtd", False)])
+    
+    metrics = {
+        "Defense/MTD_Count": mtd_count,
+        "Defense/MTD_Rate": mtd_count / len(ep_infos) if ep_infos else 0.0
+    }
 
-    has_nested = any(isinstance(v, dict) for v in final_m.values())
-
-    if has_nested:
-        for group_name, group_val in final_m.items():
-            if isinstance(group_val, dict):
-                # Defense -> Defense/R_succ, ...
-                for k, v in group_val.items():
-                    metrics[f"{group_name}/{k}"] = float(v)
-            else:
-                # 이미 flat한 값 (예: "Defense/R_succ": 0.8)
-                if isinstance(group_val, (int, float)):
-                    metrics[group_name] = float(group_val)
-    else:
-        # 완전 flat 구조
+    # Process nested metrics dict from environment
+    last_info = ep_infos[-1]
+    if "Metrics" in last_info:
+        final_m = last_info["Metrics"]
         for k, v in final_m.items():
-            if isinstance(v, (int, float)):
-                metrics[k] = float(v)
+            if isinstance(v, dict):
+                for sub_k, sub_v in v.items():
+                    metrics[f"{k}/{sub_k}"] = float(sub_v)
+            else:
+                try:
+                    metrics[k] = float(v)
+                except (ValueError, TypeError):
+                    pass
 
-    # Policy 파라미터 평균 (bl_level, decoy_ratio, shuffle_intensity)
-    bl_mean = _safe_mean([info.get("Params/bl_level", 0.0) for info in ep_infos])
-    decoy_mean = _safe_mean([info.get("Params/decoy_ratio", 0.0) for info in ep_infos])
-    shuffle_mean = _safe_mean(
-        [info.get("Params/shuffle_intensity", 0.0) for info in ep_infos]
-    )
-
-    metrics["Policy/bl_level_mean"] = bl_mean
-    metrics["Policy/decoy_ratio_mean"] = decoy_mean
-    metrics["Policy/shuffle_intensity_mean"] = shuffle_mean
+    # Policy parameter means (Episode average)
+    if ep_infos and "Params/bl_level" in ep_infos[0]:
+        metrics["Policy/bl_level_mean"] = _safe_mean([i.get("Params/bl_level", 0.0) for i in ep_infos])
+    if ep_infos and "Params/decoy_ratio" in ep_infos[0]:
+        metrics["Policy/decoy_ratio_mean"] = _safe_mean([i.get("Params/decoy_ratio", 0.0) for i in ep_infos])
+    if ep_infos and "Params/shuffle_intensity" in ep_infos[0]:
+        metrics["Policy/shuffle_intensity_mean"] = _safe_mean([i.get("Params/shuffle_intensity", 0.0) for i in ep_infos])
 
     return metrics
 
@@ -87,10 +88,11 @@ def train_ppo(args):
     device = torch.device("cuda" if torch.cuda.is_available() and args.cuda else "cpu")
 
     # ---------------------------
-    # Env 준비
+    # Env Setup
     # ---------------------------
-    NetworkEnv.max_episode_steps = args.max_steps_per_episode
-    env = NetworkEnv(seed=args.seed, seeker_level=args.seeker_level)
+    # MTDEnvironment class is defined in rl_environment_v05.py
+    env = MTDEnvironment(seeker_level=args.seeker_level)
+    env.max_episode_steps = args.max_steps_per_episode 
 
     # ---------------------------
     # Logging (TensorBoard + wandb)
@@ -123,9 +125,15 @@ def train_ppo(args):
     # ---------------------------
     MAX_GRAD_NORM = getattr(args, "max_grad_norm", 0.5)
 
+    # Use constants imported from config
+    state_dim = STATE_DIM
+    action_dim = ACTION_DIM
+
+    logger.info(f"State Dim: {state_dim}, Action Dim: {action_dim}")
+
     agent = PPOAgent(
-        state_dim=env.observation_space.shape[0],
-        action_dim=env.action_space.shape[0],
+        state_dim=state_dim,
+        action_dim=action_dim,
         hidden_size=args.hidden_size,
         lr=args.learning_rate,
         gamma=args.gamma,
@@ -150,13 +158,13 @@ def train_ppo(args):
 
     for episode in range(1, total_episodes + 1):
         try:
-            # Seeker Level 샘플링 (모든 Seeker 레벨 학습 옵션)
+            # Sample Seeker Level
             if args.train_all_seeker_levels:
                 env.seeker_level = random.choice(args.seeker_levels)
             else:
                 env.seeker_level = args.seeker_level
 
-            state, info = env.reset(seed=args.seed + episode)
+            state, _ = env.reset(seed=args.seed + episode) # reset returns (obs, info)
             done = False
             ep_reward = 0.0
             ep_steps = 0
@@ -170,6 +178,8 @@ def train_ppo(args):
                 )
 
                 action, log_prob, value = agent.get_action_and_value(state_tensor)
+                
+                # gym env step: obs, reward, terminated, truncated, info
                 next_state, reward, terminated, truncated, step_info = env.step(
                     action.cpu().numpy().squeeze(0)
                 )
@@ -193,7 +203,7 @@ def train_ppo(args):
                 if done:
                     break
 
-            # PPO 업데이트
+            # PPO Update
             if agent.ready_for_update():
                 logger.info(
                     f"[Update] Global Step {global_step}: Starting PPO update."
@@ -231,13 +241,14 @@ def train_ppo(args):
                 )
                 agent.clear_buffer()
 
-            # 에피소드 지표 집계
+            # Aggregate Episode Metrics
             reward_window.append(ep_reward)
             current_metrics = calculate_metrics_from_infos(ep_infos)
             metrics_window.append(current_metrics)
 
             avg_reward = _safe_mean(reward_window)
 
+            # Calculate Window Averaged Metrics
             window_metrics = {}
             all_keys = set().union(*(m.keys() for m in metrics_window)) if metrics_window else set()
             for key in all_keys:
@@ -245,7 +256,7 @@ def train_ppo(args):
                     [m.get(key, 0.0) for m in metrics_window]
                 )
 
-            # 기본 에피소드 지표
+            # Log Basic Episode Metrics
             writer.add_scalar("Episode/Reward_Total", ep_reward, episode)
             writer.add_scalar("Episode/Reward_Mean_Window", avg_reward, episode)
             writer.add_scalar("Episode/Length", ep_steps, episode)
@@ -258,7 +269,7 @@ def train_ppo(args):
                 "global_step": global_step,
             }
 
-            # 세부 지표 로깅 (Defense/..., Attack/..., Time/..., DRS/..., Policy/...)
+            # Log Detailed Metrics
             for key, value in current_metrics.items():
                 writer.add_scalar(key, value, episode)
                 log_data[key] = value
@@ -277,8 +288,14 @@ def train_ppo(args):
                 f"R_succ={current_metrics.get('Defense/R_succ', 0.0):.3f}"
             )
 
+        except KeyboardInterrupt:
+            logger.warning("KeyboardInterrupt detected. Saving checkpoint before exit.")
+            ckpt_path = os.path.join(log_path, f"checkpoint_ep{episode}.pth")
+            agent.save_policy(ckpt_path)
+            break
+            
         except Exception as e:
-            logger.error(f"Error in episode {episode}: {e}")
+            logger.error(f"Error in episode {episode}: {e}", exc_info=True)
             if use_wandb:
                 wandb.log(
                     {
@@ -287,7 +304,7 @@ def train_ppo(args):
                     }
                 )
             try:
-                ckpt_path = os.path.join(log_path, f"checkpoint_ep{episode}.pth")
+                ckpt_path = os.path.join(log_path, f"checkpoint_ep{episode}_error.pth")
                 agent.save_policy(ckpt_path)
             except Exception:
                 pass
@@ -301,13 +318,11 @@ def train_ppo(args):
     final_model_path = os.path.join(log_path, "final_policy.pth")
     agent.save_policy(final_model_path)
 
+    # Save Normalization Metadata
     norm_meta = {
         "FEATURE_KEYS": FEATURE_KEYS,
         "ACTION_PARAM_KEYS": ACTION_PARAM_KEYS,
-        "FEATURE_NORM_METADATA": {
-            "means": [0.0] * len(FEATURE_KEYS),
-            "stds": [1.0] * len(FEATURE_KEYS),
-        },
+        "FEATURE_NORM_METADATA": RL_CONFIG.FEATURE_NORM_METADATA,
     }
     with open(os.path.join(log_path, "norm_metadata.json"), "w") as f:
         json.dump(norm_meta, f, indent=4)
@@ -324,21 +339,21 @@ if __name__ == "__main__":
     parser.add_argument("--torch-deterministic", action="store_true", default=True)
 
     # Env
-    parser.add_argument("--seeker-level", type=int, default=2, help="기본 Seeker 레벨 (0~3)")
+    parser.add_argument("--seeker-level", type=int, default=0, help="Base Seeker Level (0~3)")
     parser.add_argument(
         "--train-all-seeker-levels",
         action="store_true",
-        help="0~3 모든 seeker 레벨을 랜덤 샘플링하면서 학습",
+        help="Train by randomly sampling from all seeker levels 0~3",
     )
     parser.add_argument(
         "--seeker-levels",
         type=int,
         nargs="+",
         default=[0, 1, 2, 3],
-        help="train-all-seeker-levels 옵션에서 사용할 레벨 리스트",
+        help="List of levels to use with train-all-seeker-levels option",
     )
-    parser.add_argument("--total-episodes", type=int, default=2000)
-    parser.add_argument("--max-steps-per-episode", type=int, default=1000)
+    parser.add_argument("--total-episodes", type=int, default=100)
+    parser.add_argument("--max-steps-per-episode", type=int, default=200)
 
     # PPO
     parser.add_argument("--learning-rate", type=float, default=3e-4)
@@ -373,7 +388,7 @@ if __name__ == "__main__":
         "--metric-window-size",
         type=int,
         default=50,
-        help="롤링 평균 윈도우 (에피소드 기준)",
+        help="Rolling mean window (in episodes)",
     )
 
     args = parser.parse_args()
