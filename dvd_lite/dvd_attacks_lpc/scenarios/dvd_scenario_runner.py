@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-# dvd_lite/dvd_attacks_lpc/scenarios/dvd_scenario_runner.py
+# 경로: dvd_lite/dvd_attacks_lpc/scenarios/dvd_scenario_runner.py
+# 설명: 시나리오 실행 및 ML 파이프라인 연동 (수정됨: DataBuilder 호출 시 로그 디렉토리 전달)
 
 import os
 import sys
@@ -16,7 +17,7 @@ from typing import Optional, Dict, Any, List
 
 # --- 로깅 설정 ---
 logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)-7s] %(name)s: %(message)s")
-log = logging.getLogger("DVDScenarioRunner_v9")
+log = logging.getLogger("DVDScenarioRunner_v9_Fixed")
 
 # --- 경로 설정 ---
 SCRIPT_DIR = os.path.dirname(os.path.realpath(__file__))
@@ -307,9 +308,18 @@ def run_cti_ml_pipeline():
     bus_write("scenario_runner", "ml_pipeline_start", {"stage": "data_building"})
 
     # 1. Data Builder 실행 (특징 추출 및 CSV 저장)
-    log.info("[ML] 1. Data Builder 실행 (로그 파일 병합 및 특징 추출)...")
+    # [FIX] bus 로그가 저장된 디렉토리(BUS_DIR)를 명시적으로 전달해야 모든 로그(network, telemetry)를 읽어옴
+    log.info(f"[ML] 1. Data Builder 실행 (로그 경로: {BUS_DIR})...")
     try:
-        subprocess.run([sys.executable, DATA_BUILDER], check=True, timeout=300)  # 5분 타임아웃
+        subprocess.run(
+            [
+                sys.executable, 
+                DATA_BUILDER, 
+                "--log-dir", BUS_DIR  # <--- [CRITICAL FIX] 이 부분이 추가되었습니다.
+            ], 
+            check=True, 
+            timeout=300
+        )
         log.info("✅ Data Builder 완료.")
     except subprocess.CalledProcessError as e:
         log.critical(f"❌ [ML FAIL] Data Builder 실패 (RC: {e.returncode}). 스크립트 중단.")
@@ -322,7 +332,6 @@ def run_cti_ml_pipeline():
         return
 
     # 2. Dataset Manager 실행 (훈련/테스트 분할)
-    # 🔥 수정: processed-dir 경로를 명시적으로 전달하여 경로 문제 해결
     log.info(f"[ML] 2. Dataset Manager 실행 (훈련/테스트 데이터셋 분할, 경로: {PROCESSED_DIR})...")
     try:
         subprocess.run(

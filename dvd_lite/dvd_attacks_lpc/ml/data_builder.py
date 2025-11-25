@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-파일명: dvd_lite/dvd_attacks_lpc/ml/data_builder.py
-설 명: bus 로그(들)를 읽어 피처를 생성하고 CSV로 저장 (Full Logic Version)
-      - 단일 파일 또는 디렉토리 내 모든 bus 로그 처리 지원
-      - 타임스탬프 기준 자동 정렬 기능 포함
-"""
+# 디렉토리: dvd_lite/dvd_attacks_lpc/ml
+# 파일명: data_builder.py
+# 설명: bus 로그(들)를 읽어 피처를 생성하고 CSV로 저장 (Full Logic Version)
+#       - [NEW] 수치형 데이터 강제 변환 및 결측치 처리(Sanitizing) 로직 추가
+#       - 단일 파일 지정 시에도 해당 디렉토리 내의 연관 로그(bus_*.log) 자동 탐색 기능 포함
 
 import os
 import sys
@@ -18,8 +17,9 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Generator
 
 import pandas as pd
+import numpy as np  # [추가] 수치 변환용
 
-# 경고 메시지 제어 (FutureWarning 해결)
+# 경고 메시지 제어
 pd.set_option('future.no_silent_downcasting', True)
 
 # ----------------------------
@@ -67,27 +67,37 @@ class DataBuilder:
 
     def _collect_log_files(self) -> List[str]:
         """처리할 로그 파일 목록을 수집합니다."""
-        files = []
+        files = set()
         
         # 1. 단일 파일 지정 시
         if self.bus_log_path and os.path.isfile(self.bus_log_path):
-            files.append(self.bus_log_path)
-        
-        # 2. 디렉토리 지정 시 (bus_*.log 패턴 검색)
+            files.add(self.bus_log_path)
+            if not self.bus_log_dir:
+                derived_dir = os.path.dirname(self.bus_log_path)
+                if os.path.isdir(derived_dir):
+                    logger.info(f"Auto-detecting sibling logs in directory: {derived_dir}")
+                    self.bus_log_dir = derived_dir
+
+        # 2. 디렉토리 지정 검색
         if self.bus_log_dir and os.path.isdir(self.bus_log_dir):
             patterns = [
                 os.path.join(self.bus_log_dir, "bus.log"),
                 os.path.join(self.bus_log_dir, "bus_*.log")
             ]
             for pattern in patterns:
-                for fpath in glob.glob(pattern):
-                    if fpath not in files:
-                        files.append(fpath)
-        
-        if not files:
-            logger.warning("No log files found to process.")
+                found = glob.glob(pattern)
+                for fpath in found:
+                    files.add(fpath)
+                        
+        file_list = list(files)
+        if not file_list:
+            logger.warning(f"No log files found in path: {self.bus_log_path} or dir: {self.bus_log_dir}")
+        else:
+            logger.info(f"Collected {len(file_list)} log files:")
+            for f in sorted(file_list):
+                logger.info(f"  - {os.path.basename(f)}")
             
-        return files
+        return file_list
 
     def _read_and_sort_logs(self, file_paths: List[str]) -> List[Dict[str, Any]]:
         """여러 로그 파일을 읽어서 타임스탬프 순으로 정렬하여 반환합니다."""
@@ -103,9 +113,7 @@ class DataBuilder:
                         if not line: continue
                         try:
                             entry = json.loads(line)
-                            # ts 필드 확보 (없으면 0.0)
                             if 'ts' not in entry:
-                                # timestamp 문자열 파싱 시도 (ISO format)
                                 ts_str = entry.get('timestamp')
                                 if ts_str:
                                     try:
@@ -121,28 +129,21 @@ class DataBuilder:
             except Exception as e:
                 logger.error(f"Error reading file {fpath}: {e}")
 
-        # 타임스탬프 기준 정렬
         logger.info(f"Sorting {len(all_logs)} log entries...")
         all_logs.sort(key=lambda x: x.get('ts', 0.0))
         return all_logs
 
     def iter_bus_logs(self) -> Generator[Dict[str, Any], None, None]:
-        """수집된 모든 로그를 시간 순서대로 yield합니다."""
         files = self._collect_log_files()
         if not files:
             return
-
-        # 메모리에 모두 올려서 정렬하는 방식 (데이터가 아주 크지 않다면 가장 정확함)
-        # 대용량 데이터의 경우 외부 정렬이나 merge sort 방식이 필요할 수 있음
         sorted_logs = self._read_and_sort_logs(files)
-        
         for entry in sorted_logs:
             yield entry
 
     def extract_features(self, log_entry: Dict[str, Any]) -> Dict[str, Any]:
         """
         하나의 bus 로그 엔트리에서 상세 ML용 feature를 추출한다.
-        (원본의 상세 로직 복원)
         """
         source = log_entry.get("source", "unknown")
         log_type = log_entry.get("type") or log_entry.get("event_type") or "unknown"
@@ -237,13 +238,9 @@ class DataBuilder:
         return features
 
     def process_logs_batch(self) -> Optional[pd.DataFrame]:
-        """
-        수집된 로그 전체를 읽어서 feature + label 이 들어간 DataFrame을 만든다.
-        상태머신을 통해 공격 구간에 라벨을 부여한다.
-        """
         records = []
         current_attack_name: Optional[str] = None
-        current_label: int = 0  # 0 = normal
+        current_label: int = 0
 
         logger.info("Starting batch processing...")
 
@@ -252,24 +249,21 @@ class DataBuilder:
             log_type = log_entry.get("type") or log_entry.get("event_type")
             data = log_entry.get("data", {}) or {}
 
-            # --- 1) 상태머신: 공격 시작/종료 이벤트 처리 ---
+            # --- 1) 상태머신: 공격 시작/종료 ---
             if source == "attack_orchestrator":
                 attack_name = data.get("attack_name")
                 if log_type == "attack_started" and attack_name:
                     current_label = self.event_mapping.get(attack_name, 0)
                     current_attack_name = attack_name
-                    # logger.debug(f"Attack started: {attack_name} (Label: {current_label})")
                 elif log_type == "attack_stopped":
                     current_label = 0
                     current_attack_name = None
-                    # logger.debug("Attack stopped.")
 
             # --- 2) feature 추출 ---
             features = self.extract_features(log_entry)
             features["label"] = current_label
             features["current_attack_name"] = current_attack_name
             
-            # timestamp 유지
             features["ts"] = log_entry.get("ts")
             features["timestamp"] = log_entry.get("timestamp")
 
@@ -281,13 +275,29 @@ class DataBuilder:
 
         df = pd.DataFrame.from_records(records)
 
-        # NaN / inf 정리
-        df.replace([float("inf"), float("-inf")], float("nan"), inplace=True)
+        # -------------------------------------------------------------
+        # [CRITICAL FIX] 데이터 Sanitizing (DtypeWarning 해결)
+        # -------------------------------------------------------------
+        logger.info("Sanitizing dataframe (converting non-numeric to NaN/0)...")
         
-        # FutureWarning 방지: fillna 호출 시 downcasting 동작 명시
+        # 1. 제외할 컬럼 (문자열로 유지해야 하는 메타 데이터)
+        exclude_cols = ["source", "log_type", "attack_name", "scenario", "runner_event", 
+                        "timestamp", "current_attack_name", "container_name", 
+                        "pkt_proto", "pkt_tcp_flags", "pkt_arp_op", "mode", 
+                        "docker_status", "docker_name", "docker_health", "ping_target"]
+        
+        # 2. 수치형 후보 컬럼 식별 (전체 컬럼 중 exclude_cols 제외)
+        numeric_cols = [c for c in df.columns if c not in exclude_cols]
+        
+        # 3. 강제 형변환 (문자열 "None", "error" 등은 NaN으로 변환됨)
+        for col in numeric_cols:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
+            
+        # 4. NaN 및 Inf 처리 -> 0으로 채움
+        df.replace([np.inf, -np.inf], np.nan, inplace=True)
         df.fillna(0, inplace=True)
+        # -------------------------------------------------------------
 
-        # 출력 경로 저장
         ts_str = datetime.now().strftime("%Y%m%d_%H%M%S")
         output_path = os.path.join(self.output_dir, f"features_batch_{ts_str}.csv")
         
@@ -297,10 +307,9 @@ class DataBuilder:
         except Exception as e:
             logger.error(f"Failed to save CSV: {e}")
 
-        # Label 분포 로깅
         if "label" in df.columns:
             logger.info("--- Label Distribution ---")
-            logger.info(df["label"].value_counts(normalize=False).sort_index()) # 개수로 표시
+            logger.info(df["label"].value_counts(normalize=False).sort_index())
             logger.info("--------------------------")
 
         return df
@@ -318,11 +327,9 @@ if __name__ == "__main__":
     if args.verbose:
         logger.setLevel(logging.DEBUG)
 
-    # 인자 처리 우선순위: log-file > log-dir > default (DEFAULT_BUS_LOG_PATH)
     log_file = args.log_file
     log_dir = args.log_dir
     
-    # 아무것도 지정 안되면 기본 경로 사용 (단일 파일 모드)
     if not log_file and not log_dir:
         log_file = DEFAULT_BUS_LOG_PATH
 

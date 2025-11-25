@@ -1,278 +1,199 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""
-Dataset Manager v4.3
-- CTI Feature CSV (features_batch_*.csv) -> train/test 분할
-- 경로 인자(--processed-dir) 추가로 DataBuilder와의 경로 불일치 해결
-"""
+# 디렉토리: dvd_lite/dvd_attacks_lpc/ml
+# 파일명: dataset_manager.py
+# 설명: 전처리된 CSV 데이터를 Train/Test로 분리하고, 
+#       [NEW] 학습 데이터(Train Set)의 소수 클래스 불균형을 해소하기 위한 데이터 증강 로직 추가
 
-import argparse
+import os
 import glob
 import logging
-import math
-import os
-from datetime import datetime
-from typing import Optional, Tuple
-
-import numpy as np
+import argparse
 import pandas as pd
+import numpy as np
 from sklearn.model_selection import train_test_split
+from sklearn.utils import resample
 
+# ----------------------------
+# 로깅 설정
+# ----------------------------
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(levelname)s - %(message)s"
 )
-log = logging.getLogger(__name__)
+logger = logging.getLogger("DatasetManager")
 
+# ----------------------------
+# 경로 설정
+# ----------------------------
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DEFAULT_PROCESSED_DIR = os.path.join(BASE_DIR, "processed_data")
+DEFAULT_OUTPUT_DIR = os.path.join(BASE_DIR, "output")
 
-def find_latest_features_csv(processed_dir: str) -> Optional[str]:
-    """지정된 경로에서 가장 최신 CSV 파일을 찾습니다."""
-    pattern = os.path.join(processed_dir, "features_batch_*.csv")
-    candidates = glob.glob(pattern)
-    if not candidates:
-        return None
-    # 수정 시간 기준 정렬하여 가장 최근 파일 반환
-    candidates.sort(key=os.path.getmtime)
-    return candidates[-1]
+class DatasetManager:
+    def __init__(
+        self, 
+        processed_dir=DEFAULT_PROCESSED_DIR, 
+        output_dir=DEFAULT_OUTPUT_DIR,
+        test_size=0.2
+    ):
+        self.processed_dir = processed_dir
+        self.output_dir = output_dir
+        self.test_size = test_size
+        
+        os.makedirs(self.output_dir, exist_ok=True)
 
+    def get_latest_processed_file(self):
+        """processed_data 디렉토리에서 가장 최근 생성된 CSV 파일을 찾습니다."""
+        list_of_files = glob.glob(os.path.join(self.processed_dir, 'features_batch_*.csv'))
+        if not list_of_files:
+            return None
+        return max(list_of_files, key=os.path.getctime)
 
-def load_dataset(input_path: str) -> pd.DataFrame:
-    log.info("[*] 원본 데이터셋 로드: %s", input_path)
-    df = pd.read_csv(input_path)
-    log.info("[*] 로드 완료: %d 샘플, %d 컬럼", len(df), len(df.columns))
-    return df
-
-
-def describe_labels(df: pd.DataFrame, label_col: str = "label"):
-    if label_col not in df.columns:
-        raise ValueError(f"'{label_col}' 컬럼이 데이터셋에 없습니다.")
-
-    counts = df[label_col].value_counts().sort_index()
-    total = counts.sum()
-
-    log.info("[*] 고유 레이블 %d종: %s", len(counts.index), list(counts.index))
-    log.info("[*] 전체 레이블 분포(분할 전):")
-    for lbl, cnt in counts.items():
-        pct = cnt / total * 100.0
-        log.info("  - label %s: %d (%.4f%%)", lbl, cnt, pct)
-
-    return counts
-
-
-def filter_rare_classes(
-    df: pd.DataFrame,
-    label_col: str,
-    min_samples_per_class: int
-) -> Tuple[pd.DataFrame, pd.Series]:
-    """
-    min_samples_per_class 미만인 레이블은 rare로 보고 제거합니다.
-    """
-    counts = df[label_col].value_counts()
-    rare_labels = counts[counts < min_samples_per_class].index.tolist()
-
-    if rare_labels:
-        log.warning(
-            "⚠ 희소(rare) 클래스 감지: %s (각 count < %d)",
-            rare_labels, min_samples_per_class
-        )
-        log.warning(
-            "  -> 현재 버전에서는 이 레이블 샘플은 train/test 분할에서 제외합니다."
-        )
-        df_filtered = df[~df[label_col].isin(rare_labels)].copy()
-    else:
-        df_filtered = df.copy()
-
-    return df_filtered, counts
-
-
-def split_dataset(
-    df: pd.DataFrame,
-    label_col: str,
-    test_size: float,
-    random_state: int
-):
-    """
-    우선 stratify=y로 시도해보고,
-    실패(ValueError - 클래스 샘플 부족 등)하면 stratify=None으로 fallback.
-    """
-
-    # 숫자형 특징만 선별 (label 제외)
-    num_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-    if label_col in num_cols:
-        num_cols.remove(label_col)
-
-    if not num_cols:
-        raise RuntimeError("숫자형 특징 컬럼이 없습니다. data_builder 단계를 확인하세요.")
-
-    X = df[num_cols].values
-    y = df[label_col].values
-
-    log.info("[*] 최종 학습 피처 수(숫자형만): %d", len(num_cols))
-    log.info("[*] train/test 분할 (test_size=%.2f, stratify=y) 시도...", test_size)
-
-    try:
-        X_train, X_test, y_train, y_test = train_test_split(
-            X,
-            y,
-            test_size=test_size,
-            random_state=random_state,
-            stratify=y,
-        )
-        log.info("✅ 계층분할(stratify=y) 성공.")
-    except ValueError as e:
-        log.error("❌ 계층분할 실패: %s", e)
-        log.warning("  -> stratify 없이 단순 분할로 fallback 합니다.")
-        X_train, X_test, y_train, y_test = train_test_split(
-            X,
-            y,
-            test_size=test_size,
-            random_state=random_state,
-            stratify=None,
-        )
-        log.info("✅ fallback 분할(stratify=None) 성공.")
-
-    return X_train, X_test, y_train, y_test, num_cols
-
-
-def save_splits(
-    X_train, X_test, y_train, y_test,
-    feature_names,
-    output_dir: str
-):
-    os.makedirs(output_dir, exist_ok=True)
-    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
-
-    # 고정된 파일명 (Trainer가 쉽게 찾기 위함)
-    train_path = os.path.join(output_dir, "train_dataset.csv")
-    test_path = os.path.join(output_dir, "test_dataset.csv")
-    
-    # 백업용 파일명
-    train_backup = os.path.join(output_dir, f"train_dataset_{ts}.csv")
-    test_backup = os.path.join(output_dir, f"test_dataset_{ts}.csv")
-
-    df_train = pd.DataFrame(X_train, columns=feature_names)
-    df_train["label"] = y_train
-
-    df_test = pd.DataFrame(X_test, columns=feature_names)
-    df_test["label"] = y_test
-
-    # 메인 저장
-    df_train.to_csv(train_path, index=False)
-    df_test.to_csv(test_path, index=False)
-    
-    # 백업 저장
-    df_train.to_csv(train_backup, index=False)
-    df_test.to_csv(test_backup, index=False)
-
-    log.info("✅ train 데이터셋 저장: %s (rows=%d)", train_path, len(df_train))
-    log.info("✅ test  데이터셋 저장: %s (rows=%d)", test_path, len(df_test))
-
-
-def main():
-    parser = argparse.ArgumentParser(
-        description="CTI Dataset Manager v4.3 - train/test 분할 스크립트"
-    )
-    parser.add_argument(
-        "--input",
-        type=str,
-        default=None,
-        help="입력 CSV. 미지정 시 processed-dir에서 최신 파일 자동 검색"
-    )
-    parser.add_argument(
-        "--processed-dir",
-        type=str,
-        default="./processed_data",
-        help="features_batch_*.csv가 저장된 디렉터리"
-    )
-    parser.add_argument(
-        "--output-dir",
-        type=str,
-        default="./output",
-        help="train/test CSV를 저장할 디렉터리"
-    )
-    parser.add_argument(
-        "--label-col",
-        type=str,
-        default="label",
-        help="레이블 컬럼명 (기본: label)"
-    )
-    parser.add_argument(
-        "--test-size",
-        type=float,
-        default=0.2,
-        help="테스트 데이터 비율 (기본: 0.2)"
-    )
-    parser.add_argument(
-        "--min-samples-per-class",
-        type=int,
-        default=2,
-        help="이 값 미만인 클래스는 rare로 보고 분할에서 제외"
-    )
-    parser.add_argument(
-        "--random-state",
-        type=int,
-        default=42,
-        help="train/test 분할용 랜덤 시드"
-    )
-
-    args = parser.parse_args()
-
-    log.info("🚀 [Dataset Manager v4.3] 데이터셋 분할 시작.")
-    
-    # 절대 경로 변환
-    proc_dir = os.path.abspath(args.processed_dir)
-    out_dir = os.path.abspath(args.output_dir)
-
-    # 1) 입력 파일 결정
-    if args.input is None:
-        inp = find_latest_features_csv(proc_dir)
-        if inp is None:
-            log.critical("❌ processed_dir(%s)에 features_batch_*.csv가 없습니다.", proc_dir)
-            raise SystemExit(1)
-        log.info("[*] --input 미지정. '%s'에서 최신 파일 검색 -> %s", proc_dir, inp)
-        input_path = inp
-    else:
-        input_path = args.input
-
-    # 2) 데이터 로드 및 레이블 분포 출력
-    df_raw = load_dataset(input_path)
-    counts = describe_labels(df_raw, label_col=args.label_col)
-
-    # 3) 희소 클래스 필터링
-    if args.min_samples_per_class > 1:
-        df, _ = filter_rare_classes(df_raw, args.label_col, args.min_samples_per_class)
-        if len(df) < len(df_raw):
-            log.warning(
-                "⚠ 희소 클래스 제거 후 남은 샘플 수: %d (원래 %d)",
-                len(df), len(df_raw)
+    def augment_training_data(self, X_train, y_train, min_samples=1000):
+        """
+        [핵심 로직] 학습 데이터 내 소수 클래스를 증강합니다.
+        - 단순히 복제만 하면 과적합되므로, 약간의 가우시안 노이즈를 추가합니다.
+        - 목표 개수(min_samples)보다 적은 클래스만 증강합니다.
+        """
+        logger.info(f"⚖️ [Data Augmentation] 소수 클래스 증강 시작 (목표: 클래스 당 최소 {min_samples}개)...")
+        
+        # 데이터프레임으로 합치기 (편의상)
+        train_df = pd.concat([X_train, y_train], axis=1)
+        label_col = y_train.name
+        
+        # 클래스별 개수 확인
+        class_counts = train_df[label_col].value_counts()
+        augmented_dfs = []
+        
+        for label, count in class_counts.items():
+            class_subset = train_df[train_df[label_col] == label]
+            
+            # 1. 메이저 클래스: 그대로 유지
+            if count >= min_samples:
+                augmented_dfs.append(class_subset)
+                continue
+                
+            # 2. 마이너 클래스: 증강 (Oversampling with Noise)
+            logger.info(f"   -> Label {label}: {count}개 -> {min_samples}개로 증강 (Noise Injection)")
+            
+            # 필요한 만큼 리샘플링 (복원 추출)
+            resampled_subset = resample(
+                class_subset,
+                replace=True,
+                n_samples=min_samples,
+                random_state=42
             )
-    else:
-        df = df_raw
+            
+            # 수치형 컬럼에만 미세한 노이즈 추가 (표준편차의 1% 수준)
+            # (문자열이나 범주형 데이터가 있다면 제외해야 함. 여기선 X_train이 대부분 수치형이라 가정)
+            numeric_cols = resampled_subset.select_dtypes(include=[np.number]).columns.tolist()
+            # 레이블 컬럼은 제외
+            if label_col in numeric_cols:
+                numeric_cols.remove(label_col)
+                
+            noise = np.random.normal(0, 0.01, resampled_subset[numeric_cols].shape)
+            resampled_subset[numeric_cols] += noise
+            
+            augmented_dfs.append(resampled_subset)
+            
+        # 전체 병합 및 셔플
+        final_train_df = pd.concat(augmented_dfs, axis=0)
+        final_train_df = final_train_df.sample(frac=1, random_state=42).reset_index(drop=True)
+        
+        logger.info(f"✅ 증강 완료: 총 {len(train_df)} -> {len(final_train_df)} 샘플로 증가.")
+        
+        return final_train_df.drop(columns=[label_col]), final_train_df[label_col]
 
-    # 4) train/test 분할
-    min_required = math.ceil(1.0 / args.test_size)
-    log.info(
-        "[*] 테스트 비율 %.1f%% 기준 '이론상' 각 클래스 최소 필요 샘플 수 ≈ %d개",
-        args.test_size * 100.0,
-        min_required
-    )
+    def run(self, input_file=None):
+        logger.info("🚀 [Dataset Manager v5.0 (Augmented)] 데이터셋 분할 및 증강 시작.")
+        
+        # 1. 입력 파일 결정
+        if not input_file:
+            input_file = self.get_latest_processed_file()
+            if not input_file:
+                logger.error(f"❌ '{self.processed_dir}'에서 처리된 데이터 파일을 찾을 수 없습니다.")
+                return
+            logger.info(f"[*] 최신 파일 자동 선택: {input_file}")
+        else:
+            logger.info(f"[*] 지정된 파일 로드: {input_file}")
 
-    X_train, X_test, y_train, y_test, feature_names = split_dataset(
-        df,
-        label_col=args.label_col,
-        test_size=args.test_size,
-        random_state=args.random_state,
-    )
+        # 2. 데이터 로드 (DtypeWarning 방지 옵션 추가)
+        try:
+            df = pd.read_csv(input_file, low_memory=False)
+            
+            # 혹시 모를 문자열 'None' 같은 값들 처리
+            df = df.apply(pd.to_numeric, errors='ignore') # 가능한 것만 변환
+            
+        except Exception as e:
+            logger.error(f"❌ 데이터 로드 실패: {e}")
+            return
 
-    # 5) 저장
-    save_splits(
-        X_train, X_test, y_train, y_test,
-        feature_names,
-        out_dir
-    )
+        logger.info(f"[*] 로드 완료: {len(df)} 샘플, {len(df.columns)} 컬럼")
 
-    log.info("✅ [Dataset Manager v4.3] 완료.")
+        # 3. X, y 분리
+        if 'label' not in df.columns:
+            logger.error("❌ 'label' 컬럼이 없습니다. data_builder가 올바르게 실행되었는지 확인하세요.")
+            return
 
+        # 학습에 불필요한 메타데이터 컬럼 제외
+        drop_cols = ['label', 'source', 'log_type', 'attack_name', 'scenario', 
+                     'runner_event', 'timestamp', 'current_attack_name', 
+                     'container_name', 'docker_name']
+        # 실제 존재하는 컬럼만 drop
+        cols_to_drop = [c for c in drop_cols if c in df.columns]
+        
+        X = df.drop(columns=cols_to_drop)
+        y = df['label']
+        
+        # 숫자가 아닌 컬럼은 학습에서 제외 (One-Hot Encoding 등이 없으므로)
+        X = X.select_dtypes(include=[np.number])
+        logger.info(f"[*] 학습용 피처 수(숫자형): {X.shape[1]}")
+
+        # 4. Train / Test 분리 (Stratified)
+        logger.info(f"[*] train/test 분할 (test_size={self.test_size}, stratify=y)...")
+        try:
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, test_size=self.test_size, stratify=y, random_state=42
+            )
+        except ValueError as e:
+            logger.warning(f"⚠️ 계층적 분할 실패 (일부 클래스 샘플 부족): {e}")
+            logger.warning("-> 일반 랜덤 분할로 전환합니다.")
+            X_train, X_test, y_train, y_test = train_test_split(
+                X, y, test_size=self.test_size, random_state=42
+            )
+
+        # 5. [NEW] 학습 데이터 증강 (오버샘플링)
+        # 최소 샘플 수 설정: 전체 데이터의 1% 혹은 고정값 (예: 1000개)
+        # Label 21, 22 같이 30개인 데이터를 1000개로 늘림
+        X_train_aug, y_train_aug = self.augment_training_data(X_train, y_train, min_samples=2000)
+
+        # 6. 저장
+        train_output = pd.concat([X_train_aug, y_train_aug], axis=1)
+        test_output = pd.concat([X_test, y_test], axis=1)
+
+        train_path = os.path.join(self.output_dir, "train_dataset.csv")
+        test_path = os.path.join(self.output_dir, "test_dataset.csv")
+
+        train_output.to_csv(train_path, index=False)
+        test_output.to_csv(test_path, index=False)
+
+        logger.info(f"✅ train 데이터셋 저장 (증강됨): {train_path} ({len(train_output)} rows)")
+        logger.info(f"✅ test  데이터셋 저장 (원본유지): {test_path} ({len(test_output)} rows)")
+        logger.info("✅ [Dataset Manager] 완료.")
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--test-size", type=float, default=0.2)
+    parser.add_argument("--processed-dir", default=DEFAULT_PROCESSED_DIR)
+    parser.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR)
+    parser.add_argument("--input", help="Direct path to input csv")
+    
+    args = parser.parse_args()
+    
+    manager = DatasetManager(
+        processed_dir=args.processed_dir,
+        output_dir=args.output_dir,
+        test_size=args.test_size
+    )
+    manager.run(input_file=args.input)
