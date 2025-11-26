@@ -2,17 +2,9 @@
 # -*- coding: utf-8 -*-
 # 디렉토리: dvd_lite/dvd_attacks_lpc/ml
 # 파일명: cti_agent_deploy.py
-# 설명: [Deployment] 학습된 모델을 로드하여 실시간 로그를 분석하고
-#       방어 모드(DEFENSE_MODE)에 따라 MTD를 수행하거나, 탐지만 수행하는 CTI Agent.
-#
-# 방어 모드:
-#   - "none"      : MTD 아무 것도 하지 않고, 공격 탐지만 수행 (Case 0 / Case 1에서 사용)
-#   - "cti_rule"  : 규칙 기반 MTD (공격 유형에 따라 iptables_mtd_controller로 즉시 방어)
-#   - "rl"        : RL 기반 MTD (실제 MTD는 rl_driven_deception_manager가 수행한다고 가정, 여기선 신호만/로그만)
-#
-# 주의:
-#   - Static MTD (정적/시간 기반)는 보통 별도 스크립트/크론으로 돌리는 게 깔끔함.
-#     그 경우 CTI Agent는 DEFENSE_MODE="none"으로 두고, 공격 탐지만 해서 데이터셋/지표에 쓰면 됨.
+# 설명: [Deployment] 학습된 모델을 로드하여 실시간 로그를 분석하고 공격 탐지 시 방어(MTD)를 수행하는 에이전트
+#       - bus.log(메타 데이터)는 참조하지 않음
+#       - bus_network.log, bus_telemetry.log 등을 실시간 모니터링
 
 import os
 import sys
@@ -26,7 +18,6 @@ import numpy as np
 import pandas as pd
 from collections import deque
 from datetime import datetime
-from typing import Optional, Dict, Any
 
 # --- 로깅 설정 ---
 logging.basicConfig(
@@ -42,15 +33,18 @@ BUS_DIR = os.path.join(PROJECT_ROOT, "bus")
 MODEL_PATH = os.path.join(BASE_DIR, "output", "cti_classifier_model.joblib")
 DECEPTION_MGR = os.path.join(PROJECT_ROOT, "mtd", "rl_driven_deception_manager.py")
 
-# mtd 모듈 import (iptables_mtd_controller)
-MTD_DIR = os.path.join(PROJECT_ROOT, "mtd")
-if MTD_DIR not in sys.path:
-    sys.path.append(MTD_DIR)
+# --- 방어 모드 설정 ---
+#   CTI_DEFENSE_MODE 환경변수로 제어
+#   - "none"     : 탐지만 수행 (No-MTD / Static-MTD 실험에서 사용)
+#   - "cti_rule" : 규칙 기반 MTD (이 파일에서 iptables_mtd_controller 직접 제어)
+#   - "rl"       : RL 기반 MTD 매니저 호출 (rl_driven_deception_manager.py)
+DEFENSE_MODE = os.environ.get("CTI_DEFENSE_MODE", "none").lower()
+
+# --- iptables 기반 MTD 컨트롤러 (cti_rule 모드에서만 사용) ---
 try:
-    from mtd.iptables_mtd_controller import IptablesMTDController  # type: ignore
-except Exception as e:
+    from mtd.iptables_mtd_controller import IptablesMTDController
+except Exception:
     IptablesMTDController = None
-    logger.warning(f"iptables_mtd_controller import 실패: {e}")
 
 # --- 모니터링할 로그 파일 목록 (bus.log 제외) ---
 TARGET_LOGS = {
@@ -62,21 +56,10 @@ TARGET_LOGS = {
 }
 
 # --- 설정 ---
-DETECTION_INTERVAL = 1.0   # 초 단위 탐지 주기
-FEATURE_WINDOW_SIZE = 10   # (여기서는 단일 로그 기준이지만 확장 가능)
+DETECTION_INTERVAL = 1.0  # 초 단위 탐지 주기
+FEATURE_WINDOW_SIZE = 10  # 최근 N개 로그를 기반으로 피처 생성 (간이)
 CONFIDENCE_THRESHOLD = 0.7 # 공격 판단 임계값 (확률)
 
-# --- 방어 모드 설정 ---
-#   환경변수 CTI_DEFENSE_MODE 로 override 가능:
-#   - "none"     : 방어 없음 (탐지만)  -> Case 0, Case 1
-#   - "cti_rule" : CTI 규칙 기반 MTD  -> Case 2
-#   - "rl"       : RL + CTI MTD       -> Case 3 (실제 MTD는 rl_driven_deception_manager가 담당)
-DEFENSE_MODE = os.environ.get("CTI_DEFENSE_MODE", "cti_rule").lower()
-if DEFENSE_MODE not in ("none", "cti_rule", "rl"):
-    logger.warning(f"알 수 없는 DEFENSE_MODE={DEFENSE_MODE}, 'cti_rule'로 fallback.")
-    DEFENSE_MODE = "cti_rule"
-
-# 정적 MTD는 여기서 다루지 않고, 별도 스크립트 + DEFENSE_MODE='none' 조합으로 운영하는 것을 권장.
 
 class RealTimeLogReader(threading.Thread):
     """로그 파일을 실시간으로 읽어 큐에 넣는 스레드 (tail -f 유사 기능)"""
@@ -121,15 +104,26 @@ class CTIAgent:
     def __init__(self):
         self.model = None
         self.label_encoder = None
-        self.id_to_name: Dict[Any, str] = {}
+        self.id_to_name = {}
         self.feature_names = None
-        self.data_buffer = deque(maxlen=1000) # 최근 로그 버퍼
+        self.data_buffer = deque(maxlen=1000)  # 최근 로그 버퍼
         self.running = True
-        self.defense_cooldown = 0.0  # 방어 후 쿨다운 (epoch time)
+        self.defense_cooldown = 0.0  # 방어 후 쿨다운
 
-        # MTD 컨트롤러 (cti_rule 모드에서 사용)
-        self.mtd_controller: Optional[IptablesMTDController] = None
-        self.mtd_service_name = "mavlink_fc"  # iptables_mtd_controller의 service name과 일치 필요
+        # --- 멀티 서비스 정의 (서비스 이름 -> (target_key, port_idx)) ---
+        # iptables_mtd_controller.DEFAULT_TARGETS와 맞춰서 사용
+        self.mtd_services = {
+            "fc_mavlink": ("FC", 0),     # FC MAVLink (10.13.0.2:14550)
+            "cc_web": ("CC", 0),         # Companion Web (10.13.0.3:3000)
+            "cc_mavlink": ("CC", 1),     # Companion MAVLink (10.13.0.3:14550)
+            "gcs_mavlink": ("GCS", 0),   # GCS MAVLink (10.13.0.4:14550)
+            # 필요 시 SIM/ROS 등도 추가 가능:
+            # "sim_sitl": ("SIM", 0),
+            # "sim_ros": ("SIM", 1),
+        }
+
+        # 규칙 기반 MTD에서 사용할 iptables 컨트롤러
+        self.mtd_controller = None
         self._init_mtd_if_needed()
 
         # 모델 로드
@@ -138,7 +132,7 @@ class CTIAgent:
         logger.info(f"CTI-Agent Defense Mode = {DEFENSE_MODE}")
 
     # ------------------------------------------------------------------
-    # MTD 초기화 (cti_rule 모드에서만 실제 사용)
+    # MTD 컨트롤러 초기화 (cti_rule 모드에서만)
     # ------------------------------------------------------------------
     def _init_mtd_if_needed(self):
         if DEFENSE_MODE != "cti_rule":
@@ -148,16 +142,19 @@ class CTIAgent:
             return
 
         try:
+            # NOTE: 필요에 따라 dry_run=False로 실제 iptables 적용 가능
             self.mtd_controller = IptablesMTDController(dry_run=True)
-            # 기본 FC MAVLink 서비스 등록 (iptables_mtd_controller의 DEFAULT_TARGETS["FC"] 기반)
-            self.mtd_controller.register_service(self.mtd_service_name, "FC", 0)
-            logger.info(f"MTD Controller 초기화 완료. 서비스 '{self.mtd_service_name}' 등록.")
+
+            # 멀티 서비스 한 번에 등록
+            for svc_name, (target_key, port_idx) in self.mtd_services.items():
+                self.mtd_controller.register_service(svc_name, target_key, port_idx)
+                logger.info(f"MTD 서비스 등록: {svc_name} -> {target_key}[{port_idx}]")
         except Exception as e:
             logger.error(f"MTD Controller 초기화 실패: {e}")
             self.mtd_controller = None
 
     # ------------------------------------------------------------------
-    # 모델 로드
+    # 모델 로드 / 피처 처리
     # ------------------------------------------------------------------
     def load_model(self):
         if not os.path.exists(MODEL_PATH):
@@ -174,9 +171,10 @@ class CTIAgent:
                 self.label_encoder = artifact['encoder']
                 self.id_to_name = artifact.get('mapping', {})
                 # feature_names는 별도 파일에서 로드하거나 artifact에 포함해야 함
+                # 여기서는 training_features.json을 로드 시도
                 feat_path = os.path.join(os.path.dirname(MODEL_PATH), 'training_features.json')
                 if os.path.exists(feat_path):
-                    with open(feat_path, 'r', encoding='utf-8') as f:
+                    with open(feat_path, 'r') as f:
                         self.feature_names = json.load(f)['features']
                 else:
                     logger.warning("⚠️ feature names 파일이 없어 모델 속성에서 추론합니다.")
@@ -189,10 +187,10 @@ class CTIAgent:
             else:
                 # 구버전 호환 (모델만 저장된 경우)
                 self.model = artifact
-                self.id_to_name = {}
+                self.id_to_name = {}  # 매핑 정보 없음
 
-            if self.feature_names is None:
-                logger.critical("❌ feature_names를 결정할 수 없습니다. 학습 시 사용한 피처 이름 정보를 제공해야 합니다.")
+            if not self.feature_names:
+                logger.error("feature_names를 결정할 수 없습니다. 학습 파이프라인과 일치하는 구성이 필요합니다.")
                 sys.exit(1)
 
             logger.info("✅ Model loaded successfully.")
@@ -201,9 +199,6 @@ class CTIAgent:
             logger.critical(f"❌ 모델 로드 실패: {e}")
             sys.exit(1)
 
-    # ------------------------------------------------------------------
-    # 로그 → 피처 변환
-    # ------------------------------------------------------------------
     def preprocess_log_to_features(self, log_entry):
         """
         단일 로그 엔트리를 모델 입력 피처 벡터로 변환
@@ -244,106 +239,103 @@ class CTIAgent:
         return df
 
     # ------------------------------------------------------------------
-    # 방어 실행 (Defense Mode별로 분기)
+    # 규칙 기반 MTD (cti_rule 모드)
     # ------------------------------------------------------------------
-    def execute_defense(self, attack_label, attack_name):
-        """공격 탐지 시 방어 로직 실행 (DEFENSE_MODE에 따라 동작 다름)"""
-        current_time = time.time()
-        if current_time < self.defense_cooldown:
-            logger.info(
-                f"🛡️ [Defense Skip] 쿨다운 중 ({int(self.defense_cooldown - current_time)}s 남음)."
-            )
-            return
-
-        logger.warning(f"🚨 [ALERT] 공격 탐지됨! Type: {attack_name} (ID: {attack_label})")
-
-        # Case 0 / Case 1: 방어 없음 (탐지 로그만 남김)
-        if DEFENSE_MODE == "none":
-            logger.info("[NO_MTD] 방어 로직은 수행하지 않습니다 (실험용 baseline).")
-            return
-
-        # 공격명 기반 간단 전략 태깅 (cti_rule / rl 모두에서 사용 가능)
-        mtd_strategy = "random"  # 기본값
-        lower_name = attack_name.lower()
-        if "gps" in lower_name:
-            mtd_strategy = "ip_shuffle"
-        elif "flood" in lower_name or "dos" in lower_name:
-            mtd_strategy = "service_swap"
-        elif "scan" in lower_name or "discovery" in lower_name:
-            mtd_strategy = "port_shuffle"
-
-        # Case 2: CTI 규칙 기반 MTD (직접 iptables MTD를 건드림)
-        if DEFENSE_MODE == "cti_rule":
-            self._execute_cti_rule_mtd(mtd_strategy)
-        # Case 3: RL + CTI (실제 MTD는 rl_driven_deception_manager가 PPO 정책으로 수행)
-        elif DEFENSE_MODE == "rl":
-            self._notify_rl_mtd(mtd_strategy)
-
-        # 공통 쿨다운 (너무 자주 방어하지 않도록)
-        self.defense_cooldown = current_time + 30.0  # 30초 쿨다운
-
-    # ------------------------------------------------------------------
-    # Case 2: CTI 규칙 기반 MTD
-    # ------------------------------------------------------------------
-    def _execute_cti_rule_mtd(self, mtd_strategy: str):
+    def _execute_cti_rule_mtd(self, mtd_strategy: str, attack_name: str):
         """
-        규칙 기반 MTD: 공격 유형에 따라 iptables_mtd_controller를 직접 제어.
-        - ip_shuffle  : shuffle_network()
-        - port_shuffle: shuffle_network() (포트도 바뀔 확률)
-        - service_swap: enable_decoy()
+        규칙 기반 MTD: 공격 유형에 따라 어떤 서비스들에 어떤 MTD를 적용할지 결정.
         """
         if self.mtd_controller is None:
             logger.error("MTD Controller가 초기화되지 않아 cti_rule 방어를 수행할 수 없습니다.")
             return
 
-        logger.info(f"⚔️ [DEFENSE-CTI_RULE] MTD 방어 수행: {mtd_strategy}")
+        lower_name = attack_name.lower()
+        target_services = []
+
+        # 예시 정책:
+        # - gps spoofing 계열: FC/GCS MAVLink 중심
+        if "gps" in lower_name or "position" in lower_name:
+            target_services = ["fc_mavlink", "gcs_mavlink"]
+
+        # - flooding/dos: 모든 MAVLink + web
+        elif "flood" in lower_name or "dos" in lower_name:
+            target_services = ["fc_mavlink", "cc_mavlink", "gcs_mavlink", "cc_web"]
+
+        # - scan/discovery: 전체 서비스 대상으로 port shuffle
+        elif "scan" in lower_name or "discovery" in lower_name:
+            target_services = list(self.mtd_services.keys())
+
+        else:
+            # 기본값: FC MAVLink만 (high value channel)
+            target_services = ["fc_mavlink"]
+
+        logger.info(
+            f"⚔️ [DEFENSE-CTI_RULE] strategy={mtd_strategy}, "
+            f"attack={attack_name}, targets={target_services}"
+        )
 
         try:
-            if mtd_strategy in ("ip_shuffle", "port_shuffle", "random"):
-                # intensity는 대략 0.7 정도로 (IP/Port 모두 꽤 자주 바뀌도록)
-                self.mtd_controller.shuffle_network(self.mtd_service_name, intensity=0.7)
-            if mtd_strategy == "service_swap":
-                self.mtd_controller.enable_decoy(self.mtd_service_name)
-            # service_swap가 아니고, 이전에 decoy가 켜져 있었으면 끄고 싶으면:
-            # else:
-            #     self.mtd_controller.disable_decoy(self.mtd_service_name)
+            for svc in target_services:
+                if mtd_strategy in ("ip_shuffle", "port_shuffle", "random"):
+                    self.mtd_controller.shuffle_network(svc, intensity=0.7)
+                if mtd_strategy == "service_swap":
+                    self.mtd_controller.enable_decoy(svc)
 
             logger.info("✅ [CTI_RULE] iptables MTD 명령 수행 완료.")
         except Exception as e:
             logger.error(f"[CTI_RULE] MTD 실행 실패: {e}")
 
     # ------------------------------------------------------------------
-    # Case 3: RL + CTI
+    # 방어 실행
     # ------------------------------------------------------------------
-    def _notify_rl_mtd(self, mtd_strategy: str):
-        """
-        RL 기반 MTD: 여기서는 RLDrivenDeceptionManager가 이미 실행 중이라고 가정.
-        - CTI Agent는 '지금 공격이 있었다'라는 사실과, 대략적인 공격 카테고리(mtd_strategy)를
-          로그로 남기거나, 나중에 연동할 IPC/파일/메시지 큐 등에 기록하는 역할만 담당.
-        - 지금은 간단히 로그 + (옵션) oneshot 호출 예시만 남겨둠.
-        """
-        logger.info(f"⚔️ [DEFENSE-RL] RL 기반 MTD에 공격 이벤트 알림: strategy_hint={mtd_strategy}")
+    def execute_defense(self, attack_label, attack_name):
+        """공격 탐지 시 방어 로직 실행 (DEFENSE_MODE에 따라 동작)"""
+        current_time = time.time()
+        if current_time < self.defense_cooldown:
+            logger.info(f"🛡️ [Defense Skip] 쿨다운 중 ({int(self.defense_cooldown - current_time)}s 남음).")
+            return
 
-        # (선택 사항) rl_driven_deception_manager.py를 oneshot 모드로 한번 호출하는 예시
-        # 실제로는 RLDM을 상시 데몬으로 띄우고, 이 함수는 파일/소켓 기반 신호만 남기는 게 더 적절함.
-        try:
-            # 간단 데모용 – 실제 실험에서는 주석 처리하고 RLDM을 별도 프로세스로 돌리는 구조 추천
-            cmd = [
-                sys.executable,
-                DECEPTION_MGR,
-                "--model-path", os.path.join(PROJECT_ROOT, "mtd", "runs", "latest", "final_policy.pth"),
-                "--norm-meta-path", os.path.join(PROJECT_ROOT, "mtd", "runs", "latest", "norm_metadata.json"),
-                "--attacker-config", os.path.join(PROJECT_ROOT, "mtd", "config", "attacker_config.json"),
-                "--service-name", self.mtd_service_name,
-                "--dry-run",
-                "--max-steps", "1",
-                "--interval-sec", "0.1",
-                "--use-simple-runtime",
-            ]
-            # subprocess.Popen(cmd)  # 실제 호출하고 싶으면 주석 해제
-            logger.info("[RL-MTD] (데모용) rl_driven_deception_manager oneshot 호출 명령 생성.")
-        except Exception as e:
-            logger.error(f"[RL-MTD] RL 매니저 연동 실패: {e}")
+        logger.warning(f"🚨 [ALERT] 공격 탐지됨! Type: {attack_name} (ID: {attack_label}), mode={DEFENSE_MODE}")
+
+        # 공격 유형별 방어 전략 매핑 (공통)
+        mtd_strategy = "random"  # 기본값
+
+        if "gps" in attack_name.lower():
+            mtd_strategy = "ip_shuffle"
+        elif "flooding" in attack_name.lower() or "dos" in attack_name.lower():
+            mtd_strategy = "service_swap"
+        elif "scan" in attack_name.lower() or "discovery" in attack_name.lower():
+            mtd_strategy = "port_shuffle"
+
+        # --- 방어 모드별 처리 ---
+        if DEFENSE_MODE == "none":
+            # No-MTD: 탐지만 수행 (비교 실험 참고용)
+            logger.info("🔍 [MODE=none] MTD 방어는 수행하지 않습니다 (탐지만).")
+            return
+
+        elif DEFENSE_MODE == "cti_rule":
+            # 규칙 기반 MTD: iptables_mtd_controller 직접 제어
+            self._execute_cti_rule_mtd(mtd_strategy, attack_name)
+            self.defense_cooldown = current_time + 30  # 30초 쿨다운
+            return
+
+        elif DEFENSE_MODE == "rl":
+            # RL 기반 MTD 매니저 호출 (rl_driven_deception_manager.py)
+            logger.info(f"⚔️ [DEFENSE-RL] MTD 방어 수행: {mtd_strategy}")
+            try:
+                # NOTE: 실제 구현에서는 전략 이름을 RLDM에 전달하거나
+                #       CTI 이벤트를 shared_state로 넘기는 방식 등으로 확장 가능.
+                cmd = [sys.executable, DECEPTION_MGR, "--strategy", mtd_strategy, "--oneshot"]
+                # subprocess.Popen(cmd)  # 실제 실행 시 주석 해제
+                logger.info("✅ RL MTD 매니저 호출 (데모용, 실제 실행은 주석 해제 필요).")
+                self.defense_cooldown = current_time + 30  # 30초 쿨다운
+            except Exception as e:
+                logger.error(f"[DEFENSE-RL] 방어 실행 실패: {e}")
+            return
+
+        else:
+            logger.warning(f"알 수 없는 DEFENSE_MODE='{DEFENSE_MODE}' - 방어를 수행하지 않습니다.")
+            return
 
     # ------------------------------------------------------------------
     # 메인 루프
@@ -387,11 +379,14 @@ class CTIAgent:
 
                         # 3. 판단 및 대응
                         if attack_name.lower() != 'normal' and confidence > CONFIDENCE_THRESHOLD:
-                            # 필요하다면 "연속 N번 이상" 조건 추가 가능
+                            logger.info(
+                                f"[PREDICT] label_id={pred_label_id}, "
+                                f"name={attack_name}, conf={confidence:.3f}"
+                            )
                             self.execute_defense(pred_label_id, attack_name)
 
-                    except Exception:
-                        # 너무 시끄러우면 debug로만
+                    except Exception as e:
+                        # 추론 오류는 디버깅 시에만 확인
                         # logger.debug(f"Inference error: {e}")
                         pass
 

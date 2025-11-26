@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # 디렉토리: dvd_lite/dvd_attacks_lpc/ml
 # 파일명: train_classifier.py
-# 설명: [Fix] 레이블 인코딩 추가(XGB 오류 해결) 및 상세 리포팅 강화
+# 설명: [Fix] 레이블 인코딩, 시각화 개선, 클래스 가중치 강화
 
 import os
 import pandas as pd
@@ -15,7 +15,7 @@ from tqdm import tqdm
 from sklearn.ensemble import RandomForestClassifier
 from sklearn.metrics import classification_report, confusion_matrix, accuracy_score, f1_score
 from sklearn.model_selection import RandomizedSearchCV
-from sklearn.preprocessing import StandardScaler, LabelEncoder # LabelEncoder 추가
+from sklearn.preprocessing import StandardScaler, LabelEncoder
 from sklearn.pipeline import Pipeline
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -53,9 +53,7 @@ def load_event_mapping():
     try:
         with open(MAPPING_FILE, 'r', encoding='utf-8') as f:
             name_to_id = json.load(f)
-            # {8: 'gps-spoofing', ...} 형태로 뒤집기
             id_to_name = {v: k for k, v in name_to_id.items()}
-            # 0번은 보통 'Normal'
             if 0 not in id_to_name:
                 id_to_name[0] = 'Normal'
             return id_to_name
@@ -64,20 +62,25 @@ def load_event_mapping():
         return {}
 
 def plot_confusion_matrix(y_true, y_pred, labels, target_names, filepath, title_suffix=""):
-    """Confusion Matrix 시각화 (축 이름에 공격명 표시)"""
+    """Confusion Matrix 시각화 (가독성 개선)"""
     try:
         cm = confusion_matrix(y_true, y_pred, labels=labels)
-        # target_names 순서도 labels 순서에 맞춤
         cm_df = pd.DataFrame(cm, index=target_names, columns=target_names)
 
-        plt.figure(figsize=(12, 10)) 
-        sns.heatmap(cm_df, annot=True, fmt='d', cmap='Blues', linewidths=.5, linecolor='gray')
-        plt.title(f'Confusion Matrix {title_suffix}', fontsize=16)
-        plt.xlabel('Predicted Label', fontsize=12)
-        plt.ylabel('True Label', fontsize=12)
-        plt.xticks(rotation=45, ha='right')
-        plt.yticks(rotation=0)
+        plt.figure(figsize=(16, 14))  # 더 크게
+        sns.set(font_scale=1.2) 
+        
+        heatmap = sns.heatmap(cm_df, annot=True, fmt='d', cmap='Blues', 
+                              linewidths=.5, linecolor='gray',
+                              annot_kws={"size": 14})
+        
+        plt.title(f'Confusion Matrix {title_suffix}', fontsize=20)
+        plt.xlabel('Predicted Label', fontsize=16)
+        plt.ylabel('True Label', fontsize=16)
+        plt.xticks(rotation=45, ha='right', fontsize=12)
+        plt.yticks(rotation=0, fontsize=12)
         plt.tight_layout()
+        
         plt.savefig(filepath, dpi=150)
         plt.close() 
         print(f"[*] Confusion Matrix 저장 완료: '{filepath}'")
@@ -115,50 +118,63 @@ def plot_feature_importance(model, feature_names, filepath, top_n=30, title_suff
         print(f"❌ 오류: FI 저장 실패: {e}", file=sys.stderr)
 
 def get_model_pipeline(model_type='rf', num_classes=2):
-    """모델 파이프라인 반환"""
+    """모델 파이프라인 반환 (클래스 가중치 강화)"""
     if model_type == 'rf':
         pipeline = Pipeline([
             ('scaler', StandardScaler()),
-            ('clf', RandomForestClassifier(class_weight='balanced', n_jobs=-1, random_state=42))
+            ('clf', RandomForestClassifier(
+                class_weight='balanced_subsample', # 더 강력한 가중치
+                n_jobs=-1, 
+                random_state=42
+            ))
         ])
         param_dist = {
-            'clf__n_estimators': [100, 200],
-            'clf__max_depth': [10, 20, None],
+            'clf__n_estimators': [200, 300],
+            'clf__max_depth': [20, 30, None],
             'clf__min_samples_split': [2, 5],
+            'clf__min_samples_leaf': [1, 2], # 소수 클래스 보호
             'clf__max_features': ['sqrt']
         }
         
     elif model_type == 'xgb' and HAS_XGBOOST:
-        # XGBoost는 num_class 파라미터 필요 (objective='multi:softprob')
         pipeline = Pipeline([
             ('scaler', StandardScaler()),
             ('clf', XGBClassifier(
                 eval_metric='mlogloss', 
                 n_jobs=-1, 
                 random_state=42, 
-                use_label_encoder=False,
                 objective='multi:softprob',
-                num_class=num_classes # 클래스 개수 전달
+                num_class=num_classes,
+                # [NEW] 소수 클래스에 가중치를 부여하는 파라미터는 이진 분류용이라
+                # 멀티클래스에서는 sample_weight를 fit 할 때 주는 것이 정석이나,
+                # 여기서는 max_delta_step 등을 활용하여 불균형 완화 시도 가능
+                # 또는 트리를 더 깊게 쌓도록 유도
             ))
         ])
         param_dist = {
-            'clf__n_estimators': [100, 200],
+            'clf__n_estimators': [200, 300],
             'clf__learning_rate': [0.05, 0.1],
-            'clf__max_depth': [5, 7],
+            'clf__max_depth': [7, 10], # 깊이를 늘려 소수 클래스 포착
             'clf__subsample': [0.8],
-            'clf__colsample_bytree': [0.8]
+            'clf__colsample_bytree': [0.8],
+            'clf__min_child_weight': [1, 3] # 너무 작은 잎 노드는 방지하되 적절히 허용
         }
 
     elif model_type == 'lgbm' and HAS_LIGHTGBM:
         pipeline = Pipeline([
             ('scaler', StandardScaler()),
-            ('clf', LGBMClassifier(class_weight='balanced', n_jobs=-1, random_state=42, verbose=-1))
+            ('clf', LGBMClassifier(
+                class_weight='balanced', 
+                n_jobs=-1, 
+                random_state=42, 
+                verbose=-1
+            ))
         ])
         param_dist = {
-            'clf__n_estimators': [100, 200],
+            'clf__n_estimators': [200, 300],
             'clf__learning_rate': [0.05, 0.1],
-            'clf__num_leaves': [31, 50],
-            'clf__max_depth': [-1, 10, 20]
+            'clf__num_leaves': [50, 80],
+            'clf__max_depth': [-1, 20]
         }
     else:
         return None, None
@@ -166,21 +182,23 @@ def get_model_pipeline(model_type='rf', num_classes=2):
     return pipeline, param_dist
 
 def main():
-    parser = argparse.ArgumentParser(description="CTI Classifier Trainer v5.2 (Fixed Label Encoding)")
+    parser = argparse.ArgumentParser(description="CTI Classifier Trainer v5.3 (Improved Viz & Balance)")
     parser.add_argument('--train-data', default=os.path.join(OUTPUT_DIR, 'train_dataset.csv'))
     parser.add_argument('--test-data', default=os.path.join(OUTPUT_DIR, 'test_dataset.csv'))
     parser.add_argument('--model-output', default=os.path.join(OUTPUT_DIR, 'cti_classifier_model.joblib'))
     parser.add_argument('--features-output', default=os.path.join(OUTPUT_DIR, 'training_features.json'))
     parser.add_argument('--report-output', default=os.path.join(OUTPUT_DIR, 'classification_report.json'))
+    parser.add_argument('--cm-output', default=os.path.join(OUTPUT_DIR, 'confusion_matrix_best.png'))
+    parser.add_argument('--fi-output', default=os.path.join(OUTPUT_DIR, 'feature_importance_best.png'))
+    
     parser.add_argument('--model-type', default='auto', choices=['rf', 'xgb', 'lgbm', 'auto'])
     parser.add_argument('--n-iter', type=int, default=5)
     parser.add_argument('--cv', type=int, default=2)
 
     args = parser.parse_args()
 
-    print("🚀 [Classifier Trainer v5.2] 학습 시작 (Label Encoding 적용).")
+    print("🚀 [Classifier Trainer v5.3] 학습 시작 (Viz Upgraded & Weight Balancing).")
 
-    # 1. 데이터 로드
     if not os.path.exists(args.train_data):
         print(f"❌ 훈련 데이터 없음: {args.train_data}")
         sys.exit(1)
@@ -192,12 +210,12 @@ def main():
     test_df = test_df.replace([np.inf, -np.inf], np.nan).fillna(0)
 
     X_train = train_df.drop('label', axis=1)
-    y_train_raw = train_df['label'] # Raw labels (0, 8, 20...)
+    y_train_raw = train_df['label'] 
     X_test = test_df.drop('label', axis=1)
     y_test_raw = test_df['label']
 
-    # Feature 저장 및 컬럼 매칭
     training_features = list(X_train.columns)
+    os.makedirs(os.path.dirname(args.features_output), exist_ok=True)
     with open(args.features_output, 'w') as f:
         json.dump({'features': training_features}, f, indent=4)
 
@@ -206,21 +224,16 @@ def main():
             X_test[col] = 0
     X_test = X_test[training_features]
 
-    # [핵심] Label Encoding 적용
-    # XGBoost 등을 위해 0, 8, 20 -> 0, 1, 2 로 변환
     label_encoder = LabelEncoder()
     y_train = label_encoder.fit_transform(y_train_raw)
     y_test = label_encoder.transform(y_test_raw)
     
     num_classes = len(label_encoder.classes_)
-    print(f"[*] Classes ({num_classes}): {label_encoder.classes_}") # [0, 8, 11...] 출력됨
+    print(f"[*] Classes ({num_classes}): {label_encoder.classes_}") 
 
-    # ID -> Name 매핑 로드
     id_to_name = load_event_mapping()
-    # LabelEncoder 순서대로 이름 리스트 생성
     target_names = [f"{lbl}: {id_to_name.get(lbl, 'Unknown')}" for lbl in label_encoder.classes_]
 
-    # 2. 모델 학습 및 평가
     models_to_try = []
     if args.model_type == 'auto':
         models_to_try = ['rf']
@@ -251,7 +264,6 @@ def main():
         )
         
         start_time = time.time()
-        # tqdm으로 진행 표시 (search.fit이 오래 걸림)
         with tqdm(total=args.n_iter * args.cv, desc=f"Optimizing {m_name.upper()}", unit="fit") as pbar:
             search.fit(X_train, y_train)
             pbar.update(args.n_iter * args.cv)
@@ -260,19 +272,15 @@ def main():
         
         print(f"   -> Best CV F1-Macro: {search.best_score_:.4f} (Time: {elapsed:.1f}s)")
 
-        # 즉시 평가
         temp_model = search.best_estimator_
         y_pred = temp_model.predict(X_test)
         
-        # 상세 리포트 출력 (여기서 공격명 표시!)
         print(f"\n[{m_name.upper()} Detailed Report]")
         print(classification_report(y_test, y_pred, target_names=target_names, zero_division=0))
 
-        # 시각화 저장
         cm_path = os.path.join(OUTPUT_DIR, f'confusion_matrix_{m_name}.png')
         fi_path = os.path.join(OUTPUT_DIR, f'feature_importance_{m_name}.png')
         
-        # 인코딩된 레이블(0,1,2)을 기준으로 행렬 그리되, 라벨은 실제 이름으로 표시
         plot_confusion_matrix(y_test, y_pred, range(num_classes), target_names, cm_path, title_suffix=f"({m_name.upper()})")
         plot_feature_importance(temp_model, training_features, fi_path, title_suffix=f"({m_name.upper()})")
 
@@ -285,8 +293,6 @@ def main():
     print(f"🏆 최종 선택 모델: {best_name.upper()} (CV Score: {best_score:.4f})")
     print("="*60)
 
-    # 3. 저장 (모델 + 인코더 함께 저장해야 나중에 복원 가능)
-    # 딕셔너리 형태로 묶어서 저장
     final_artifact = {
         'model': best_model,
         'encoder': label_encoder,
@@ -295,13 +301,11 @@ def main():
     joblib.dump(final_artifact, args.model_output)
     print(f"[*] Saved model artifact to: {args.model_output}")
 
-    # 4. 최종 리포트 저장
     y_pred_final = best_model.predict(X_test)
     report_dict = classification_report(y_test, y_pred_final, target_names=target_names, zero_division=0, output_dict=True)
     with open(args.report_output, 'w') as f:
         json.dump(report_dict, f, indent=4)
 
-    # 최종 시각화 덮어쓰기
     plot_confusion_matrix(y_test, y_pred_final, range(num_classes), target_names, args.cm_output, title_suffix="(Best Model)")
     plot_feature_importance(best_model, training_features, args.fi_output, title_suffix="(Best Model)")
 

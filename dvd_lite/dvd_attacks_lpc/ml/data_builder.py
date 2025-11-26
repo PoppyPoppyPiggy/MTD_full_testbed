@@ -2,9 +2,8 @@
 # -*- coding: utf-8 -*-
 # 디렉토리: dvd_lite/dvd_attacks_lpc/ml
 # 파일명: data_builder.py
-# 설명: bus 로그(들)를 읽어 피처를 생성하고 CSV로 저장 (Full Logic Version)
-#       - [NEW] 수치형 데이터 강제 변환 및 결측치 처리(Sanitizing) 로직 추가
-#       - 단일 파일 지정 시에도 해당 디렉토리 내의 연관 로그(bus_*.log) 자동 탐색 기능 포함
+# 설명: bus 로그(들)를 읽어 피처를 생성하고 CSV로 저장 (Full Logic + Feature Engineering)
+#       - [NEW] 공격 특화 피처 엔지니어링 추가 (WiFi, Injection, Exfil 탐지용)
 
 import os
 import sys
@@ -17,7 +16,7 @@ from datetime import datetime
 from typing import Any, Dict, List, Optional, Generator
 
 import pandas as pd
-import numpy as np  # [추가] 수치 변환용
+import numpy as np 
 
 # 경고 메시지 제어
 pd.set_option('future.no_silent_downcasting', True)
@@ -113,6 +112,7 @@ class DataBuilder:
                         if not line: continue
                         try:
                             entry = json.loads(line)
+                            # 타임스탬프 표준화
                             if 'ts' not in entry:
                                 ts_str = entry.get('timestamp')
                                 if ts_str:
@@ -144,6 +144,7 @@ class DataBuilder:
     def extract_features(self, log_entry: Dict[str, Any]) -> Dict[str, Any]:
         """
         하나의 bus 로그 엔트리에서 상세 ML용 feature를 추출한다.
+        [NEW] 공격 특화 피처 추가
         """
         source = log_entry.get("source", "unknown")
         log_type = log_entry.get("type") or log_entry.get("event_type") or "unknown"
@@ -167,19 +168,23 @@ class DataBuilder:
 
         # ---- network_traffic_monitor ----
         elif source == "network_traffic_monitor":
-            if log_type in ("network_packet", "network_traffic_batch"):
-                if isinstance(data, dict):
-                    features.update({
-                        "pkt_length": data.get("length"),
-                        "pkt_proto": data.get("protocol"),
-                        "pkt_src_port": data.get("src_port"),
-                        "pkt_dst_port": data.get("dst_port"),
-                        "pkt_tcp_flags": data.get("tcp_flags"),
-                        "pkt_arp_op": data.get("arp_op"),
-                    })
-            else:
-                features["pkt_length"] = data.get("length")
-                features["pkt_proto"] = data.get("protocol")
+            # 기본 네트워크 피처
+            features["pkt_length"] = float(data.get("length", 0))
+            features["pkt_src_port"] = float(data.get("src_port", 0))
+            features["pkt_dst_port"] = float(data.get("dst_port", 0))
+            
+            # [NEW] 공격 특화 피처
+            # 1. WiFi Deauth 탐지 (802.11, deauth subtype)
+            features["is_wifi_mgmt"] = 1 if data.get("protocol") in ("802.11", "WiFi", "WLAN") else 0
+            features["is_deauth"] = 1 if data.get("subtype") == "deauth" else 0
+            features["is_disassoc"] = 1 if data.get("subtype") == "disassoc" else 0
+            
+            # 2. 주요 서비스 포트 접근 여부 (Scan/Dos 탐지)
+            dst_port = features["pkt_dst_port"]
+            features["is_mavlink_port"] = 1 if dst_port in (5760, 14550, 14551) else 0
+            features["is_web_port"] = 1 if dst_port in (80, 443, 3000, 8080) else 0
+            features["is_ftp_port"] = 1 if dst_port in (20, 21) else 0
+            features["is_ssh_port"] = 1 if dst_port == 22 else 0
 
         # ---- dvd_telemetry_monitor ----
         elif source == "dvd_telemetry_monitor":
@@ -197,13 +202,18 @@ class DataBuilder:
                 "groundspeed_ms": data.get("groundspeed_ms"),
                 "battery_v": data.get("battery_v"),
                 "battery_pct": data.get("battery_pct"),
-                "mode": data.get("mode"),
             })
+            
+            # [NEW] Waypoint Injection / Mode Change 탐지
+            mode = str(data.get("mode", "")).upper()
+            features["mode_is_guided"] = 1 if "GUIDED" in mode else 0
+            features["mode_is_auto"] = 1 if "AUTO" in mode else 0
+            features["mode_is_rtl"] = 1 if "RTL" in mode else 0
+            features["mode_is_stabilize"] = 1 if "STABILIZE" in mode else 0
 
         # ---- dvd_container_monitor ----
         elif source == "dvd_container_monitor":
             features.update({
-                "container_name": data.get("container_name"),
                 "cpu_load_pct": data.get("cpu_load_pct"),
                 "memory_pct": data.get("memory_pct"),
                 "net_rx_bytes": data.get("network_rx_bytes"),
@@ -212,13 +222,16 @@ class DataBuilder:
                 "disk_write_bytes": data.get("disk_write_bytes"),
                 "container_running": data.get("running"),
             })
+            # 컨테이너 이름 식별 (One-hot 대용)
+            c_name = str(data.get("container_name", "")).lower()
+            features["is_gcs_container"] = 1 if "ground-control" in c_name else 0
+            features["is_fc_container"] = 1 if "flight-controller" in c_name else 0
 
         # ---- qos_monitor ----
         elif source == "qos_monitor":
             features.update({
                 "avg_rtt_ms": data.get("avg_rtt_ms"),
                 "packet_loss_pct": data.get("packet_loss_pct"),
-                "ping_target": data.get("ping_target"),
                 "cpu_load_pct": data.get("cpu_load_pct"),
                 "mem_percent": (data.get("system_resources_cumulative") or {}).get("memory_percent"),
                 "disk_read_bps": (data.get("system_resources_rates") or {}).get("disk_read_bps"),
@@ -229,11 +242,13 @@ class DataBuilder:
 
         # ---- docker_event_monitor ----
         elif source == "docker_event_monitor":
-            features.update({
-                "docker_status": data.get("status"),
-                "docker_name": data.get("name"),
-                "docker_health": data.get("health_status"),
-            })
+            status = str(data.get("status", "")).lower()
+            features["docker_health"] = data.get("health_status")
+            
+            # [NEW] Exfiltration 탐지 (파일 접근/복사/실행)
+            features["is_exec_start"] = 1 if status == "exec_start" else 0
+            features["is_copy"] = 1 if "copy" in status or "archive" in status else 0
+            features["is_die"] = 1 if status == "die" else 0
 
         return features
 
@@ -286,10 +301,10 @@ class DataBuilder:
                         "pkt_proto", "pkt_tcp_flags", "pkt_arp_op", "mode", 
                         "docker_status", "docker_name", "docker_health", "ping_target"]
         
-        # 2. 수치형 후보 컬럼 식별 (전체 컬럼 중 exclude_cols 제외)
+        # 2. 수치형 후보 컬럼 식별
         numeric_cols = [c for c in df.columns if c not in exclude_cols]
         
-        # 3. 강제 형변환 (문자열 "None", "error" 등은 NaN으로 변환됨)
+        # 3. 강제 형변환
         for col in numeric_cols:
             df[col] = pd.to_numeric(df[col], errors='coerce')
             

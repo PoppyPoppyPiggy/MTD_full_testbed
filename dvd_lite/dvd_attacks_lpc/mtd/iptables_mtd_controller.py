@@ -38,11 +38,11 @@ logger = logging.getLogger("IptablesMTD")
 
 # 기본 타겟 설정 (사용자가 제공한 정보 기반)
 DEFAULT_TARGETS = {
-    "FC": {"ip": "10.13.0.2", "ports": [14550]},          # Flight Controller (MAVLink)
-    "CC": {"ip": "10.13.0.3", "ports": [3000, 14550]},    # Companion Computer (Web, MAVLink)
-    "GCS": {"ip": "10.13.0.4", "ports": [14550]},         # Ground Control Station
-    "SIM": {"ip": "10.13.0.5", "ports": [5760, 11311]},   # Simulator (SITL, ROS)
-    "DECOY": {"ip": "10.13.0.7", "ports": [14550, 3000]}, # Decoy Container (MAVLink, Web)
+    "FC":   {"ip": "10.13.0.2", "ports": [14550]},          # Flight Controller (MAVLink)
+    "CC":   {"ip": "10.13.0.3", "ports": [3000, 14550]},    # Companion (Web, MAVLink)
+    "GCS":  {"ip": "10.13.0.4", "ports": [14550]},          # Ground Control Station
+    "SIM":  {"ip": "10.13.0.5", "ports": [5760, 11311]},    # Simulator (SITL, ROS)
+    "DECOY":{"ip": "10.13.0.7", "ports": [14550, 3000]},    # Decoy Container
 }
 
 
@@ -285,14 +285,21 @@ if __name__ == "__main__":
     # 간단 테스트 실행 (dry_run=True 이므로 iptables는 실제로는 변경되지 않음)
     ctl = IptablesMTDController(dry_run=True)
 
-    # 서비스 등록: FC / MAVLink → fc_mavlink
+    # --- 여러 서비스 등록 예시 ---
+    # FC MAVLink
     ctl.register_service("fc_mavlink", "FC", 0)
+    # Companion Web
+    ctl.register_service("cc_web", "CC", 0)
+    # Companion MAVLink
+    ctl.register_service("cc_mavlink", "CC", 1)
+    # GCS MAVLink
+    ctl.register_service("gcs_mavlink", "GCS", 0)
 
-    print("\n--- [Test 1] Shuffling IP & Port ---")
+    print("\n--- [Test 1] Shuffling IP & Port (fc_mavlink) ---")
     ctl.shuffle_network("fc_mavlink", intensity=1.0)
 
-    print("\n--- [Test 2] Activating Decoy ---")
-    ctl.enable_decoy("fc_mavlink")
+    print("\n--- [Test 2] Activating Decoy (cc_web) ---")
+    ctl.enable_decoy("cc_web")
 
     print("\n--- Current Status ---")
     print(ctl.get_mapping_info())

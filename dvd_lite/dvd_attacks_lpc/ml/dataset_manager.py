@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # 디렉토리: dvd_lite/dvd_attacks_lpc/ml
 # 파일명: dataset_manager.py
-# 설명: [Enhanced] 데이터 불균형 해소를 위한 강력한 Resampling (Under + Over) 적용
+# 설명: [Enhanced] 데이터 불균형 해소를 위한 강력한 Resampling (Under + Over + SMOTE) 적용
 
 import os
 import glob
@@ -12,6 +12,13 @@ import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
 from sklearn.utils import resample
+
+# SMOTE (Optional)
+try:
+    from imblearn.over_sampling import SMOTE
+    HAS_IMBLEARN = True
+except ImportError:
+    HAS_IMBLEARN = False
 
 # ----------------------------
 # 로깅 설정
@@ -48,11 +55,11 @@ class DatasetManager:
             return None
         return max(list_of_files, key=os.path.getctime)
 
-    def balance_training_data(self, X_train, y_train, target_samples=2000, max_samples=5000):
+    def balance_training_data(self, X_train, y_train, target_samples=3000, max_samples=4000):
         """
-        [핵심] 학습 데이터 균형 맞추기 (Under + Over Sampling)
-        - 소수 클래스: target_samples(2000개)까지 증강 (노이즈 추가)
-        - 다수 클래스: max_samples(5000개)까지 축소 (무작위 선택)
+        [개선] 더 균형 잡힌 샘플링
+        - 소수 클래스: 3000개까지 증강 (기존 2000) - 더 강한 노이즈 추가
+        - 다수 클래스: 4000개로 축소 (기존 5000)
         """
         logger.info(f"⚖️ [Balancing] 데이터 균형 조정 시작 (Target: {target_samples}, Max: {max_samples})...")
         
@@ -78,7 +85,7 @@ class DatasetManager:
                 
             # 2. 소수 클래스 (Over-sampling with Noise)
             elif count < target_samples:
-                logger.info(f"   -> Label {label}: {count} -> {target_samples} (Over-sampling + Noise)")
+                logger.info(f"   -> Label {label}: {count} -> {target_samples} (Over-sampling + Enhanced Noise)")
                 resampled_subset = resample(
                     class_subset,
                     replace=True, # 복원 추출 (늘리기)
@@ -86,14 +93,18 @@ class DatasetManager:
                     random_state=42
                 )
                 
-                # 수치형 컬럼에 노이즈 추가
+                # [개선] 더 강한 노이즈 (5% 수준) 및 컬럼별 특성 반영
                 numeric_cols = resampled_subset.select_dtypes(include=[np.number]).columns.tolist()
                 if label_col in numeric_cols:
                     numeric_cols.remove(label_col)
                 
-                # 노이즈 강도 설정 (표준편차의 1%)
-                noise = np.random.normal(0, 0.01, resampled_subset[numeric_cols].shape)
-                resampled_subset[numeric_cols] += noise
+                # 각 컬럼의 표준편차 기반 노이즈 추가
+                for col in numeric_cols:
+                    col_std = resampled_subset[col].std()
+                    if col_std > 0:
+                        # 표준편차의 5% 만큼의 노이즈
+                        noise = np.random.normal(0, col_std * 0.05, len(resampled_subset))
+                        resampled_subset[col] = resampled_subset[col] + noise
                 
                 balanced_dfs.append(resampled_subset)
                 
@@ -110,8 +121,38 @@ class DatasetManager:
         
         return final_train_df.drop(columns=[label_col]), final_train_df[label_col]
 
-    def run(self, input_file=None):
-        logger.info("🚀 [Dataset Manager v5.1 (Balanced)] 시작.")
+    def balance_with_smote(self, X_train, y_train):
+        """SMOTE를 이용한 소수 클래스 증강 (가능할 경우 사용)"""
+        if not HAS_IMBLEARN:
+            logger.warning("⚠️ imbalanced-learn 라이브러리 없음. 기본 resampling 방식 사용.")
+            return self.balance_training_data(X_train, y_train)
+            
+        logger.info("⚖️ [SMOTE] 합성 샘플 생성 중...")
+        
+        # 클래스별 최소 샘플 수 확인 (k_neighbors 오류 방지)
+        class_counts = y_train.value_counts()
+        min_samples = class_counts.min()
+        
+        # k_neighbors는 최소 샘플 수보다 작아야 함
+        k = min(5, min_samples - 1) if min_samples > 1 else 1
+        
+        try:
+            smote = SMOTE(
+                sampling_strategy='not majority',  # 다수 클래스 제외하고 나머지 증강
+                k_neighbors=k,
+                random_state=42
+            )
+            X_resampled, y_resampled = smote.fit_resample(X_train, y_train)
+            
+            logger.info(f"✅ SMOTE 완료: {len(X_train)} -> {len(X_resampled)} 샘플")
+            return X_resampled, y_resampled
+            
+        except Exception as e:
+            logger.error(f"SMOTE 실패: {e}. 기본 방식 사용.")
+            return self.balance_training_data(X_train, y_train)
+
+    def run(self, input_file=None, use_smote=False):
+        logger.info("🚀 [Dataset Manager v5.2 (Enhanced)] 시작.")
         
         if not input_file:
             input_file = self.get_latest_processed_file()
@@ -122,7 +163,10 @@ class DatasetManager:
         
         try:
             df = pd.read_csv(input_file, low_memory=False)
-            df = df.apply(pd.to_numeric, errors='ignore')
+            # [FIX] errors='ignore' 대신 coerce 사용 후 fillna
+            cols = df.columns
+            df[cols] = df[cols].apply(pd.to_numeric, errors='coerce').fillna(0)
+            
         except Exception as e:
             logger.error(f"❌ 로드 실패: {e}")
             return
@@ -134,13 +178,13 @@ class DatasetManager:
         # 학습에 불필요한 컬럼 제거
         drop_cols = ['source', 'log_type', 'attack_name', 'scenario', 
                      'runner_event', 'timestamp', 'current_attack_name', 
-                     'container_name', 'docker_name']
+                     'container_name', 'docker_name', 'ts']
         cols_to_drop = [c for c in drop_cols if c in df.columns]
         
-        X = df.drop(columns=cols_to_drop + ['label']) # label도 X에서 제외
+        X = df.drop(columns=cols_to_drop + ['label']) 
         y = df['label']
         
-        # 수치형만 선택
+        # 수치형만 선택 (이미 위에서 변환했지만 안전장치)
         X = X.select_dtypes(include=[np.number])
         
         # Train / Test 분리
@@ -150,14 +194,19 @@ class DatasetManager:
                 X, y, test_size=self.test_size, stratify=y, random_state=42
             )
         except ValueError:
+            # stratify 실패 시 (클래스 샘플이 너무 적을 때)
             X_train, X_test, y_train, y_test = train_test_split(
                 X, y, test_size=self.test_size, random_state=42
             )
 
-        # [핵심] 학습 데이터 균형 맞추기 (Target: 2000, Max: 5000)
-        X_train_bal, y_train_bal = self.balance_training_data(
-            X_train, y_train, target_samples=2000, max_samples=5000
-        )
+        # [핵심] 학습 데이터 균형 맞추기
+        if use_smote and HAS_IMBLEARN:
+            X_train_bal, y_train_bal = self.balance_with_smote(X_train, y_train)
+        else:
+            # 기본: Target 3000, Max 4000으로 조정
+            X_train_bal, y_train_bal = self.balance_training_data(
+                X_train, y_train, target_samples=3000, max_samples=4000
+            )
 
         # 저장
         train_output = pd.concat([X_train_bal, y_train_bal], axis=1)
@@ -177,6 +226,7 @@ if __name__ == "__main__":
     parser.add_argument("--processed-dir", default=DEFAULT_PROCESSED_DIR)
     parser.add_argument("--output-dir", default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--input", help="Direct path to input csv")
+    parser.add_argument("--smote", action="store_true", help="Use SMOTE for balancing")
     args = parser.parse_args()
     
     manager = DatasetManager(
@@ -184,4 +234,4 @@ if __name__ == "__main__":
         output_dir=args.output_dir,
         test_size=args.test_size
     )
-    manager.run(input_file=args.input)
+    manager.run(input_file=args.input, use_smote=args.smote)
