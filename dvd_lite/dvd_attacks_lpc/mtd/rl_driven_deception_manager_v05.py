@@ -17,7 +17,7 @@ from .qos_monitor import QoSMonitor
 from .mtd_scoring import MTDScoring
 
 from .rl_model_v05 import PPOAgent
-from .rl_config_v06 import FEATURE_KEYS, STATE_DIM, ACTION_DIM, FEATURE_NORM_METADATA
+from .rl_config_v05 import FEATURE_KEYS, STATE_DIM, ACTION_DIM, FEATURE_NORM_METADATA, ACT_THRESHOLDS, ACTION_PARAM_KEYS
 
 log = logging.getLogger(__name__)
 
@@ -36,28 +36,46 @@ class RLPolicyInterface:
         vec = [raw_obs.get(key, 0.0) for key in FEATURE_KEYS]
         return np.clip(np.array(vec, dtype=np.float32), 0.0, 1.0)
 
-    def select_action(self, obs_dict: Dict[str, float]) -> int:
+    def select_multi_action(self, obs_dict: Dict[str, float]) -> Dict[str, Any]:
+        """
+        [IMPROVEMENT] Multi-Action Selection
+        Returns a dictionary of actions based on thresholds instead of a single ID.
+        """
         obs_vec = self.preprocess_obs(obs_dict)
         obs_tensor = torch.as_tensor(obs_vec, dtype=torch.float32).to(self.device).unsqueeze(0)
         
         with torch.no_grad():
-            action, _, _ = self.agent.get_action_and_value(obs_tensor)
-            action_np = action.cpu().numpy().squeeze()
+            action_raw, _, _ = self.agent.get_action_and_value(obs_tensor)
+            action_np = action_raw.cpu().numpy().squeeze()
             
-        # Action Mapping Logic (Continuous -> Discrete ID for IPTables Controller)
-        # 0: No-op, 1: IP Shuffle, 2: Port Shuffle, 3: Decoy
-        shuffle_intensity = action_np[2]
-        decoy_ratio = action_np[5]
+        # Map Continuous Output [-1, 1] to [0, 1]
+        def _scale(idx):
+            return 0.5 * (action_np[idx] + 1.0)
+            
+        # Create Action Dictionary
+        action_dict = {
+            "shuffle_intensity": _scale(2),
+            "decoy_ratio": _scale(5),
+            "blacklist_aggression": _scale(3),
+            "blacklist_duration": _scale(4),
+            "dnat_target_focus": _scale(0),
+            "dnat_decoy_focus": _scale(1)
+        }
         
-        if shuffle_intensity > 0.7: return 1
-        elif shuffle_intensity > 0.4: return 2
-        elif decoy_ratio > 0.5: return 3
-        else: return 0
+        # Determine Boolean Flags based on Thresholds
+        flags = {
+            "do_shuffle": action_dict["shuffle_intensity"] >= ACT_THRESHOLDS["SHUFFLE"],
+            "active_decoy": action_dict["decoy_ratio"] >= ACT_THRESHOLDS["DECOY_ACTIVE"],
+            "active_blacklist": action_dict["blacklist_aggression"] >= ACT_THRESHOLDS["BL_ACTIVE"]
+        }
+        
+        return {**action_dict, **flags}
 
 class RLDrivenDeceptionManager:
     def __init__(self, config_path: str | Path, dry_run: bool = True):
         self.config = MTDConfig.load(config_path)
         self.state_store = MTDStateStore(self.config.state_file)
+        # Note: IPTablesMTDController needs update to handle dict input!
         self.iptables = IPTablesMTDController(self.config, self.state_store, dry_run)
         self.cti_reader = CtiStatusReader(self.config.cti_status_file)
         self.qos_monitor = QoSMonitor(self.state_store)
@@ -71,17 +89,20 @@ class RLDrivenDeceptionManager:
         cti = self.cti_reader.read()
         qos = self.qos_monitor.sample(cti.src_ip)
 
-        # Build Observation from real metrics
+        # Build Observation
         obs = {
             "cti_alert_rate": float(cti.threat_level),
             "uptime_ratio": 1.0 - float(qos.loss_rate),
             "breach_success_rate": 1.0 if cti.is_breach else 0.0
         }
         
-        action_id = self.policy.select_action(obs)
-        action = self.config.actions[action_id] if action_id < len(self.config.actions) else self.config.actions[0]
+        # [IMPROVEMENT] Get Multi-Action Dict
+        multi_action = self.policy.select_multi_action(obs)
         
-        metrics = self.iptables.apply_action(action, state)
+        # Apply Multi-Action via Controller
+        # NOTE: apply_action in controller must be updated to accept dict
+        metrics = self.iptables.apply_action(multi_action, state)
+        
         state.step += 1
         self.state_store.save(state)
         return metrics
