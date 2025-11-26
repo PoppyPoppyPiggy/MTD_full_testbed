@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """
 Minimal iptables controller for demonstration purposes.
 
@@ -9,7 +10,8 @@ instead of modifying the system firewall.
 """
 
 import logging
-from typing import List
+from typing import List, Optional
+import subprocess
 
 logger = logging.getLogger(__name__)
 
@@ -17,16 +19,34 @@ logger = logging.getLogger(__name__)
 class IptablesController:
     """Controller for managing iptables rules."""
     def __init__(self, dry_run: bool = True) -> None:
+        # When dry_run is True, commands are only logged and not executed.
         self.dry_run = dry_run
 
-    def _run_cmd(self, cmd: List[str]) -> None:
-        """Run or log the iptables command depending on dry_run."""
-        if self.dry_run:
-            logger.info(f"[DryRun] iptables command: {' '.join(cmd)}")
-        else:
-            import subprocess
-            subprocess.run(cmd, check=True)
+    def _run_cmd(self, cmd: List[str], ignore_errors: bool = False) -> None:
+        """
+        Run or log the iptables command depending on dry_run.
 
+        :param cmd: iptables command as a list of arguments.
+        :param ignore_errors: if True, swallow CalledProcessError and only log.
+        """
+        cmd_str = " ".join(cmd)
+
+        if self.dry_run:
+            logger.info(f"[DryRun] iptables command: {cmd_str}")
+            return
+
+        try:
+            subprocess.run(cmd, check=True)
+        except subprocess.CalledProcessError as e:
+            if ignore_errors:
+                logger.debug(f"[IGNORED ERROR] iptables command failed: {cmd_str} ({e})")
+                return
+            logger.error(f"[ERROR] iptables command failed: {cmd_str} ({e})")
+            raise
+
+    # ------------------------------------------------------------------
+    # High-level helpers
+    # ------------------------------------------------------------------
     def add_drop_rule(self, ip: str) -> None:
         """Add a rule to drop traffic from the specified IP."""
         cmd = ["iptables", "-A", "INPUT", "-s", ip, "-j", "DROP"]
@@ -52,27 +72,6 @@ class IptablesController:
         ]
         self._run_cmd(cmd)
 
-    def shuffle_address(self, original_ip: str, original_port: int,
-                        new_ip: str, new_port: int) -> None:
-        """
-        Shuffle both the destination IP and port of an incoming connection.
-
-        This helper performs a combined IP/port shuffle by first
-        redirecting traffic arriving on ``original_port`` to ``new_port`` on the local
-        host and then rewriting the destination IP to ``new_ip``.  In effect,
-        it makes services appear to have moved to a completely different network
-        location.
-
-        :param original_ip: The old VIP or service IP to match.
-        :param original_port: The original port number for the service.
-        :param new_ip: The new IP address to redirect traffic to.
-        :param new_port: The new port number to redirect traffic to.
-        """
-        # Shuffle the port: change incoming traffic on original_port to new_port
-        self.shuffle_port(original_port, new_port)
-        # Shuffle the IP: rewrite traffic destined for original_ip to the new_ip
-        self.shuffle_ip(original_ip, new_ip)
-
     def shuffle_ip(self, src_ip: str, dest_ip: str) -> None:
         """
         Redirect all traffic destined for ``src_ip`` to ``dest_ip``.
@@ -86,7 +85,38 @@ class IptablesController:
         ]
         self._run_cmd(cmd)
 
-    def swap_service(self, port: int, decoy_ip: str, decoy_port: int | None = None) -> None:
+    def shuffle_address(
+        self,
+        original_ip: str,
+        original_port: int,
+        new_ip: str,
+        new_port: int
+    ) -> None:
+        """
+        Shuffle both the destination IP and port of an incoming connection.
+
+        This helper performs a combined IP/port shuffle by first
+        redirecting traffic arriving on ``original_port`` to ``new_port`` on the local
+        host and then rewriting the destination IP to ``new_ip``.  In effect,
+        it makes services appear to have moved to a completely different
+        network location.
+
+        :param original_ip: The old VIP or service IP to match.
+        :param original_port: The original port number for the service.
+        :param new_ip: The new IP address to redirect traffic to.
+        :param new_port: The new port number to redirect traffic to.
+        """
+        # Shuffle the port: change incoming traffic on original_port to new_port
+        self.shuffle_port(original_port, new_port)
+        # Shuffle the IP: rewrite traffic destined for original_ip to the new_ip
+        self.shuffle_ip(original_ip, new_ip)
+
+    def swap_service(
+        self,
+        port: int,
+        decoy_ip: str,
+        decoy_port: Optional[int] = None
+    ) -> None:
         """
         Swap a service running on ``port`` to a decoy service.
 

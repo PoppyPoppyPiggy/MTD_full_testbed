@@ -170,11 +170,13 @@ class MTDEnvironment(gym.Env):
     metadata = {"render_modes": ["human"], "render_fps": 4}
     max_episode_steps = 200
 
-    def __init__(self, seed=None, seeker_level=2, log_dir=None):
+    def __init__(self, seed=None, seeker_level=2, log_dir=None,
+                 seeker_profiles_path: str | None = None):
         super().__init__()
         self.rng = np.random.default_rng(seed)
         self.seeker_level = seeker_level
         self.current_step = 0
+        self.seeker_profiles_path = seeker_profiles_path  # NEW
 
         # Load endpoints from attacker_config.json or fall back to defaults
         self.endpoints = self._load_endpoints_from_config()
@@ -184,9 +186,12 @@ class MTDEnvironment(gym.Env):
         # Components
         self.cti = HybridCTI(self.rng)
         self.blacklister = SimulatedBlacklister(self.rng)
-        self.seeker = SimulatedHeuristicSeeker(self.rng, seeker_level, self.endpoints)
+        # 여기서 seeker_level + profiles_path 전달
+        self.seeker = SimulatedHeuristicSeeker(
+            self.rng, seeker_level, self.endpoints, profiles_path=self.seeker_profiles_path
+        )
 
-        # Action and observation spaces
+        # Action and observation spaces ...
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(len(ACTION_PARAM_KEYS),), dtype=np.float32)
         self.observation_space = spaces.Box(low=-100.0, high=100.0, shape=(len(FEATURE_KEYS),), dtype=np.float32)
 
@@ -236,7 +241,10 @@ class MTDEnvironment(gym.Env):
         self._reset_counters()
         self.cti = HybridCTI(self.rng)
         self.blacklister = SimulatedBlacklister(self.rng)
-        self.seeker = SimulatedHeuristicSeeker(self.rng, self.seeker_level, self.endpoints)
+        # 현재 self.seeker_level 값으로 새 seeker 재생성
+        self.seeker = SimulatedHeuristicSeeker(
+            self.rng, self.seeker_level, self.endpoints, profiles_path=self.seeker_profiles_path
+        )
         return self._get_state(), self._get_current_metrics()
 
     def _apply_mtd_strategy(self, action):

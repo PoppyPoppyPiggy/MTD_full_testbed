@@ -4,11 +4,11 @@ rl_eval_v06.py
 =================
 
 This module provides a simple evaluation routine for a PPO agent
-trained on the v06 MTD environment.  Given a saved policy
+trained on the v06 MTD environment. Given a saved policy
 (e.g. ``final_policy.pth``) it will run a number of episodes in
 ``MTDEnvironment`` and report aggregated metrics such as mean total
 reward, defence success rate, combined MTD score and mean values of
-each policy parameter.  It reuses the ``calculate_metrics_from_infos``
+each policy parameter. It reuses the ``calculate_metrics_from_infos``
 function from the training script to summarise per‑episode metrics.
 
 Example usage::
@@ -18,7 +18,7 @@ Example usage::
         --episodes 50 --seeker-level 2 --max-steps 200
 
 The script prints a JSON‑like summary of averaged metrics across all
-episodes.  You can adjust the number of evaluation episodes, the
+episodes. You can adjust the number of evaluation episodes, the
 attacker difficulty (seeker level) and the maximum steps per episode
 via command line arguments.
 
@@ -37,11 +37,12 @@ import numpy as np
 import torch
 
 # Import the environment, model architecture and config
+# NOTE: Ensure rl_environment_v06.py, rl_config_v06.py, and rl_train_v06.py exist and are correct in the environment.
 from .rl_environment_v06 import MTDEnvironment
 # We define our own ActorCritic here rather than importing from the
-# training module.  The architecture matches the one used during
+# training module. The architecture matches the one used during
 # training (two hidden layers with Tanh activations, separate actor
-# mean head, critic head and a learnable log_std parameter).  This
+# mean head, critic head and a learnable log_std parameter). This
 # definition ensures that we can load a saved policy's state dict
 # without requiring the original training module.
 import torch.nn as nn
@@ -110,6 +111,8 @@ class ActorCritic(nn.Module):
         entropy = dist.entropy().sum(dim=1)
         value = self.critic(feats).flatten()
         return log_prob, entropy, value
+
+# Assuming these are defined in the correct imported modules:
 from .rl_config_v06 import STATE_DIM, ACTION_DIM
 from .rl_train_v06 import calculate_metrics_from_infos
 
@@ -157,7 +160,9 @@ def evaluate(model_path: str,
         while not done and steps < max_steps:
             state_tensor = torch.as_tensor(state, dtype=torch.float32, device=device_t).unsqueeze(0)
             with torch.no_grad():
-                action, _, _ = model.get_action_and_value(state_tensor)
+                # FIX: Model returns 4 values, explicitly unpack all 4.
+                action, _, _, _ = model.get_action_and_value(state_tensor)
+                
             # Convert tensor to numpy array for the environment
             action_np = action.squeeze(0).cpu().numpy()
             next_state, reward, terminated, truncated, info = env.step(action_np)

@@ -1,0 +1,39 @@
+{
+  "levels": {
+    "0": {
+      "scan_effort": 0.2,          // 포트 스캔 빈도 / 범위 약함
+      "attack_bias": 0.2,          // 디코이 구분 거의 못함
+      "ip_change_prob": 0.0,       // 블랙리스트 회피 없음
+      "breach_prob": 0.1,          // 성공적인 breach 확률 낮음
+      "exploit_prob": 0.2          // 익스플로잇 성공 확률
+    },
+    "1": {
+      "scan_effort": 0.4,
+      "attack_bias": 0.4,
+      "ip_change_prob": 0.1,
+      "breach_prob": 0.2,
+      "exploit_prob": 0.3
+    },
+    "2": {
+      "scan_effort": 0.6,
+      "attack_bias": 0.5,
+      "ip_change_prob": 0.3,
+      "breach_prob": 0.4,
+      "exploit_prob": 0.5
+    },
+    "3": {
+      "scan_effort": 0.8,
+      "attack_bias": 0.7,
+      "ip_change_prob": 0.5,
+      "breach_prob": 0.6,
+      "exploit_prob": 0.7
+    },
+    "4": {
+      "scan_effort": 1.0,
+      "attack_bias": 0.9,
+      "ip_change_prob": 0.8,
+      "breach_prob": 0.8,
+      "exploit_prob": 0.9
+    }
+  }
+}
