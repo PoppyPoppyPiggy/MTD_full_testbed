@@ -5,16 +5,13 @@ import random
 import logging
 import json
 import os
-import subprocess
-import time
 from collections import deque
 
-# [FIX] rl_config_v05에서 필요한 상수들 가져오기
 from .rl_config_v05 import (
     RL_CONFIG,
     FEATURE_KEYS,
     ACTION_PARAM_KEYS,
-    ACT_THRESHOLDS, # [NEW] 복합 행동 임계값
+    ACT_THRESHOLDS,
     COST_MTD_ACTION,
     COST_SHUFFLE,
     COST_DECOY,
@@ -26,6 +23,7 @@ from .rl_config_v05 import (
     REWARD_NORMAL,
     MTD_STATE_PATH
 )
+from .seeker_agent import Endpoint, SimulatedHeuristicSeeker
 
 logger = logging.getLogger("RLEnv")
 
@@ -39,31 +37,9 @@ def _safe_divide(numerator, denominator):
     return numerator / denominator if denominator != 0 else 0.0
 
 # -------------------------
-# Endpoint Class
-# -------------------------
-class Endpoint:
-    def __init__(self, ip, name="Unknown", is_decoy=False):
-        self.ip = ip
-        self.name = name
-        self.is_decoy = is_decoy
-        self.scan_progress = 0.0
-        self.exploit_progress = 0.0
-        self.breach_progress = 0.0
-        self.state = 0 # 0: Safe, 1: Scanned, 2: Exploited, 3: Breached
-
-    def reset_progress(self):
-        self.scan_progress = 0.0
-        self.exploit_progress = 0.0
-        self.breach_progress = 0.0
-        self.state = 0
-
-# -------------------------
 # Simulated Components
 # -------------------------
 class HybridCTI:
-    """
-    CTI Agent: 실제 mtd_state.json과 시뮬레이션 데이터를 혼합하여 위협 수준 판단
-    """
     def __init__(self, rng):
         self.rng = rng
         self.alert_history = deque([0] * 100, maxlen=100)
@@ -78,18 +54,15 @@ class HybridCTI:
         return {}
 
     def process_traffic(self, is_suspicious_sim):
-        # 1. 실제 상태 확인
         real_state = self.get_real_state()
         real_alert = real_state.get("attack_detected", False)
         real_score = real_state.get("risk_score", 0.0)
 
-        # 2. 시뮬레이션 값 (Fallback)
         if is_suspicious_sim:
             sim_score = self.rng.normal(loc=0.8, scale=0.1)
         else:
             sim_score = self.rng.normal(loc=0.1, scale=0.1)
         
-        # 3. 병합 (실제 탐지가 우선)
         if real_alert:
             final_score = max(real_score, sim_score)
             is_alert = True
@@ -105,9 +78,6 @@ class HybridCTI:
         return sum(self.alert_history) / self.alert_history.maxlen
 
 class SimulatedBlacklister:
-    """
-    Blacklister: CTI 점수에 따라 IP 차단 수행
-    """
     def __init__(self, rng):
         self.rng = rng
         self.blacklist_policy = {"aggression": 0.0, "duration": 0}
@@ -118,11 +88,10 @@ class SimulatedBlacklister:
         self.blacklist_policy["duration"] = int(duration * 1000)
 
     def apply_block(self, ip, cti_score):
-        # CTI 점수가 방어자의 민감도 설정보다 높으면 차단
-        # aggression이 높을수록(1.0) 작은 점수에도 차단 (threshold가 낮아짐)
-        threshold = 1.0 - self.blacklist_policy["aggression"]
+        # Threshold decreases as aggression increases
+        threshold = 1.0 - (self.blacklist_policy["aggression"] * 0.8) # Max aggression -> 0.2 threshold
         if cti_score >= threshold:
-            self.blocked_ips[ip] = self.blacklist_policy["duration"]
+            self.blocked_ips[ip] = max(10, self.blacklist_policy["duration"])
             return True
         return False
 
@@ -138,104 +107,8 @@ class SimulatedBlacklister:
     def get_size_ratio(self, total):
         return min(1.0, len(self.blocked_ips) / max(1, total))
 
-class SimulatedHeuristicSeeker:
-    """
-    [IMPROVEMENT] Realistic Seeker (공격자)
-    - 방어자의 상태(bl_level 등)를 알지 못함.
-    - 오직 자신의 의도(Intent)와 진행 상황(Progress)만 관리.
-    - 외부 환경(Environment)이 성공/실패 여부를 결정하여 알려줌.
-    """
-    def __init__(self, rng, level, endpoints):
-        self.rng = rng
-        self.endpoints = endpoints
-        self.current_target = self.rng.choice(endpoints)
-        
-        # Seeker Level에 따른 파라미터 설정 (스캔 노력, 공격 속도, IP 변경 확률)
-        # Level 0~4 mapping
-        params = {
-            0: (0.1, 0.1, 0.05),
-            1: (0.3, 0.2, 0.1),
-            2: (0.5, 0.5, 0.2),
-            3: (0.7, 0.7, 0.3),
-            4: (0.9, 0.9, 0.5)
-        }
-        p = params.get(level, params[2])
-        self.scan_effort = p[0]
-        self.attack_speed = p[1]
-        self.ip_change_prob = p[2]
-        
-        self.seeker_ip = "192.168.1.100" # 초기 공격자 IP
-        self.seeker_params = (self.scan_effort, 0.5) # (scan, bias)
-
-    def step(self, is_mtd_shuffle):
-        """
-        Seeker의 한 스텝 행동 결정.
-        결과값은 Seeker의 '의도'일 뿐이며, 실제 성공 여부는 Env에서 판정함.
-        """
-        # 1. MTD Shuffle 발생 시: 연결 끊김, 재설정 필요
-        if is_mtd_shuffle:
-            for ep in self.endpoints:
-                ep.reset_progress()
-            self.current_target = self.rng.choice(self.endpoints)
-            
-            # [CRITICAL FIX] 셔플 상황에서도 모든 키를 반환해야 KeyError 방지
-            return {
-                "seeker_ip": self.seeker_ip,
-                "is_scan": True, # 재탐색 중
-                "intent": "reorient",
-                "target_ep": None,
-                "is_exploit_attempt": False, 
-                "is_breach_attempt": False
-            }
-
-        t = self.current_target
-        intent = "scan"
-        
-        # 2. 공격 진행 (Intent 생성)
-        # 공격 속도만큼 진행도 증가
-        t.exploit_progress += self.attack_speed
-        
-        is_exploit_attempt = False
-        is_breach_attempt = False
-        
-        if t.exploit_progress >= 1.0:
-            intent = "exploit"
-            is_exploit_attempt = True
-            
-        if t.breach_progress >= 1.0:
-            intent = "breach"
-            is_breach_attempt = True
-        
-        return {
-            "seeker_ip": self.seeker_ip,
-            "is_scan": True,
-            "intent": intent,
-            "target_ep": t,
-            "is_exploit_attempt": is_exploit_attempt,
-            "is_breach_attempt": is_breach_attempt
-        }
-
-    def handle_outcome(self, outcome):
-        """
-        환경으로부터 행동의 결과를 피드백 받음.
-        """
-        t = self.current_target
-        if outcome == "blocked":
-            # 차단당함: 진행도 후퇴 또는 IP 변경 시도
-            t.exploit_progress = max(0.0, t.exploit_progress - 0.5)
-            t.breach_progress = max(0.0, t.breach_progress - 0.5)
-            
-            # 고난도 Seeker는 IP 변경 시도 (회피)
-            if self.rng.random() < self.ip_change_prob:
-                self.seeker_ip = f"192.168.1.{self.rng.integers(101, 200)}"
-                
-        elif outcome == "exploit_success":
-            t.breach_progress += self.attack_speed # 침투 단계로 이동
-        elif outcome == "breach_success":
-            t.state = 3 # 장악 완료
-
 # -------------------------
-# MTD Environment (Main)
+# MTD Environment
 # -------------------------
 class MTDEnvironment(gym.Env):
     metadata = {"render_modes": ["human"], "render_fps": 4}
@@ -255,9 +128,7 @@ class MTDEnvironment(gym.Env):
         self.blacklister = SimulatedBlacklister(self.rng)
         self.seeker = SimulatedHeuristicSeeker(self.rng, seeker_level, self.endpoints)
 
-        # Action Space: 6개의 연속 파라미터
         self.action_space = spaces.Box(low=-1.0, high=1.0, shape=(len(ACTION_PARAM_KEYS),), dtype=np.float32)
-        # Observation Space: 16개의 특징 벡터
         self.observation_space = spaces.Box(low=-100.0, high=100.0, shape=(len(FEATURE_KEYS),), dtype=np.float32)
 
         self._reset_counters()
@@ -275,7 +146,7 @@ class MTDEnvironment(gym.Env):
         except Exception:
             pass
         
-        if not endpoints: # Fallback
+        if not endpoints:
             for i in range(5): endpoints.append(Endpoint(f"10.13.0.{10+i}", f"Target_{i}", False))
             for i in range(2): endpoints.append(Endpoint(f"10.13.0.{20+i}", f"Decoy_{i}", True))
         return endpoints
@@ -307,10 +178,6 @@ class MTDEnvironment(gym.Env):
         return self._get_state(), self._get_current_metrics()
 
     def _apply_mtd_strategy(self, action):
-        """
-        [IMPROVEMENT] 복합 MTD 전략 적용
-        RL의 연속 출력을 기반으로 Shuffle, Decoy, Blacklist 정책을 동시에 결정
-        """
         params = {
             "dnat_target_focus": _scale_action(action[0]),
             "dnat_decoy_focus": _scale_action(action[1]),
@@ -321,21 +188,21 @@ class MTDEnvironment(gym.Env):
         }
         self.last_actions = params
         
-        # 1. 블랙리스트 정책 업데이트
+        # 1. Update Blacklist Policy
         self.blacklister.update_policy(params["blacklist_aggression"], params["blacklist_duration"])
 
-        # 2. 동시 행동 결정 (Threshold 기반)
-        is_shuffle = params["shuffle_intensity"] >= ACT_THRESHOLDS.get("SHUFFLE", 0.6)
-        is_decoy_active = params["decoy_ratio"] >= ACT_THRESHOLDS.get("DECOY_ACTIVE", 0.4)
+        # 2. Determine Active Defenses
+        is_shuffle = params["shuffle_intensity"] >= ACT_THRESHOLDS["SHUFFLE"]
+        is_decoy_active = params["decoy_ratio"] >= ACT_THRESHOLDS["DECOY_ACTIVE"]
         
         if is_shuffle:
             self.ep_shuffle_count += 1
-            # 실제 환경이라면 여기서 ./scripts/ip_port_swap.sh 실행
 
-        # 비용 계산
+        # Cost Calculation
         cost = COST_MTD_ACTION
         if is_shuffle: cost += COST_SHUFFLE * params["shuffle_intensity"]
         if is_decoy_active: cost += COST_DECOY * params["decoy_ratio"]
+        # Blacklist cost proportional to aggression (risk of false positives)
         cost += COST_BL * params["blacklist_aggression"]
         
         self.ep_total_cost += cost
@@ -344,6 +211,7 @@ class MTDEnvironment(gym.Env):
             "cost": cost,
             "is_shuffle": is_shuffle,
             "is_decoy_active": is_decoy_active,
+            "decoy_ratio": params["decoy_ratio"],
             "params": params
         }
 
@@ -353,14 +221,19 @@ class MTDEnvironment(gym.Env):
         terminated = self.current_step >= self.max_episode_steps
         truncated = False
 
-        # 1. Defender Action (Multi-Action)
+        # 1. Defender Action
         mtd_res = self._apply_mtd_strategy(action)
 
-        # 2. Seeker Intent (방어 상태를 모른 채 의도만 전달)
-        seeker_intent = self.seeker.step(mtd_res["is_shuffle"])
+        # 2. Seeker Step
+        # Pass defense status to Seeker
+        seeker_status = {
+            "is_shuffle": mtd_res["is_shuffle"],
+            "is_decoy_active": mtd_res["is_decoy_active"],
+            "decoy_ratio": mtd_res["decoy_ratio"]
+        }
+        seeker_intent = self.seeker.step(seeker_status)
         
-        # 3. Environment Interaction (성공/실패 판정)
-        # 블랙리스트 차단 여부 확인
+        # 3. Environment Logic (Outcome Determination)
         is_blocked = self.blacklister.is_blocked(seeker_intent["seeker_ip"])
         
         outcome = "continue"
@@ -369,39 +242,43 @@ class MTDEnvironment(gym.Env):
         is_decoy_hit = False
         
         if seeker_intent["target_ep"]:
-             # 디코이 여부 확인
+            # Check Decoy Hit
             if seeker_intent["target_ep"].is_decoy and seeker_intent["is_exploit_attempt"]:
                 is_decoy_hit = True
+                outcome = "decoy_hit"
             
-            # 공격 결과 판정
-            if is_blocked:
+            # Check Blocking
+            elif is_blocked:
                 outcome = "blocked"
+            
+            # Attack Resolution
             elif seeker_intent["is_exploit_attempt"]:
-                # 방어자가 디코이에 집중하거나 블랙리스트가 약하면 뚫림
-                # 간단한 확률 모델: 블랙리스트 강도가 낮을수록 성공 확률 높음
-                if self.rng.random() > mtd_res["params"]["blacklist_aggression"]:
+                # Probability of block by policy even if not explicitly in list yet
+                block_prob = mtd_res["params"]["blacklist_aggression"] * 0.5
+                if self.rng.random() > block_prob:
                     outcome = "exploit_success"
                     is_exploit_success = True
                 else:
-                    outcome = "blocked" # 확률적 차단
+                    outcome = "blocked"
+            
             elif seeker_intent["is_breach_attempt"]:
-                if self.rng.random() > mtd_res["params"]["blacklist_aggression"]:
+                block_prob = mtd_res["params"]["blacklist_aggression"] * 0.7
+                if self.rng.random() > block_prob:
                     outcome = "breach_success"
                     is_breach_success = True
                 else:
                     outcome = "blocked"
         
-        # Seeker에게 결과 피드백
+        # Feedback to Seeker
         self.seeker.handle_outcome(outcome)
 
-        # 4. CTI 업데이트
+        # 4. CTI & Blacklist Update
         cti_score, is_alert = self.cti.process_traffic(seeker_intent["is_scan"])
         if is_alert:
             self.blacklister.apply_block(seeker_intent["seeker_ip"], cti_score)
         self.blacklister.step()
 
-        # 5. 카운터 업데이트
-        # [FIX] seeker_intent에 'is_exploit_attempt' 키가 항상 존재하도록 수정되었으므로 안전함
+        # 5. Update Counters
         if seeker_intent["is_exploit_attempt"]: self.ep_exploit_attempts += 1
         if seeker_intent["is_breach_attempt"]: self.ep_breach_attempts += 1
         if is_breach_success: self.ep_breach_success += 1
@@ -414,7 +291,7 @@ class MTDEnvironment(gym.Env):
         
         if not mtd_res["is_shuffle"]: self.ep_uptime_steps += 1
 
-        # 6. Reward & Info 계산
+        # 6. Reward & Info
         reward_info = {
             "is_exploit_success": is_exploit_success,
             "is_breach_success": is_breach_success,
@@ -429,11 +306,12 @@ class MTDEnvironment(gym.Env):
 
         obs = self._get_state()
         info = self._get_current_metrics()
-        info["cost"] = mtd_res["cost"]
-        info["raw_reward"] = reward
-        info["applied_mtd"] = mtd_res["is_shuffle"]
+        info.update({
+            "cost": mtd_res["cost"],
+            "raw_reward": reward,
+            "applied_mtd": mtd_res["is_shuffle"]
+        })
         
-        # Params 로깅
         for k, v in mtd_res["params"].items():
             info[f"Params/{k}"] = v
 
@@ -442,24 +320,26 @@ class MTDEnvironment(gym.Env):
     def _calculate_reward(self, mtd_res, r_info):
         reward = 0.0
         
-        # 공격 성공 시 큰 페널티
-        if r_info["is_breach_success"]: reward += REWARD_ATTACK_SUCCESS
-        elif r_info["is_exploit_success"]: reward += (REWARD_ATTACK_SUCCESS * 0.2)
+        # 1. Attack Outcomes (Big Penalties)
+        if r_info["is_breach_success"]: 
+            reward += REWARD_ATTACK_SUCCESS # -100
+        elif r_info["is_exploit_success"]: 
+            reward += (REWARD_ATTACK_SUCCESS * 0.3) # -30
         
-        # 방어 성공 시 보상
-        if r_info["is_breach_block"]: reward += REWARD_ATTACK_BLOCKED
-        elif r_info["is_exploit_block"]: reward += (REWARD_ATTACK_BLOCKED * 0.5)
+        # 2. Defense Outcomes (Big Rewards)
+        if r_info["is_breach_block"]: 
+            reward += REWARD_ATTACK_BLOCKED # +50
+        elif r_info["is_exploit_block"]: 
+            reward += (REWARD_ATTACK_BLOCKED * 0.4) # +20
 
-        # 디코이 유인 성공 보상
-        if r_info["is_decoy_hit"]: reward += 5.0
+        if r_info["is_decoy_hit"]: 
+            reward += 10.0 # Decoy bonus
         
-        # 비용 차감
+        # 3. Cost Penalty (Reduced weight)
         reward -= (mtd_res["cost"] * COST_WEIGHT)
         
-        # 정상 상태 유지 보상 (공격도 없고 셔플도 안할 때)
-        real_state = self.cti.get_real_state()
-        is_real_attack = real_state.get("attack_detected", False)
-        if not is_real_attack and not r_info["is_breach_attempt"] and not mtd_res["is_shuffle"]:
+        # 4. Normal State (Bonus for surviving without breach)
+        if not r_info["is_breach_success"] and not r_info["is_exploit_success"]:
             reward += REWARD_NORMAL
 
         return float(reward)
@@ -489,7 +369,10 @@ class MTDEnvironment(gym.Env):
         r_succ = _safe_divide(self.ep_breach_block, self.ep_breach_attempts) if self.ep_breach_attempts > 0 else 0.0
         c_def = _safe_divide(self.ep_total_cost, max(1, self.ep_total_steps))
         decoy_rate = _safe_divide(self.ep_decoy_hits, max(1, self.ep_exploit_attempts))
-        s_mtd = (0.5 * r_succ) + (0.3 * decoy_rate) - (0.2 * c_def)
+        
+        # Improved S_MTD formula
+        s_mtd = (0.5 * r_succ) + (0.3 * decoy_rate) - (0.1 * c_def)
+        
         return {
             "Defense/R_succ": r_succ, 
             "Defense/S_MTD_overall": s_mtd,

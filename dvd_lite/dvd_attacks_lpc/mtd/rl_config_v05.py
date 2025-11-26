@@ -13,12 +13,11 @@ NUM_TARGET_ENDPOINTS = 5
 NUM_DECOY_ENDPOINTS = 2
 NUM_TOTAL_ENDPOINTS = NUM_TARGET_ENDPOINTS + NUM_DECOY_ENDPOINTS
 
-# [IMPROVEMENT] Multi-Action Thresholds
-# RL 에이전트의 연속 출력값이 이 임계치를 넘으면 해당 방어 기법이 활성화됩니다.
+# [IMPROVEMENT] Adjusted Thresholds for easier triggering
 ACT_THRESHOLDS = {
-    "SHUFFLE": 0.6,      # 이 값 이상이면 IP/Port Shuffle 수행
-    "DECOY_ACTIVE": 0.4, # 이 값 이상이면 Decoy DNAT 활성화
-    "BL_ACTIVE": 0.3     # 이 값 이상이면 Blacklist 정책 적용
+    "SHUFFLE": 0.4,      # Lowered from 0.6 to encourage shuffling
+    "DECOY_ACTIVE": 0.3, # Lowered from 0.4
+    "BL_ACTIVE": 0.3     # Lowered from 0.3
 }
 
 # Seeker Attack Model Parameters
@@ -38,12 +37,17 @@ SEEKER_PROB_PARAMS = {
     "BREACH_ATTEMPT_PROB": 0.9,
 }
 
-# Cost Weights
-COST_MTD_ACTION = 0.005
-COST_SHUFFLE = 0.5
-COST_DECOY = 0.05
-COST_BL = 0.01
-COST_WEIGHT = 0.5
+# [IMPROVEMENT] Adjusted Costs & Rewards to incentivize defense
+COST_MTD_ACTION = 0.001   # Reduced base cost
+COST_SHUFFLE = 0.1        # Reduced from 0.5 (Shuffling shouldn't be too expensive)
+COST_DECOY = 0.01         # Reduced from 0.05
+COST_BL = 0.005           # Reduced from 0.01
+COST_WEIGHT = 0.2         # Reduced total cost weight in reward calculation
+
+REWARD_ATTACK_BLOCKED = 50.0   # Increased from 20.0 (Big reward for stopping breach)
+REWARD_ATTACK_SUCCESS = -100.0 # Increased penalty from -50.0
+REWARD_MTD_COST = -0.1
+REWARD_NORMAL = 1.0            # Slight bonus for staying alive
 
 # Blacklister Mapping
 BLACKLIST_SENSITIVITY_MIN = 0.1
@@ -99,12 +103,6 @@ VALUE_LOSS_COEF = 0.5
 BATCH_SIZE = 64
 EPOCHS = 10
 
-# --- Reward System ---
-REWARD_ATTACK_BLOCKED = 20.0
-REWARD_ATTACK_SUCCESS = -50.0
-REWARD_MTD_COST = -0.1
-REWARD_NORMAL = 0.5
-
 # --- LOGGING METRICS ---
 LOG_METRICS_DEFENSE = ["R_succ", "C_def", "CostPerBlock", "S_MTD_overall"]
 LOG_METRICS_DRS = ["D_bits", "R_redundancy", "S_shuffle"]
@@ -119,7 +117,7 @@ class RL_CONFIG:
     ACTION_DIM = ACTION_DIM
     MTD_STATE_PATH = MTD_STATE_PATH
     FEATURE_NORM_METADATA = FEATURE_NORM_METADATA
-    ACT_THRESHOLDS = ACT_THRESHOLDS  # Added to wrapper
+    ACT_THRESHOLDS = ACT_THRESHOLDS
     
     LEARNING_RATE = LEARNING_RATE
     GAMMA = GAMMA
