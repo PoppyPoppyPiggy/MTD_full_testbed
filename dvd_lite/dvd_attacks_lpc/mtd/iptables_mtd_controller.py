@@ -1,97 +1,132 @@
-# Directory: dvd_lite/dvd_attacks_lpc/mtd/
-# Filename: iptables_channel_switch.py
+"""
+iptables_mtd_controller.py
+==========================
 
-import subprocess
+This module extends the base ``IptablesController`` with additional
+Moving Target Defense (MTD) operations, including IP rotation, port
+hopping and activation of an alternate communication channel.  These
+methods are inspired by the original ``iptables_channel_switch.py``
+example and expose a consistent API for the RL-driven deception
+manager and other components.
+
+The controller supports both dry‑run mode (for development) and
+execution mode.  In dry‑run mode, commands are logged via the Python
+``logging`` module instead of being executed.
+
+Usage
+-----
+
+::
+
+    from iptables_mtd_controller import IptablesMTDController
+    ctl = IptablesMTDController(dry_run=False)
+    ctl.rotate_ip(original_ip='10.13.0.2')
+    ctl.rotate_port(old_port=14550, new_port=14560)
+    ctl.activate_backup_channel(attacker_ip='10.13.0.200', gcs_ip='10.13.0.4', backup_ip='10.13.0.7')
+
+"""
+
+from __future__ import annotations
+
+import logging
 import random
+from typing import List
 
-class IptablesChannelSwitcher:
-    """
-    Docker 컨테이너 환경 내부 또는 호스트에서 iptables를 조작하여
-    '가상 노드 이동' 및 '통신 채널 변경(대체 노드 통신)'을 수행하는 액추에이터입니다.
-    """
-    def __init__(self):
-        # Docker Network 설정에 따른 IP 주소 (docker-compose.yaml 참조)
-        self.target_ip = "10.13.0.2"   # Flight Controller (실제 드론 제어기)
-        self.backup_ip = "10.13.0.200" # Attacker가 아닌 Decoy/Backup Container IP로 설정해야 함
-                                       # 예: 10.13.0.7 (decoy-gateway)
-        
-        self.gcs_ip = "10.13.0.4"      # Ground Control Station (아군)
-        self.attacker_ip_prefix = "10.13.0.200" # 공격자 IP (시뮬레이터상 고정 혹은 대역)
+from iptables_controller import IptablesController
 
-        self.current_port = 14550
-        self.available_ports = [14550, 14560, 14570, 14580]
+logger = logging.getLogger(__name__)
 
-    def _run_cmd(self, cmd):
-        """Shell 명령어 실행 및 에러 처리"""
-        try:
-            # stdout=subprocess.DEVNULL로 설정하여 로그를 깔끔하게 유지
-            subprocess.run(cmd, shell=True, check=True, stdout=subprocess.DEVNULL)
-            return True
-        except subprocess.CalledProcessError as e:
-            print(f"[IPTables] Error executing '{cmd}': {e}")
-            return False
 
-    def rotate_ip(self):
+class IptablesMTDController(IptablesController):
+    """Extended iptables controller with additional MTD actions."""
+
+    def __init__(self,
+                 dry_run: bool = True,
+                 target_ip: str = "10.13.0.2",
+                 backup_ip: str = "10.13.0.7",
+                 gcs_ip: str = "10.13.0.4",
+                 attacker_ip_prefix: str = "10.13.0.200",
+                 available_ports: List[int] | None = None) -> None:
+        super().__init__(dry_run=dry_run)
+        self.target_ip = target_ip
+        self.backup_ip = backup_ip
+        self.gcs_ip = gcs_ip
+        self.attacker_ip_prefix = attacker_ip_prefix
+        self.available_ports = available_ports or [14550, 14560, 14570, 14580]
+        self.current_port = self.available_ports[0]
+
+    # ------------------------------------------------------------------
+    # High‑level MTD actions
+    # ------------------------------------------------------------------
+    def rotate_ip(self, original_ip: str | None = None, new_fake_last_octet: int | None = None) -> None:
         """
-        [MTD: IP Shuffle]
-        가상 IP(VIP)를 생성하여 마치 드론이 다른 IP로 이동한 것처럼 속입니다.
-        실제로는 DNAT를 통해 원본 Flight Controller로 연결됩니다.
+        Perform an IP shuffle by creating a new virtual IP (VIP) and
+        forwarding traffic to the real target IP.  Optionally specify
+        ``original_ip`` to flush only matching rules.  ``new_fake_last_octet``
+        can be provided for deterministic testing; otherwise a random
+        octet (10–90) is chosen.
         """
-        new_fake_last_octet = random.randint(10, 90)
-        new_vip = f"10.13.0.{new_fake_last_octet}"
-        
-        print(f"[MTD] Rotating Virtual IP to {new_vip}")
-        
-        # 1. 기존 PREROUTING 규칙 삭제 (Flush는 주의 필요, 특정 체인만 관리 권장)
-        # 여기서는 예시로 nat 테이블의 PREROUTING 전체를 초기화합니다.
-        self._run_cmd("iptables -t nat -F PREROUTING")
-        
-        # 2. DNAT 규칙 추가
-        # GCS나 외부에서 New VIP로 요청이 오면 -> 실제 Target IP로 전달
-        # 공격자가 기존 IP를 스캔 중이라면 연결이 끊기거나 실패하게 됨
-        cmd = f"iptables -t nat -A PREROUTING -d {new_vip} -j DNAT --to-destination {self.target_ip}"
-        self._run_cmd(cmd)
-        
-        # (Optional) SNAT: 돌아가는 패킷의 소스 IP도 VIP로 변조해야 완벽한 속임수 가능
-        cmd_snat = f"iptables -t nat -A POSTROUTING -s {self.target_ip} -j SNAT --to-source {new_vip}"
-        self._run_cmd(cmd_snat)
+        vip_octet = new_fake_last_octet or random.randint(10, 90)
+        vip_ip = f"10.13.0.{vip_octet}"
+        logger.info(f"[MTD] Rotating IP: {original_ip or self.target_ip} -> {vip_ip}")
+        # Flush NAT PREROUTING chain; in production, filter more selectively
+        self._run_cmd(["iptables", "-t", "nat", "-F", "PREROUTING"])
+        # DNAT: redirect traffic destined to VIP to the real target
+        target = original_ip or self.target_ip
+        self._run_cmd([
+            "iptables", "-t", "nat", "-A", "PREROUTING",
+            "-d", vip_ip, "-j", "DNAT", "--to-destination", target
+        ])
+        # SNAT: rewrite source of return packets
+        self._run_cmd([
+            "iptables", "-t", "nat", "-A", "POSTROUTING",
+            "-s", target, "-j", "SNAT", "--to-source", vip_ip
+        ])
 
-    def rotate_port(self):
+    def rotate_port(self, old_port: int | None = None, new_port: int | None = None) -> None:
         """
-        [MTD: Port Hopping]
-        MAVLink 통신 포트를 변경하여 스캐닝을 혼란스럽게 합니다.
+        Perform a port hopping action by redirecting incoming traffic on
+        ``new_port`` to the original service port (assumed 14550).  If
+        ``old_port`` is provided, the PREROUTING chain is flushed before
+        installing the new mapping.  When ``new_port`` is None, a random
+        available port is chosen from ``available_ports`` that differs
+        from the current port.
         """
-        new_port = random.choice([p for p in self.available_ports if p != self.current_port])
-        print(f"[MTD] Hopping Port {self.current_port} -> {new_port}")
-        
-        # 기존 규칙 초기화
-        self._run_cmd("iptables -t nat -F PREROUTING")
-        
-        # 외부에서 New Port로 들어오면 -> 내부 14550(실제 서비스 포트)으로 전달
-        # 이렇게 하면 Flight Controller 설정을 바꾸지 않고도 포트 변경 효과를 냄
-        cmd = f"iptables -t nat -A PREROUTING -p udp --dport {new_port} -j REDIRECT --to-port 14550"
-        self._run_cmd(cmd)
-        
+        old_port = old_port or self.current_port
+        if new_port is None:
+            choices = [p for p in self.available_ports if p != self.current_port]
+            new_port = random.choice(choices)
+        logger.info(f"[MTD] Hopping port {old_port} -> {new_port}")
+        # Flush existing PREROUTING rules
+        self._run_cmd(["iptables", "-t", "nat", "-F", "PREROUTING"])
+        # Redirect UDP traffic on new_port to the fixed service port (14550)
+        self._run_cmd([
+            "iptables", "-t", "nat", "-A", "PREROUTING",
+            "-p", "udp", "--dport", str(new_port),
+            "-j", "REDIRECT", "--to-port", "14550"
+        ])
         self.current_port = new_port
 
-    def activate_backup_channel(self):
+    def activate_backup_channel(self,
+                                attacker_ip: str | None = None,
+                                gcs_ip: str | None = None,
+                                backup_ip: str | None = None) -> None:
         """
-        [Critical Defense: Alternate Node Communication]
-        주요 통신 채널이 심각하게 침해당했을 때, 
-        1. 공격자 트래픽 차단 (Blackhole)
-        2. 아군(GCS) 트래픽은 Backup Node(Decoy Gateway 등)로 우회
+        Activate an alternate communication channel when a critical threat
+        is detected.  Drops all traffic from the attacker and redirects
+        GCS traffic to a backup node.  You may override ``attacker_ip``,
+        ``gcs_ip`` and ``backup_ip`` per invocation.
         """
-        print("[MTD] ! CRITICAL THREAT DETECTED ! ACTIVATING BACKUP CHANNEL !")
-        
-        # 1. 공격자(Attacker)로부터 오는 트래픽은 명시적 차단 (DROP)
-        # 시뮬레이션 환경에서 Attacker IP가 10.13.0.200이라 가정
-        self._run_cmd(f"iptables -A INPUT -s {self.attacker_ip_prefix} -j DROP")
-        self._run_cmd(f"iptables -A FORWARD -s {self.attacker_ip_prefix} -j DROP")
-        
-        # 2. GCS(아군) 트래픽은 Backup IP 경로로 리다이렉트 (Failover Simulation)
-        # 마치 로드밸런서가 트래픽을 다른 서버로 넘기듯 처리
-        # self.backup_ip는 실제 살아있는 컨테이너(예: 10.13.0.7)여야 핑 등이 응답함
-        cmd = f"iptables -t nat -A PREROUTING -s {self.gcs_ip} -j DNAT --to-destination {self.backup_ip}"
-        self._run_cmd(cmd)
-        
-        print(f"[MTD] GCS traffic redirected to Backup Node: {self.backup_ip}")
+        attacker = attacker_ip or self.attacker_ip_prefix
+        gcs = gcs_ip or self.gcs_ip
+        backup = backup_ip or self.backup_ip
+        logger.warning("[MTD] Critical threat detected: activating backup channel")
+        # Block attacker traffic
+        self._run_cmd(["iptables", "-A", "INPUT", "-s", attacker, "-j", "DROP"])
+        self._run_cmd(["iptables", "-A", "FORWARD", "-s", attacker, "-j", "DROP"])
+        # Redirect GCS traffic to backup node
+        self._run_cmd([
+            "iptables", "-t", "nat", "-A", "PREROUTING",
+            "-s", gcs, "-j", "DNAT", "--to-destination", backup
+        ])
+        logger.info(f"[MTD] GCS traffic from {gcs} redirected to backup node {backup}")

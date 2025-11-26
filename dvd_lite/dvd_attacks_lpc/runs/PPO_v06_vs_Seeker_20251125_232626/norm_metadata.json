@@ -1,0 +1,66 @@
+{
+    "FEATURE_KEYS": [
+        "cti_alert_rate",
+        "blacklist_size_ratio",
+        "uptime_ratio",
+        "breach_success_rate",
+        "decoy_lure_rate",
+        "current_exposure_mean",
+        "r_known_ratio",
+        "r_exploited_ratio",
+        "seeker_scan_effort",
+        "seeker_attack_bias",
+        "last_action_dnat_target_focus",
+        "last_action_dnat_decoy_focus",
+        "last_action_shuffle_intensity",
+        "last_action_blacklist_aggression",
+        "last_action_blacklist_duration",
+        "last_action_decoy_ratio"
+    ],
+    "ACTION_PARAM_KEYS": [
+        "dnat_target_focus",
+        "dnat_decoy_focus",
+        "shuffle_intensity",
+        "blacklist_aggression",
+        "blacklist_duration",
+        "decoy_ratio"
+    ],
+    "FEATURE_NORM_METADATA": {
+        "means": [
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0.5,
+            0.5
+        ],
+        "stds": [
+            0.25,
+            0.25,
+            0.25,
+            0.25,
+            0.25,
+            0.25,
+            0.25,
+            0.25,
+            0.25,
+            0.25,
+            0.25,
+            0.25,
+            0.25,
+            0.25,
+            0.25,
+            0.25
+        ]
+    }
+}

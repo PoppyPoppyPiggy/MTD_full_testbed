@@ -1,6 +1,3 @@
-# Directory: dvd_lite/dvd_attacks_lpc/mtd/
-# Filename: seeker_agent.py
-
 import numpy as np
 import random
 
@@ -21,22 +18,18 @@ class Endpoint:
         self.state = 0
 
 class SimulatedHeuristicSeeker:
-    """
-    Advanced Seeker Agent that interacts with MTD defenses.
-    """
     def __init__(self, rng, level, endpoints):
         self.rng = rng
         self.endpoints = endpoints
         self.current_target = self.rng.choice(endpoints)
         
         # Seeker Level Parameters
-        # (Scan Effort, Attack Speed, IP Change Probability, Patience)
         params = {
             0: (0.1, 0.1, 0.05, 0.2),
             1: (0.3, 0.2, 0.1, 0.4),
             2: (0.5, 0.4, 0.3, 0.6),
             3: (0.7, 0.6, 0.5, 0.8),
-            4: (0.9, 0.8, 0.8, 1.0)
+            4: (0.9, 0.9, 0.8, 1.0)
         }
         p = params.get(level, params[2])
         self.scan_effort = p[0]
@@ -55,18 +48,15 @@ class SimulatedHeuristicSeeker:
 
     def step(self, defense_status):
         """
-        Determine Seeker's intent based on defense status.
-        defense_status: {
-            "is_shuffle": bool,
-            "is_decoy_active": bool,
-            "decoy_ratio": float
-        }
+        defense_status: { "is_shuffle", "is_decoy_active", "decoy_ratio" }
         """
-        # 1. Reaction to Shuffle (Connection Reset)
+        # 1. 셔플 발생 시 반응 (모든 진행도 리셋)
         if defense_status.get("is_shuffle", False):
             for ep in self.endpoints:
                 ep.reset_progress()
+            # 강제로 타겟 변경 (재탐색 시간 소요)
             self.current_target = self.rng.choice(self.endpoints)
+            
             return {
                 "seeker_ip": self.seeker_ip,
                 "is_scan": True,
@@ -79,17 +69,16 @@ class SimulatedHeuristicSeeker:
         t = self.current_target
         intent = "scan"
         
-        # 2. Apply Decoy Effect (If active, chance to switch to a decoy target)
+        # 2. 디코이 활성화 시 유인 (속임수)
+        # 디코이 정책이 켜져 있고, 현재 타겟이 진짜라면 -> 확률적으로 디코이로 바꿈
         if defense_status.get("is_decoy_active", False):
-            # Higher decoy_ratio -> Higher chance to get lured
             if not t.is_decoy and self.rng.random() < defense_status.get("decoy_ratio", 0.0):
-                # Switch target to a decoy
                 decoys = [ep for ep in self.endpoints if ep.is_decoy]
                 if decoys:
                     self.current_target = self.rng.choice(decoys)
                     t = self.current_target
 
-        # 3. Progress Attack
+        # 3. 공격 진행
         t.exploit_progress += self.attack_speed
         
         is_exploit_attempt = False
@@ -113,34 +102,31 @@ class SimulatedHeuristicSeeker:
         }
 
     def handle_outcome(self, outcome):
-        """
-        React to environment feedback (Blocked, Success, Decoy Hit)
-        """
         t = self.current_target
         
         if outcome == "blocked":
-            # If blocked, lose progress
-            t.exploit_progress = max(0.0, t.exploit_progress - 0.8)
-            t.breach_progress = max(0.0, t.breach_progress - 0.8)
+            # 차단 시: 진행도를 크게 잃음 (처음부터 다시 해야 함)
+            t.exploit_progress = 0.0
+            t.breach_progress = 0.0
             
-            # Decide whether to change IP (Evasion)
+            # IP 변경 시도 (회피)
             if self.rng.random() < self.ip_change_prob:
                 self._change_ip()
             else:
-                # If low patience, might switch target
+                # 인내심 테스트 후 타겟 변경
                 if self.rng.random() > self.patience:
                     self.current_target = self.rng.choice(self.endpoints)
 
         elif outcome == "exploit_success":
-            t.breach_progress += self.attack_speed # Move to breach phase
+            t.breach_progress += self.attack_speed 
             
         elif outcome == "breach_success":
-            t.state = 3 # Pwned
+            t.state = 3 
             
         elif outcome == "decoy_hit":
-            # Wasted time on decoy
+            # 디코이 공격: 진행도는 초기화되지만, 계속 속아 넘어갈 수도 있음
             t.exploit_progress = 0.0
             t.breach_progress = 0.0
-            # Realize it's a decoy? Maybe switch target
-            if self.rng.random() > 0.2:
+            # 20% 확률로만 디코이임을 눈치채고 타겟 변경
+            if self.rng.random() > 0.8:
                 self.current_target = self.rng.choice(self.endpoints)

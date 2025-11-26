@@ -1,115 +1,226 @@
-# dvd_lite/dvd_attacks_lpc/mtd/rl_driven_deception_manager.py
+#!/usr/bin/env python3
+"""
+rl_driven_deception_manager.py
+===============================
+
+This module implements a more complete RL-driven Moving Target Defense (MTD)
+manager for the DVD testbed.  It is designed to be invoked either as a
+stand-alone service that continuously monitors CTI status and QoS metrics or
+as a one-shot command from the CTI agent to execute a specific strategy.
+
+Key features:
+
+* **CTI Status Integration**: Uses ``CtiStatusReader`` to ingest
+  ``cti_status.json`` and extract attack indicators (is_attack,
+  threat_level, src_ip, attack_name).  These values are used to build an
+  observation vector for the RL policy.
+* **Simple RL Policy**: A placeholder policy is included which makes
+  decisions based on the threat level.  In a production deployment this
+  would be replaced by a trained PPO or other RL model.
+* **Iptables Controller**: Supports IP banning, IP shuffling, port shuffling
+  and service swap using ``IptablesController``.  Actions are executed by
+  modifying the local firewall rules.  A ``dry_run`` mode allows safe
+  testing.
+* **MTD State Persistence**: When an action modifies the service attack
+  surface (e.g., port shuffle), the state is recorded to ``mtd_state.json``
+  so that other components (like the Seeker) can discover the new attack
+  surface.
+* **Command-line Interface**: Allows forcing a specific strategy via the
+  ``--strategy`` option or running a single observe-select-act iteration
+  with ``--oneshot``.
+
+This script is not intended to implement the full RL training loop; it is
+focused on the deployment-time decision logic and integration with CTI
+status and iptables.
+"""
+
 from __future__ import annotations
 
+import argparse
+import json
 import logging
-from pathlib import Path
-from typing import Any, Dict
+import os
+import random
+import time
+from dataclasses import dataclass
+from typing import Dict, Any
 
-from .mtd_config import MTDConfig
-from .mtd_state_store import MTDStateStore, MTDState
-from .iptables_mtd_controller import IPTablesMTDController
-from .cti_status_reader import CtiStatusReader
-from .qos_monitor import QoSMonitor
-from .mtd_scoring import MTDScoring
+from cti_status_reader import CtiStatusReader, CtiStatus
+from iptables_controller import IptablesController
+
+logger = logging.getLogger("RLDeceptionManager")
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)-7s] [RL-Manager] %(message)s",
+)
+
+# Paths for shared state
+DEFAULT_PROJECT_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir, os.pardir))
+DEFAULT_SHARED_STATE = os.path.join(DEFAULT_PROJECT_ROOT, "mtd", "shared_state")
+DEFAULT_STATUS_PATH = os.path.join(DEFAULT_SHARED_STATE, "cti_status.json")
+DEFAULT_MTD_STATE_PATH = os.path.join(DEFAULT_SHARED_STATE, "mtd_state.json")
+
+# Service configuration
+SERVICE_PORTS = {
+    "mavlink": 14550,
+    "sitl": 5760,
+    "web": 3000,
+    "rtsp": 554,
+    "ros": 11311,
+}
+
+# Decoy IP used for service swap and IP shuffle
+DECOY_IP = "10.13.0.7"
 
 
-log = logging.getLogger(__name__)
-
-
-class RLPolicyInterface:
-    """
-    실제 PPO 정책은 ml/ 또는 rl/ 디렉터리에서 구현.
-    여기서는 (obs_dict) -> action_id 인터페이스만 정의.
-    """
-
-    def __init__(self, action_space_size: int):
-        self.action_space_size = action_space_size
-
-    def select_action(self, obs: Dict[str, float]) -> int:
-        # TODO: PPO 정책으로 교체
-        # 현재는 placeholder (항상 0번 액션)
-        return 0
+@dataclass
+class ActionResult:
+    """Encapsulates the result of an MTD action."""
+    action: str
+    details: Dict[str, Any]
 
 
 class RLDrivenDeceptionManager:
-    """
-    - CTI 상태 + QoS 상태 + MTDState -> observation 벡터 구성
-    - RL 정책(PPO 등)에 action_id 요청
-    - config.actions[action_id] 를 iptables를 통해 적용
-    - MTDState.history에 step 메트릭 기록
-    - 에피소드 끝나면 MTDScoring으로 S_D, C_M, R_A, S_MTD 계산
-    """
+    """RL-driven MTD manager with simple heuristic policy."""
 
-    def __init__(self, config_path: str | Path, dry_run: bool = True):
-        self.config = MTDConfig.load(config_path)
-        self.state_store = MTDStateStore(self.config.state_file)
-        self.iptables = IPTablesMTDController(
-            config=self.config,
-            state_store=self.state_store,
-            dry_run=dry_run,
-        )
-        self.cti_reader = CtiStatusReader(self.config.cti_status_file)
-        self.qos_monitor = QoSMonitor(self.state_store)
-        self.scoring = MTDScoring(self.state_store, self.config.metrics_log)
+    def __init__(self,
+                 status_path: str = DEFAULT_STATUS_PATH,
+                 mtd_state_path: str = DEFAULT_MTD_STATE_PATH,
+                 dry_run: bool = False) -> None:
+        self.status_reader = CtiStatusReader(status_path)
+        self.mtd_state_path = mtd_state_path
+        self.iptables = IptablesController(dry_run=dry_run)
+        self.port_assignments: Dict[str, int] = SERVICE_PORTS.copy()
 
-        action_space = len(self.config.actions)
-        self.policy = RLPolicyInterface(action_space)
-
-    def _build_observation(self, state: MTDState, cti, qos) -> Dict[str, float]:
+    # ------------------------------------------------------------------
+    # Observation and policy
+    # ------------------------------------------------------------------
+    def build_observation(self) -> Dict[str, float]:
+        """Construct an observation from CTI status."""
+        status: CtiStatus = self.status_reader.read_status()
         return {
-            "step": float(state.step),
-            "current_action_id": float(state.current_action_id),
-            "threat_level": float(cti.threat_level),
-            "is_attack": 1.0 if cti.is_attack else 0.0,
-            "is_breach": 1.0 if cti.is_breach else 0.0,
-            "latency_ms": float(qos.latency_ms),
-            "loss_rate": float(qos.loss_rate),
-            "attacker_blocked": 1.0 if qos.attacker_blocked else 0.0,
-            "blacklist_size": float(len(state.blacklist)),
+            'threat_level': status.threat_level,
+            'is_attack': 1.0 if status.is_attack else 0.0,
         }
 
-    def step(self):
+    def select_action(self, observation: Dict[str, float]) -> str:
+        """Heuristic policy mapping threat level to an action."""
+        threat = observation['threat_level']
+        if threat > 0.8:
+            return 'ip_shuffle'
+        if threat > 0.5:
+            return 'service_swap'
+        if threat > 0.2:
+            return 'port_shuffle'
+        return 'no_action'
+
+    # ------------------------------------------------------------------
+    # Helper methods
+    # ------------------------------------------------------------------
+    def _choose_unused_port(self) -> int:
+        """Select a random port not currently assigned to any service."""
+        used_ports = set(self.port_assignments.values())
+        while True:
+            candidate = random.randint(20000, 30000)
+            if candidate not in used_ports:
+                return candidate
+
+    def _save_mtd_state(self) -> None:
         """
-        한 step마다 호출 (예: 5초마다 cron, 혹은 RL 환경에서 매 step).
-
-        1) CTI 상태 읽기
-        2) QoS/blacklist 업데이트
-        3) observation 생성
-        4) RL 정책으로부터 action 선택
-        5) iptables DNAT 적용
-        6) 메트릭 기록
+        Write the current port assignment mapping to the MTD state file.  Other
+        components (e.g., the Seeker) can consult this file to know which
+        ports to target.
         """
-        state = self.state_store.load()
-        cti = self.cti_reader.read()
+        try:
+            os.makedirs(os.path.dirname(self.mtd_state_path), exist_ok=True)
+            with open(self.mtd_state_path, 'w', encoding='utf-8') as f:
+                json.dump(self.port_assignments, f)
+            logger.debug(f"Saved MTD state: {self.port_assignments}")
+        except Exception as e:
+            logger.error(f"Failed to write MTD state file: {e}")
 
-        # 공격 발생 시: src_ip를 blacklist에 등록하고 QoS 모형 업데이트
-        if cti.is_attack and cti.src_ip:
-            qos = self.qos_monitor.register_attack(cti.src_ip, cti.threat_level)
-        else:
-            qos = self.qos_monitor.sample(cti.src_ip)
+    # ------------------------------------------------------------------
+    # Action implementations
+    # ------------------------------------------------------------------
+    def perform_no_action(self) -> ActionResult:
+        logger.info("No MTD action taken.")
+        return ActionResult(action='no_action', details={})
 
-        obs = self._build_observation(state, cti, qos)
-        action_id = self.policy.select_action(obs)
-        action = self.config.actions[action_id]
+    def perform_port_shuffle(self) -> ActionResult:
+        """Shuffle the port for a randomly selected service."""
+        service = random.choice(list(self.port_assignments.keys()))
+        old_port = self.port_assignments[service]
+        new_port = self._choose_unused_port()
+        self.port_assignments[service] = new_port
+        self.iptables.shuffle_port(old_port, new_port)
+        logger.info(f"Shuffled {service} from port {old_port} to {new_port}")
+        self._save_mtd_state()
+        return ActionResult(action='port_shuffle', details={'service': service, 'old_port': old_port, 'new_port': new_port})
 
-        metrics = self.iptables.apply_action(action, state)
-        # CTI/QoS 기반 플래그 보강 (RL reward 설계에 사용 가능)
-        metrics.is_attack = cti.is_attack
-        metrics.is_breach = cti.is_breach
-        metrics.attacker_blocked = qos.attacker_blocked
-        metrics.qos_latency_ms = qos.latency_ms
-        metrics.qos_loss_rate = qos.loss_rate
+    def perform_ip_shuffle(self) -> ActionResult:
+        """Redirect traffic for a service from its original IP to a decoy IP."""
+        service = 'mavlink'
+        original_ip = '10.13.0.2'
+        self.iptables.shuffle_ip(original_ip, DECOY_IP)
+        logger.info(f"Shuffled IP for {service} from {original_ip} to {DECOY_IP}")
+        return ActionResult(action='ip_shuffle', details={'service': service, 'old_ip': original_ip, 'new_ip': DECOY_IP})
 
-        state.step += 1
-        self.state_store.save(state)
-        return metrics
+    def perform_service_swap(self) -> ActionResult:
+        """Swap an existing service to a decoy implementation via DNAT."""
+        service = 'web'
+        port = self.port_assignments[service]
+        self.iptables.swap_service(port, DECOY_IP)
+        logger.info(f"Swapped {service} service on port {port} to decoy {DECOY_IP}")
+        return ActionResult(action='service_swap', details={'service': service, 'port': port, 'decoy_ip': DECOY_IP})
 
-    def finalize_episode(self) -> Dict[str, Any]:
-        """
-        에피소드 종료 시 호출.
-        - 전체 step history 기반으로 S_D, C_M, R_A_norm, S_MTD_norm 계산
-        - wandb / tensorboard에 올릴 요약 딕셔너리 반환
-        """
-        summary, _ = self.scoring.export_last_episode()
-        log.info("Episode summary: %s", summary)
-        return summary
+    def perform_action(self, action: str) -> ActionResult:
+        """Dispatch the selected action to its handler."""
+        if action == 'port_shuffle':
+            return self.perform_port_shuffle()
+        if action == 'ip_shuffle':
+            return self.perform_ip_shuffle()
+        if action == 'service_swap':
+            return self.perform_service_swap()
+        return self.perform_no_action()
+
+    # ------------------------------------------------------------------
+    # Execution loop
+    # ------------------------------------------------------------------
+    def run_once(self) -> ActionResult:
+        """Run one observe-select-act cycle and return the result."""
+        obs = self.build_observation()
+        action = self.select_action(obs)
+        return self.perform_action(action)
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="RL-driven MTD manager")
+    parser.add_argument('--status-path', type=str, default=DEFAULT_STATUS_PATH, help='Path to CTI status file')
+    parser.add_argument('--mtd-state-path', type=str, default=DEFAULT_MTD_STATE_PATH, help='Path to MTD state file')
+    parser.add_argument('--strategy', type=str, default=None, help='Force execution of a specific strategy')
+    parser.add_argument('--dry-run', action='store_true', help='Log iptables commands instead of executing them')
+    parser.add_argument('--oneshot', action='store_true', help='Execute a single cycle and exit')
+    args = parser.parse_args()
+
+    manager = RLDrivenDeceptionManager(status_path=args.status_path,
+                                       mtd_state_path=args.mtd_state_path,
+                                       dry_run=args.dry_run)
+    if args.strategy:
+        logger.info(f"Executing forced strategy: {args.strategy}")
+        manager.perform_action(args.strategy)
+        return
+    if args.oneshot:
+        manager.run_once()
+        return
+    logger.info("Starting RL MTD manager loop. Press Ctrl+C to exit.")
+    try:
+        while True:
+            result = manager.run_once()
+            logger.debug(f"Action result: {result}")
+            time.sleep(5)
+    except KeyboardInterrupt:
+        logger.info("RL MTD manager terminated.")
+
+
+if __name__ == '__main__':
+    main()
