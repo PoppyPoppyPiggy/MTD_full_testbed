@@ -178,7 +178,7 @@ class DatasetManager:
         # 학습에 불필요한 컬럼 제거
         drop_cols = ['source', 'log_type', 'attack_name', 'scenario', 
                      'runner_event', 'timestamp', 'current_attack_name', 
-                     'container_name', 'docker_name', 'ts']
+                     'container_name', 'docker_name']
         cols_to_drop = [c for c in drop_cols if c in df.columns]
         
         X = df.drop(columns=cols_to_drop + ['label']) 

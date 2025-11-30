@@ -1,39 +1,70 @@
 {
+  "description": "MTD RL Seeker Level Profiles (BSS-Q Framework Based)",
+  "reference": "Eghtesad et al. (GameSec 2020), OpenReview BSS-Q",
   "levels": {
     "0": {
-      "scan_effort": 0.2,          // 포트 스캔 빈도 / 범위 약함
-      "attack_bias": 0.2,          // 디코이 구분 거의 못함
-      "ip_change_prob": 0.0,       // 블랙리스트 회피 없음
-      "breach_prob": 0.1,          // 성공적인 breach 확률 낮음
-      "exploit_prob": 0.2          // 익스플로잇 성공 확률
+      "name": "Script Kiddie",
+      "mode": "random",
+      "scan_effort": 0.3,
+      "attack_bias": 0.2,
+      "ip_change_prob": 0.05,
+      "exploit_prob": 0.3,
+      "breach_prob": 0.2,
+      "decoy_detection": 0.1,
+      "learning_rate": 0.0,
+      "description": "Basic automated scanning, easily fooled by decoys"
     },
     "1": {
-      "scan_effort": 0.4,
+      "name": "Mainstream Hacker",
+      "mode": "heuristic",
+      "scan_effort": 0.5,
       "attack_bias": 0.4,
       "ip_change_prob": 0.1,
-      "breach_prob": 0.2,
-      "exploit_prob": 0.3
+      "exploit_prob": 0.5,
+      "breach_prob": 0.4,
+      "decoy_detection": 0.3,
+      "learning_rate": 0.01,
+      "description": "Moderate capability, some decoy awareness"
     },
     "2": {
-      "scan_effort": 0.6,
+      "name": "Time-Aware Attacker",
+      "mode": "time_aware",
+      "scan_effort": 0.4,
       "attack_bias": 0.5,
-      "ip_change_prob": 0.3,
-      "breach_prob": 0.4,
-      "exploit_prob": 0.5
+      "ip_change_prob": 0.15,
+      "exploit_prob": 0.6,
+      "breach_prob": 0.5,
+      "decoy_detection": 0.5,
+      "learning_rate": 0.02,
+      "time_adaptation_rate": 0.005,
+      "description": "Increases aggression over time"
     },
     "3": {
-      "scan_effort": 0.8,
+      "name": "Adaptive APT",
+      "mode": "adaptive",
+      "scan_effort": 0.6,
       "attack_bias": 0.7,
-      "ip_change_prob": 0.5,
+      "ip_change_prob": 0.2,
+      "exploit_prob": 0.7,
       "breach_prob": 0.6,
-      "exploit_prob": 0.7
+      "decoy_detection": 0.7,
+      "learning_rate": 0.05,
+      "stealth_factor": 0.8,
+      "description": "Adapts to defense, evades detection"
     },
     "4": {
-      "scan_effort": 1.0,
+      "name": "Expert APT (Database Specialist)",
+      "mode": "adaptive",
+      "scan_effort": 0.8,
       "attack_bias": 0.9,
-      "ip_change_prob": 0.8,
-      "breach_prob": 0.8,
-      "exploit_prob": 0.9
+      "ip_change_prob": 0.3,
+      "exploit_prob": 0.85,
+      "breach_prob": 0.75,
+      "decoy_detection": 0.9,
+      "learning_rate": 0.1,
+      "stealth_factor": 0.9,
+      "target_priority": ["TARGET_GCS", "TARGET_FC"],
+      "description": "Highly sophisticated, targeted attacks on critical assets"
     }
   }
 }

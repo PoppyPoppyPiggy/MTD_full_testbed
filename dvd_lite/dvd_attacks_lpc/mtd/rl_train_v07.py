@@ -27,6 +27,10 @@ Usage:
 
 import os
 import sys
+
+# 현재 디렉토리를 path에 추가 (import 문제 해결)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 import argparse
 import json
 import time
@@ -42,7 +46,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.distributions import Normal
 
-# 로컬 모듈
+# 로컬 모듈 (절대 import)
 from rl_config_v07 import (
     MTDConfig,
     STATE_DIM,

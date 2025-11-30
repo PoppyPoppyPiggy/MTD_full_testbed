@@ -38,7 +38,7 @@ def log_bus_event(type: str, data: Dict[str, Any], source_override: str = "ai_ct
         print(f"Warning: Failed to write alert to bus.log: {e}")
         # 실패 시 stdout으로라도 출력
         # print(json.dumps(record, ensure_ascii=False, default=str))
-
+#dvd_lite/dvd_attacks_lpc/ml/output/cti_classifier_model.joblib
 
 # --- 상수 정의 ---
 MODEL_PATH = os.path.join(PROJECT_ROOT, 'ml', 'output', 'cti_classifier_model.joblib')

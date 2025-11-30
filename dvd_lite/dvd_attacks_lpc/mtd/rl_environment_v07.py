@@ -12,19 +12,25 @@ KEY CHANGES FROM v06:
 4. TESTBED-ALIGNED METRICS
 """
 
+import os
+import sys
+
+# 현재 디렉토리를 path에 추가
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
 import gymnasium as gym
 from gymnasium import spaces
 import numpy as np
 import logging
 import json
-import os
 import math
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Tuple, Any
 from collections import deque
 from enum import Enum
 
-from .rl_config_v07 import (
+# 절대 import로 변경 (. 제거)
+from rl_config_v07 import (
     MTDConfig,
     AttackProgress,
     AttackPhase,

@@ -1,19 +1,28 @@
 {
+  "description": "DVD Testbed Target Configuration",
+  "testbed": "DVD-lite (Damn Vulnerable Drone)",
+  "network": {
+    "subnet": "10.13.0.0/24",
+    "gateway": "10.13.0.1"
+  },
   "targets": {
     "TARGET_FC": "10.13.0.2",
     "TARGET_CC": "10.13.0.3",
     "TARGET_GCS": "10.13.0.4",
     "TARGET_SIM": "10.13.0.5",
-    "TARGET_DECOY": "10.13.0.7"
+    "TARGET_DECOY_1": "10.13.0.7",
+    "TARGET_DECOY_2": "10.13.0.8"
   },
   "ports": {
-    "PORT_MAVLINK": "14550",
-    "PORT_SITL": "5760",
-    "PORT_RTSP": "554",
-    "PORT_WEB": "3000",
-    "PORT_ROS": "11311"
+    "PORT_MAVLINK": 14550,
+    "PORT_SITL": 5760,
+    "PORT_RTSP": 554,
+    "PORT_WEB": 3000,
+    "PORT_ROS": 11311
   },
   "interfaces": {
     "TARGET_CC_WIFI": "192.168.13.1"
-  }
+  },
+  "critical_assets": ["TARGET_FC", "TARGET_GCS"],
+  "decoy_assets": ["TARGET_DECOY_1", "TARGET_DECOY_2"]
 }

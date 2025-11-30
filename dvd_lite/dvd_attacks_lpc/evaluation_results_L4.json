@@ -1,0 +1,12 @@
+{
+  "episodes": 50,
+  "seeker_level": 0,
+  "average_total_reward": 237.82793935000896,
+  "Defense/MTD_Rate": 1.0,
+  "Defense/R_succ": 0.5102899999999999,
+  "Defense/S_MTD_overall": 0.30896242236252874,
+  "Defense/Uptime": 0.990770237655265,
+  "Defense/CostMean": 0.03804465301334858,
+  "Attack/DecoyLureRate": 0.19207295593295595,
+  "Attack/BreachSuccessRate": 0.0
+}

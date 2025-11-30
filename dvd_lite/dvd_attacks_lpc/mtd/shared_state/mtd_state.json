@@ -1,12 +1,177 @@
 {
-    "timestamp": 1700388000.0,
-    "active_rules": [],
-    "available_targets": [
-        "10.13.0.6:14550",
-        "10.13.0.2:14550",
-        "10.13.0.3:8080",
-        "10.13.0.4:5760"
-    ],
-    "decoy_target": "10.13.0.6:14550",
-    "current_target": "10.13.0.6:14550"
+  "version": "1.0.0",
+  "last_updated": "2024-01-01T00:00:00Z",
+  "description": "MTD Shared State - RL Environment ↔ Testbed Synchronization",
+  
+  "services": {
+    "target_fc_port_mavlink": {
+      "service_id": "target_fc_port_mavlink",
+      "target_key": "TARGET_FC",
+      "port_key": "PORT_MAVLINK",
+      "real_ip": "10.13.0.2",
+      "real_port": 14550,
+      "virtual_ip": "10.13.0.2",
+      "virtual_port": 14550,
+      "is_decoy_redirect": false,
+      "is_critical": true,
+      "last_shuffle_time": "",
+      "shuffle_count": 0
+    },
+    "target_cc_port_web": {
+      "service_id": "target_cc_port_web",
+      "target_key": "TARGET_CC",
+      "port_key": "PORT_WEB",
+      "real_ip": "10.13.0.3",
+      "real_port": 3000,
+      "virtual_ip": "10.13.0.3",
+      "virtual_port": 3000,
+      "is_decoy_redirect": false,
+      "is_critical": false,
+      "last_shuffle_time": "",
+      "shuffle_count": 0
+    },
+    "target_cc_port_mavlink": {
+      "service_id": "target_cc_port_mavlink",
+      "target_key": "TARGET_CC",
+      "port_key": "PORT_MAVLINK",
+      "real_ip": "10.13.0.3",
+      "real_port": 14550,
+      "virtual_ip": "10.13.0.3",
+      "virtual_port": 14550,
+      "is_decoy_redirect": false,
+      "is_critical": false,
+      "last_shuffle_time": "",
+      "shuffle_count": 0
+    },
+    "target_gcs_port_mavlink": {
+      "service_id": "target_gcs_port_mavlink",
+      "target_key": "TARGET_GCS",
+      "port_key": "PORT_MAVLINK",
+      "real_ip": "10.13.0.4",
+      "real_port": 14550,
+      "virtual_ip": "10.13.0.4",
+      "virtual_port": 14550,
+      "is_decoy_redirect": false,
+      "is_critical": true,
+      "last_shuffle_time": "",
+      "shuffle_count": 0
+    },
+    "target_gcs_port_web": {
+      "service_id": "target_gcs_port_web",
+      "target_key": "TARGET_GCS",
+      "port_key": "PORT_WEB",
+      "real_ip": "10.13.0.4",
+      "real_port": 3000,
+      "virtual_ip": "10.13.0.4",
+      "virtual_port": 3000,
+      "is_decoy_redirect": false,
+      "is_critical": true,
+      "last_shuffle_time": "",
+      "shuffle_count": 0
+    },
+    "target_sim_port_sitl": {
+      "service_id": "target_sim_port_sitl",
+      "target_key": "TARGET_SIM",
+      "port_key": "PORT_SITL",
+      "real_ip": "10.13.0.5",
+      "real_port": 5760,
+      "virtual_ip": "10.13.0.5",
+      "virtual_port": 5760,
+      "is_decoy_redirect": false,
+      "is_critical": false,
+      "last_shuffle_time": "",
+      "shuffle_count": 0
+    },
+    "target_sim_port_ros": {
+      "service_id": "target_sim_port_ros",
+      "target_key": "TARGET_SIM",
+      "port_key": "PORT_ROS",
+      "real_ip": "10.13.0.5",
+      "real_port": 11311,
+      "virtual_ip": "10.13.0.5",
+      "virtual_port": 11311,
+      "is_decoy_redirect": false,
+      "is_critical": false,
+      "last_shuffle_time": "",
+      "shuffle_count": 0
+    },
+    "target_decoy_port_mavlink": {
+      "service_id": "target_decoy_port_mavlink",
+      "target_key": "TARGET_DECOY",
+      "port_key": "PORT_MAVLINK",
+      "real_ip": "10.13.0.7",
+      "real_port": 14550,
+      "virtual_ip": "10.13.0.7",
+      "virtual_port": 14550,
+      "is_decoy_redirect": false,
+      "is_critical": false,
+      "last_shuffle_time": "",
+      "shuffle_count": 0
+    },
+    "target_decoy_port_web": {
+      "service_id": "target_decoy_port_web",
+      "target_key": "TARGET_DECOY",
+      "port_key": "PORT_WEB",
+      "real_ip": "10.13.0.7",
+      "real_port": 3000,
+      "virtual_ip": "10.13.0.7",
+      "virtual_port": 3000,
+      "is_decoy_redirect": false,
+      "is_critical": false,
+      "last_shuffle_time": "",
+      "shuffle_count": 0
+    }
+  },
+  
+  "blacklist": {},
+  
+  "statistics": {
+    "total_shuffles": 0,
+    "total_port_hops": 0,
+    "total_decoy_redirects": 0,
+    "total_blocks": 0
+  },
+  
+  "current_entropy_bits": 17.97,
+  
+  "attack_detection": {
+    "attack_detected": false,
+    "risk_score": 0.0,
+    "threat_level": "low",
+    "confidence": 0.0,
+    "last_alert_time": null
+  },
+  
+  "cti_alerts": {
+    "total_alerts": 0,
+    "alerts_last_minute": 0,
+    "alert_rate": 0.0,
+    "alert_types": {
+      "scan_detected": 0,
+      "exploit_attempt": 0,
+      "breach_attempt": 0,
+      "anomaly_detected": 0
+    }
+  },
+  
+  "testbed_sync": {
+    "iptables_synced": false,
+    "deception_manager_synced": false,
+    "last_sync": null,
+    "sync_errors": []
+  },
+  
+  "attacker_env_export": {
+    "TARGET_FC": "10.13.0.2",
+    "TARGET_CC": "10.13.0.3",
+    "TARGET_GCS": "10.13.0.4",
+    "TARGET_SIM": "10.13.0.5",
+    "TARGET_DECOY": "10.13.0.7",
+    "PORT_MAVLINK": "14550",
+    "PORT_SITL": "5760",
+    "PORT_RTSP": "554",
+    "PORT_WEB": "3000",
+    "PORT_ROS": "11311",
+    "TARGET_CC_WIFI": "192.168.13.1"
+  }
 }

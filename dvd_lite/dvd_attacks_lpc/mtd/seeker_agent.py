@@ -8,6 +8,13 @@ seeker_agent.py
   * seeker_level 별 설정(seeker_levels.json)을 읽어서 파라미터를 다르게 사용
   * seeker_params[0] = scan_effort
   * seeker_params[1] = attack_bias
+
+레벨/모드 요약:
+- random   (level 0): 균등 샘플링으로 타깃 선택, 낮은 scan_effort, 낮은 decoy 회피.
+- heuristic(level 1): 정해진 scan_effort/attack_bias로 디코이 회피 경향, IP 변경 확률 소폭 증가.
+- time_aware(level 2): 시간이 지날수록 scan_effort, breach_prob를 증가시켜 장기전에 강함.
+- adaptive (level 3): outcome에 따라 scan_effort/attack_bias/breach_prob/ exploit_prob를 가감하며
+  차단·디코이 후에는 스텔스하게, 성공 후에는 더욱 공격적으로 행동.
 """
 
 from __future__ import annotations
@@ -60,10 +67,11 @@ class SimulatedHeuristicSeeker:
 
         # level 프로파일 로딩
         self.level_profile = self._load_level_profile(self.level)
+        self.mode = self.level_profile.get("mode", "heuristic")
         # state: scan_effort, attack_bias 등
         self.seeker_params = [
-            self.level_profile.get("scan_effort", 0.5),
-            self.level_profile.get("attack_bias", 0.5),
+            float(self.level_profile.get("scan_effort", 0.5)),
+            float(self.level_profile.get("attack_bias", 0.5)),
         ]
 
         self.ip_change_prob = float(self.level_profile.get("ip_change_prob", 0.1))
@@ -89,6 +97,7 @@ class SimulatedHeuristicSeeker:
             pass
         # fallback 기본값
         return {
+            "mode": "heuristic",
             "scan_effort": 0.5,
             "attack_bias": 0.5,
             "ip_change_prob": 0.1,
@@ -114,6 +123,13 @@ class SimulatedHeuristicSeeker:
         # 간단한 예:
         # - attack_bias가 낮으면 디코이에도 잘 걸린다.
         # - attack_bias가 높으면 decoy는 피하고 real target만 골라가려 한다.
+        # Random attacker는 모든 엔드포인트를 균등하게 선택한다.
+        if self.mode == "random":
+            idx = int(self.rng.integers(0, len(self.endpoints)))
+            self.current_ip_idx = idx
+            return self.endpoints[idx]
+
+        # Heuristic/Time-aware/Adaptive 공통: decoy 회피 성향을 attack_bias로 모델링
         probs = []
         for ep in self.endpoints:
             if ep.is_decoy:
@@ -163,6 +179,9 @@ class SimulatedHeuristicSeeker:
 
         # 스캔/공격/브리치 시도 결정
         scan_effort = self.seeker_params[0]
+        # time-aware 모드는 시간이 지날수록 스캔 빈도를 높인다.
+        if self.mode == "time_aware":
+            scan_effort = min(1.0, scan_effort + 0.002 * self.step_count)
         # scan_effort 클수록 더 자주 스캔 시도
         is_scan = self.rng.random() < scan_effort
 
@@ -172,13 +191,21 @@ class SimulatedHeuristicSeeker:
         is_breach_attempt = False
 
         if target_ep:
+            exploit_prob = self.exploit_prob
+            breach_prob = self.breach_prob
+
+            # adaptive 모드는 직전 outcome에 따라 확률을 바꾼다 (handle_outcome에서 업데이트)
+            # time-aware 모드는 일정 시간이 지나면 더 과감하게 breach를 시도
+            if self.mode == "time_aware" and self.step_count > 50:
+                breach_prob = min(1.0, breach_prob + 0.1)
+
             # scan 후 exploit 시도 여부
-            if self.rng.random() < self.exploit_prob:
+            if self.rng.random() < exploit_prob:
                 is_exploit_attempt = True
                 target_ep.exploit_progress += 0.3
 
                 # exploit 진행도가 높아지면 breach 시도
-                if target_ep.exploit_progress >= 0.7 and self.rng.random() < self.breach_prob:
+                if target_ep.exploit_progress >= 0.7 and self.rng.random() < breach_prob:
                     is_breach_attempt = True
                     target_ep.breach_progress += 0.5
 
@@ -201,3 +228,15 @@ class SimulatedHeuristicSeeker:
         if outcome in ("blocked", "decoy_hit"):
             # 다음엔 다른 엔드포인트로 옮길 가능성 증가
             self._maybe_change_ip()
+
+        if self.mode == "adaptive":
+            # 성공 시 공격성 유지, 실패 시 더 은신/우회하려 함
+            if outcome in ("breach_success", "exploit_success"):
+                self.seeker_params[0] = min(1.0, self.seeker_params[0] + 0.05)
+                self.seeker_params[1] = min(1.0, self.seeker_params[1] + 0.05)
+                self.breach_prob = min(1.0, self.breach_prob + 0.05)
+            else:
+                # 차단/디코이 시도를 줄이고 stealth하게 변경
+                self.seeker_params[0] = max(0.1, self.seeker_params[0] - 0.05)
+                self.seeker_params[1] = max(0.0, self.seeker_params[1] - 0.05)
+                self.exploit_prob = max(0.1, self.exploit_prob - 0.05)

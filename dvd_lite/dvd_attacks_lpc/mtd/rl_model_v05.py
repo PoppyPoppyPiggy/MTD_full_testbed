@@ -1,3 +1,13 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+rl_model_v05.py
+
+PPOAgent + ActorCritic for continuous MTD policy (v06에서 재사용).
+- max_buffer_size 확대 (1000 -> 2048)
+- target_kl 기반 early stop 추가
+"""
+
 import os
 import numpy as np
 import torch
@@ -10,14 +20,6 @@ LOG_STD_MIN = -20
 
 
 class ActorCritic(nn.Module):
-    """
-    Actor-Critic 네트워크
-    - shared feature (state_dim -> hidden -> hidden)
-    - actor_mean: action mean (hidden -> action_dim)
-    - critic: value (hidden -> 1)
-    - log_std: 학습 가능한 log-std (action_dim)
-    """
-
     def __init__(self, state_dim, action_dim, hidden_size=128):
         super().__init__()
 
@@ -73,12 +75,6 @@ class ActorCritic(nn.Module):
 
 
 class PPOAgent:
-    """
-    PPO 에이전트
-      - rollout buffer
-      - GAE, PPO clip 업데이트
-    """
-
     def __init__(
         self,
         state_dim,
@@ -117,7 +113,8 @@ class PPOAgent:
         self.values = []
         self.dones = []
 
-        self.max_buffer_size = 1000
+        # [TUNED] rollout buffer size
+        self.max_buffer_size = 2048
 
     def get_action_and_value(self, state_tensor):
         with torch.no_grad():
@@ -220,6 +217,8 @@ class PPOAgent:
 
         for _ in range(self.ppo_epochs):
             np.random.shuffle(b_inds)
+            should_break = False
+
             for start in range(0, len(self.rewards), self.minibatch_size):
                 end = start + self.minibatch_size
                 mb_inds = b_inds[start:end]
@@ -252,7 +251,9 @@ class PPOAgent:
                 entropy_loss = entropy.mean()
 
                 total_loss = (
-                    policy_loss - self.ent_coef * entropy_loss + self.vf_coef * value_loss
+                    policy_loss
+                    - self.ent_coef * entropy_loss
+                    + self.vf_coef * value_loss
                 )
 
                 self.optimizer.zero_grad()
@@ -263,6 +264,18 @@ class PPOAgent:
                 last_policy_loss = policy_loss.item()
                 last_value_loss = value_loss.item()
                 last_entropy_loss = entropy_loss.item()
+
+                # [NEW] minibatch별 KL 모니터링 + 조기 종료
+                if self.target_kl is not None and self.target_kl > 0:
+                    with torch.no_grad():
+                        mb_ratio = torch.exp(new_log_probs - mb_old_log_probs)
+                        mb_approx_kl = (mb_ratio - 1.0 - mb_ratio.log()).mean()
+                    if mb_approx_kl.item() > 1.5 * self.target_kl:
+                        should_break = True
+                        break
+
+            if should_break:
+                break
 
         with torch.no_grad():
             new_log_probs, _, new_values = self.network.get_log_prob(states, actions)

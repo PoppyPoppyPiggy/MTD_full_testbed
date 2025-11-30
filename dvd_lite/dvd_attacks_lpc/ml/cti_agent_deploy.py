@@ -1,12 +1,4 @@
-#!/usr/bin/env python3
-# -*- coding: utf-8 -*-
-# 디렉토리: dvd_lite/dvd_attacks_lpc/ml
-# 파일명: cti_agent_deploy.py
-# 설명: [Deployment] 학습된 모델을 로드하여 실시간 로그를 분석하고 공격 탐지 시 방어(MTD)를 수행하는 에이전트
-#       - bus.log(메타 데이터)는 참조하지 않음
-#       - bus_network.log, bus_telemetry.log 등을 실시간 모니터링
 
-import os
 import sys
 import time
 import json
@@ -32,6 +24,8 @@ PROJECT_ROOT = os.path.dirname(BASE_DIR)
 BUS_DIR = os.path.join(PROJECT_ROOT, "bus")
 MODEL_PATH = os.path.join(BASE_DIR, "output", "cti_classifier_model.joblib")
 DECEPTION_MGR = os.path.join(PROJECT_ROOT, "mtd", "rl_driven_deception_manager.py")
+CTI_POLICY_PATH = os.path.join(PROJECT_ROOT, "mtd", "shared_state", "cti_policy.json")
+CTI_STATUS_PATH = os.path.join(PROJECT_ROOT, "mtd", "shared_state", "cti_status.json")
 
 # --- 방어 모드 설정 ---
 #   CTI_DEFENSE_MODE 환경변수로 제어
@@ -57,33 +51,7 @@ TARGET_LOGS = {
 
 # --- 설정 ---
 DETECTION_INTERVAL = 1.0  # 초 단위 탐지 주기
-FEATURE_WINDOW_SIZE = 10  # 최근 N개 로그를 기반으로 피처 생성 (간이)
-CONFIDENCE_THRESHOLD = 0.7 # 공격 판단 임계값 (확률)
-
-
-class RealTimeLogReader(threading.Thread):
-    """로그 파일을 실시간으로 읽어 큐에 넣는 스레드 (tail -f 유사 기능)"""
-    def __init__(self, filepath, log_type, data_queue):
-        super().__init__()
-        self.filepath = filepath
-        self.log_type = log_type
-        self.data_queue = data_queue
-        self.running = True
-        self.daemon = True
-
-    def run(self):
-        # 파일이 생성될 때까지 대기
-        while self.running and not os.path.exists(self.filepath):
-            time.sleep(1)
-
-        logger.info(f"[*] Monitoring started: {os.path.basename(self.filepath)}")
-
-        try:
-            with open(self.filepath, 'r', encoding='utf-8') as f:
-                # 파일 끝으로 이동 (과거 로그 무시하고 현재부터 탐지하려면)
-                f.seek(0, os.SEEK_END)
-
-                while self.running:
+@@ -87,94 +89,126 @@ class RealTimeLogReader(threading.Thread):
                     line = f.readline()
                     if not line:
                         time.sleep(0.1)
@@ -109,6 +77,9 @@ class CTIAgent:
         self.data_buffer = deque(maxlen=1000)  # 최근 로그 버퍼
         self.running = True
         self.defense_cooldown = 0.0  # 방어 후 쿨다운
+        self.detection_threshold = CONFIDENCE_THRESHOLD
+        self.ban_duration_sec = 300
+        self._policy_mtime = None
 
         # --- 멀티 서비스 정의 (서비스 이름 -> (target_key, port_idx)) ---
         # iptables_mtd_controller.DEFAULT_TARGETS와 맞춰서 사용
@@ -128,6 +99,9 @@ class CTIAgent:
 
         # 모델 로드
         self.load_model()
+
+        # CTI 정책 초기 로드 (RL이 cti_policy.json을 덮어쓰면 탐지/밴 파라미터를 즉시 반영)
+        self._refresh_cti_policy(force=True)
 
         logger.info(f"CTI-Agent Defense Mode = {DEFENSE_MODE}")
 
@@ -154,6 +128,32 @@ class CTIAgent:
             self.mtd_controller = None
 
     # ------------------------------------------------------------------
+    # CTI 정책 파일 로딩
+    # ------------------------------------------------------------------
+    def _refresh_cti_policy(self, force: bool = False):
+        """cti_policy.json 변경사항을 반영해 탐지/밴 파라미터를 업데이트한다."""
+        try:
+            if not os.path.exists(CTI_POLICY_PATH):
+                return
+
+            mtime = os.path.getmtime(CTI_POLICY_PATH)
+            if self._policy_mtime is not None and mtime == self._policy_mtime and not force:
+                return
+
+            with open(CTI_POLICY_PATH, "r", encoding="utf-8") as f:
+                policy = json.load(f)
+
+            self.detection_threshold = float(policy.get("detection_threshold", self.detection_threshold))
+            self.ban_duration_sec = float(policy.get("ban_duration_sec", self.ban_duration_sec))
+            self._policy_mtime = mtime
+            logger.info(
+                f"CTI 정책 적용: detection_threshold={self.detection_threshold:.3f}, "
+                f"ban_duration_sec={self.ban_duration_sec}"
+            )
+        except Exception as e:
+            logger.error(f"CTI 정책 로드 실패: {e}")
+
+    # ------------------------------------------------------------------
     # 모델 로드 / 피처 처리
     # ------------------------------------------------------------------
     def load_model(self):
@@ -178,78 +178,7 @@ class CTIAgent:
                         self.feature_names = json.load(f)['features']
                 else:
                     logger.warning("⚠️ feature names 파일이 없어 모델 속성에서 추론합니다.")
-                    if hasattr(self.model, 'feature_names_in_'):
-                        self.feature_names = list(self.model.feature_names_in_)
-                    elif hasattr(self.model, "named_steps") and "clf" in self.model.named_steps:
-                        clf = self.model.named_steps["clf"]
-                        if hasattr(clf, "feature_names_in_"):
-                            self.feature_names = list(clf.feature_names_in_)
-            else:
-                # 구버전 호환 (모델만 저장된 경우)
-                self.model = artifact
-                self.id_to_name = {}  # 매핑 정보 없음
-
-            if not self.feature_names:
-                logger.error("feature_names를 결정할 수 없습니다. 학습 파이프라인과 일치하는 구성이 필요합니다.")
-                sys.exit(1)
-
-            logger.info("✅ Model loaded successfully.")
-
-        except Exception as e:
-            logger.critical(f"❌ 모델 로드 실패: {e}")
-            sys.exit(1)
-
-    def preprocess_log_to_features(self, log_entry):
-        """
-        단일 로그 엔트리를 모델 입력 피처 벡터로 변환
-        (data_builder.py의 extract_features 로직 간소화 버전)
-        """
-        # 기본값 0으로 초기화된 딕셔너리 생성 (모든 피처 포함)
-        features = {feat: 0.0 for feat in self.feature_names}
-
-        data = log_entry.get("data", {})
-        source = log_entry.get("_log_source")  # 우리가 주입한 타입
-
-        # 각 로그 타입별 피처 매핑
-        if source == "network":
-            features['pkt_length'] = float(data.get('length', 0))
-            features['pkt_src_port'] = float(data.get('src_port', 0))
-            features['pkt_dst_port'] = float(data.get('dst_port', 0))
-            # 프로토콜 등은 원-핫 인코딩이 필요하나 여기선 간략히 수치형만 처리
-
-        elif source == "telemetry":
-            features['alt_m'] = float(data.get('alt_m', 0))
-            features['groundspeed_ms'] = float(data.get('groundspeed_ms', 0))
-            features['battery_v'] = float(data.get('battery_v', 0))
-            features['pitch_deg'] = float(data.get('pitch_deg', 0))
-            features['roll_deg'] = float(data.get('roll_deg', 0))
-
-        elif source == "qos":
-            features['cpu_load_pct'] = float(data.get('cpu_load_pct', 0))
-            features['packet_loss_pct'] = float(data.get('packet_loss_pct', 0))
-            features['avg_rtt_ms'] = float(data.get('avg_rtt_ms', 0))
-            features['net_recv_bps'] = float((data.get('system_resources_rates') or {}).get('net_recv_bps', 0))
-
-        # DataFrame으로 변환 (1개 행)
-        df = pd.DataFrame([features])
-
-        # 모델 학습 시 사용된 컬럼 순서와 정확히 일치시켜야 함
-        df = df[self.feature_names]
-
-        return df
-
-    # ------------------------------------------------------------------
-    # 규칙 기반 MTD (cti_rule 모드)
-    # ------------------------------------------------------------------
-    def _execute_cti_rule_mtd(self, mtd_strategy: str, attack_name: str):
-        """
-        규칙 기반 MTD: 공격 유형에 따라 어떤 서비스들에 어떤 MTD를 적용할지 결정.
-        """
-        if self.mtd_controller is None:
-            logger.error("MTD Controller가 초기화되지 않아 cti_rule 방어를 수행할 수 없습니다.")
-            return
-
-        lower_name = attack_name.lower()
+@@ -253,153 +287,190 @@ class CTIAgent:
         target_services = []
 
         # 예시 정책:
@@ -275,6 +204,8 @@ class CTIAgent:
         )
 
         try:
+            # RL이 설정한 블랙리스트 지속 시간을 규칙 기반 MTD에도 반영
+            self.mtd_controller.apply_blacklist_policy(aggression=0.8, duration_sec=self.ban_duration_sec)
             for svc in target_services:
                 if mtd_strategy in ("ip_shuffle", "port_shuffle", "random"):
                     self.mtd_controller.shuffle_network(svc, intensity=0.7)
@@ -284,6 +215,32 @@ class CTIAgent:
             logger.info("✅ [CTI_RULE] iptables MTD 명령 수행 완료.")
         except Exception as e:
             logger.error(f"[CTI_RULE] MTD 실행 실패: {e}")
+
+    # ------------------------------------------------------------------
+    # CTI 상태 파일 기록
+    # ------------------------------------------------------------------
+    def _write_cti_status(
+        self,
+        attack_type: str,
+        attack_confidence: float,
+        detection_threshold: float,
+        ban_duration_sec: float,
+    ) -> None:
+        """CTI 상태를 shared_state/cti_status.json에 기록한다."""
+        try:
+            os.makedirs(os.path.dirname(CTI_STATUS_PATH), exist_ok=True)
+            status = {
+                "is_attack_detected": True,
+                "attack_type": attack_type,
+                "attack_confidence": attack_confidence,
+                "detection_threshold": detection_threshold,
+                "ban_duration_sec": ban_duration_sec,
+                "last_alert_time": datetime.utcnow().isoformat() + "Z",
+            }
+            with open(CTI_STATUS_PATH, "w", encoding="utf-8") as f:
+                json.dump(status, f, indent=2)
+        except Exception as e:
+            logger.error(f"cti_status.json 기록 실패: {e}")
 
     # ------------------------------------------------------------------
     # 방어 실행
@@ -326,8 +283,8 @@ class CTIAgent:
                 # NOTE: 실제 구현에서는 전략 이름을 RLDM에 전달하거나
                 #       CTI 이벤트를 shared_state로 넘기는 방식 등으로 확장 가능.
                 cmd = [sys.executable, DECEPTION_MGR, "--strategy", mtd_strategy, "--oneshot"]
-                # subprocess.Popen(cmd)  # 실제 실행 시 주석 해제
-                logger.info("✅ RL MTD 매니저 호출 (데모용, 실제 실행은 주석 해제 필요).")
+                subprocess.Popen(cmd)
+                logger.info("✅ RL MTD 매니저 호출 완료.")
                 self.defense_cooldown = current_time + 30  # 30초 쿨다운
             except Exception as e:
                 logger.error(f"[DEFENSE-RL] 방어 실행 실패: {e}")
@@ -352,6 +309,9 @@ class CTIAgent:
 
         try:
             while self.running:
+                # RL이 조정한 cti_policy.json 변경분을 주기적으로 반영
+                self._refresh_cti_policy()
+
                 if not self.data_buffer:
                     time.sleep(0.5)
                     continue
@@ -378,10 +338,16 @@ class CTIAgent:
                         attack_name = self.id_to_name.get(pred_label_id, f"Unknown-{pred_label_id}")
 
                         # 3. 판단 및 대응
-                        if attack_name.lower() != 'normal' and confidence > CONFIDENCE_THRESHOLD:
+                        if attack_name.lower() != 'normal' and confidence > self.detection_threshold:
                             logger.info(
                                 f"[PREDICT] label_id={pred_label_id}, "
                                 f"name={attack_name}, conf={confidence:.3f}"
+                            )
+                            self._write_cti_status(
+                                attack_type=attack_name,
+                                attack_confidence=confidence,
+                                detection_threshold=self.detection_threshold,
+                                ban_duration_sec=self.ban_duration_sec,
                             )
                             self.execute_defense(pred_label_id, attack_name)
 
