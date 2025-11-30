@@ -1,589 +1,577 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+"""MTD RL Environment v07 - Real IP×Port search space implementation.
+
+Implements:
+- Actual (IP, Port) → Service mapping
+- Attacker scans through search space (Urn model)
+- Dynamic Diversity/Redundancy metrics
+- Level-based scan efficiency
 """
-rl_environment_v07.py
+from __future__ import annotations
 
-MTD Reinforcement Learning Environment (v07) - State-Based Deterministic Model
-
-KEY CHANGES FROM v06:
-1. PROBABILITY → STATE-BASED TRANSITIONS
-2. 3-STAGE ATTACK MODEL (ASP = DSP × ESP × CSP)
-3. INITIAL STATE: PARTIAL COMPROMISE
-4. TESTBED-ALIGNED METRICS
-"""
-
-import os
-import sys
-
-# 현재 디렉토리를 path에 추가
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
-import gymnasium as gym
-from gymnasium import spaces
-import numpy as np
-import logging
-import json
 import math
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple, Any
-from collections import deque
-from enum import Enum
+from enum import Enum, auto
+from typing import Any, Dict, List, Optional, Set, Tuple
 
-# 절대 import로 변경 (. 제거)
-from rl_config_v07 import (
-    MTDConfig,
+import gymnasium as gym
+import numpy as np
+from gymnasium import spaces
+
+from .rl_config_v07 import (
+    ACTION_DIM,
+    DEFAULT_SEEKER_PROFILES,
+    STATE_DIM,
     AttackProgress,
-    AttackPhase,
-    EpisodeMetrics,
-    FEATURE_KEYS,
-    ACTION_PARAM_KEYS,
-    calculate_entropy,
-    get_seeker_profile,
+    EpisodeStats,
+    MTDConfig,
+    ServiceMapping,
+    load_seeker_profiles,
 )
 
-logger = logging.getLogger("MTDEnv_v07")
 
-
-@dataclass
-class Endpoint:
-    ip: str
-    name: str
-    is_decoy: bool = False
-    is_critical: bool = False
-    attack_progress: AttackProgress = field(default_factory=AttackProgress)
-    current_virtual_ip: Optional[str] = None
-    current_virtual_port: Optional[int] = None
-    is_online: bool = True
-    last_shuffle_step: int = 0
-    
-    def reset_progress(self, partial: bool = False):
-        self.attack_progress.reset(partial=partial)
-    
-    def get_phase(self) -> AttackPhase:
-        return self.attack_progress.current_phase
-    
-    def is_compromised(self) -> bool:
-        return self.attack_progress.is_compromised
-
-
-@dataclass
-class AttackerState:
-    attacker_id: str = "ATTACKER_0"
-    total_scans: int = 0
-    total_exploits: int = 0
-    total_breach_attempts: int = 0
-    current_target_idx: Optional[int] = None
-    is_scanning: bool = False
-    is_exploiting: bool = False
-    is_breaching: bool = False
-    steps_on_current_target: int = 0
-    is_blocked: bool = False
-    block_remaining_steps: int = 0
-
-
-@dataclass
-class MTDActionResult:
-    shuffle_applied: bool = False
-    port_hop_applied: bool = False
-    decoy_activated: bool = False
-    blacklist_updated: bool = False
-    costs: Dict[str, float] = field(default_factory=dict)
-    total_cost: float = 0.0
-    progress_reset_count: int = 0
-    entropy_gained: float = 0.0
-    params: Dict[str, float] = field(default_factory=dict)
-
-
-class StepOutcome(Enum):
-    NOTHING = "nothing"
-    SCAN_BLOCKED = "scan_blocked"
-    SCAN_SUCCESS = "scan_success"
-    SCAN_DECOY = "scan_decoy"
-    EXPLOIT_BLOCKED = "exploit_blocked"
-    EXPLOIT_SUCCESS = "exploit_success"
-    EXPLOIT_DECOY = "exploit_decoy"
-    BREACH_BLOCKED = "breach_blocked"
-    BREACH_SUCCESS = "breach_success"
+class Outcome(Enum):
+    NOTHING = auto()
+    SCAN_MISS = auto()           # 스캔했지만 아무것도 없음
+    SCAN_BLOCKED = auto()        # 블랙리스트로 차단
+    SCAN_FOUND_SERVICE = auto()  # 실제 서비스 발견!
+    SCAN_FOUND_DECOY = auto()    # 디코이 발견
+    EXPLOIT_BLOCKED = auto()
+    EXPLOIT_SUCCESS = auto()
+    EXPLOIT_DECOY = auto()
+    BREACH_BLOCKED = auto()
+    BREACH_SUCCESS = auto()
 
 
 class MTDEnvironment(gym.Env):
-    metadata = {"render_modes": ["human"], "render_fps": 4}
+    """MTD Environment with real search space implementation."""
     
+    metadata = {"render_modes": ["human"]}
+
     def __init__(
         self,
-        seed: Optional[int] = None,
+        seed: int = 42,
         seeker_level: int = 1,
-        config: MTDConfig = None,
-        initial_state_mode: str = "partial_compromise",
-        log_dir: Optional[str] = None,
+        seeker_profiles_path: Optional[str] = None,
+        config: Optional[MTDConfig] = None,
     ):
         super().__init__()
-        
-        self.config = config or MTDConfig()
+        self.cfg = config or MTDConfig()
         self.rng = np.random.default_rng(seed)
+
+        # Spaces
+        self.observation_space = spaces.Box(-1, 1, shape=(STATE_DIM,), dtype=np.float32)
+        self.action_space = spaces.Box(-1, 1, shape=(ACTION_DIM,), dtype=np.float32)
+
+        # Seeker profile
+        self.profiles = load_seeker_profiles(seeker_profiles_path)
         self.seeker_level = seeker_level
-        self.seeker_profile = get_seeker_profile(seeker_level)
-        self.config.initial_state.mode = initial_state_mode
+        self.profile = self.profiles.get(seeker_level, self.profiles[1])
+
+        # Initialize service mappings
+        self._init_service_mappings()
         
-        self.current_step = 0
-        self.max_episode_steps = self.config.ppo.max_steps_per_episode
+        # Attack state
+        self.attack_progress = AttackProgress()
         
-        self.endpoints: List[Endpoint] = []
-        self._initialize_endpoints()
+        # Environment state
+        self.step_count = 0
+        self.energy_used = 0.0
+        self.blacklist_ips: Set[int] = set()
+        self.last_action = np.zeros(ACTION_DIM)
+        self.last_shuffle_step = 0
+        self.shuffle_count = 0
+        self.stats = EpisodeStats()
+        self.cost_weight = self.cfg.reward_model.cost_weight_explore
         
-        self.attacker = AttackerState()
-        self.blacklist: Dict[str, int] = {}
-        self.active_decoy_count = 0
-        self.decoy_engagement_steps = 0
-        self.episode_metrics = EpisodeMetrics()
-        self.energy_consumed = 0.0
-        self.energy_budget = self.config.cost_model.energy_budget_per_episode
-        self.cost_weight = self.config.reward_model.cost_weight_explore
-        self.last_actions = {key: 0.5 for key in ACTION_PARAM_KEYS}
+        # Diversity tracking
+        self.config_history: List[Set[Tuple[int, int]]] = []
+        self.current_diversity = 1.0
         
-        self.action_space = spaces.Box(
-            low=-1.0, high=1.0, shape=(len(ACTION_PARAM_KEYS),), dtype=np.float32
+        # Counters
+        self._total_scans = 0
+        self._blocked_scans = 0
+        self._decoy_hits = 0
+        self._first_discovery_step = 0
+
+    def _init_service_mappings(self):
+        """서비스 매핑 초기화 - 가상 (IP, Port) ↔ 실제 서비스"""
+        self.service_mappings: List[ServiceMapping] = []
+        
+        ss = self.cfg.search_space
+        tb = self.cfg.testbed
+        
+        # 실제 타겟 매핑 (4개 타겟 × 5개 포트 = 20개 서비스)
+        port_list = list(tb.service_ports.values())
+        
+        for i, (name, real_ip) in enumerate(tb.real_targets.items()):
+            for j, (port_name, real_port) in enumerate(tb.service_ports.items()):
+                # 가상 주소 랜덤 할당
+                virt_ip = self.rng.integers(ss.virtual_ip_start, ss.virtual_ip_end + 1)
+                virt_port = self.rng.integers(ss.virtual_port_start, ss.virtual_port_end + 1)
+                
+                self.service_mappings.append(ServiceMapping(
+                    target_name=f"{name}:{port_name}",
+                    real_ip=real_ip,
+                    real_port=real_port,
+                    virtual_ip=virt_ip,
+                    virtual_port=virt_port,
+                    is_decoy=False,
+                    is_critical=(name in tb.critical_assets),
+                    active=True,
+                ))
+        
+        # 디코이 매핑 (2개 디코이 × 5개 포트 = 10개 디코이 서비스)
+        for name, real_ip in tb.decoys.items():
+            for port_name, real_port in tb.service_ports.items():
+                virt_ip = self.rng.integers(ss.virtual_ip_start, ss.virtual_ip_end + 1)
+                virt_port = self.rng.integers(ss.virtual_port_start, ss.virtual_port_end + 1)
+                
+                self.service_mappings.append(ServiceMapping(
+                    target_name=f"{name}:{port_name}",
+                    real_ip=real_ip,
+                    real_port=real_port,
+                    virtual_ip=virt_ip,
+                    virtual_port=virt_port,
+                    is_decoy=True,
+                    is_critical=False,
+                    active=False,  # 디코이는 기본 비활성
+                ))
+        
+        self._update_address_map()
+
+    def _update_address_map(self):
+        """가상 주소 → 서비스 매핑 업데이트"""
+        self.address_to_service: Dict[Tuple[int, int], ServiceMapping] = {}
+        for svc in self.service_mappings:
+            if svc.active:
+                addr = svc.get_virtual_address()
+                self.address_to_service[addr] = svc
+
+    def _shuffle_addresses(self, intensity: float):
+        """IP/Port Shuffle - 가상 주소 재할당"""
+        ss = self.cfg.search_space
+        num_to_shuffle = int(len(self.service_mappings) * intensity)
+        
+        # 셔플할 서비스 선택
+        services_to_shuffle = self.rng.choice(
+            self.service_mappings, 
+            min(num_to_shuffle, len(self.service_mappings)),
+            replace=False
         )
-        self.observation_space = spaces.Box(
-            low=-10.0, high=10.0, shape=(len(FEATURE_KEYS),), dtype=np.float32
-        )
         
-        self.alert_history = deque(maxlen=100)
-    
-    def _initialize_endpoints(self):
-        self.endpoints = []
-        for i, (name, ip) in enumerate(self.config.topology.real_targets.items()):
-            is_critical = name in ["TARGET_FC", "TARGET_GCS"]
-            ep = Endpoint(ip=ip, name=name, is_decoy=False, is_critical=is_critical)
-            initial_progress = self.config.initial_state.get_initial_progress(
-                endpoint_idx=i, is_decoy=False
-            )
-            ep.attack_progress = initial_progress
-            self.endpoints.append(ep)
+        shuffled_count = 0
+        for svc in services_to_shuffle:
+            if not svc.is_decoy or svc.active:  # 활성 서비스만 셔플
+                old_addr = svc.get_virtual_address()
+                svc.virtual_ip = self.rng.integers(ss.virtual_ip_start, ss.virtual_ip_end + 1)
+                svc.virtual_port = self.rng.integers(ss.virtual_port_start, ss.virtual_port_end + 1)
+                shuffled_count += 1
         
-        for name, ip in self.config.topology.decoy_targets.items():
-            ep = Endpoint(ip=ip, name=name, is_decoy=True, is_critical=False)
-            self.endpoints.append(ep)
-    
-    def _reset_counters(self):
-        self.episode_metrics = EpisodeMetrics()
-        self.energy_consumed = 0.0
-        self.blacklist.clear()
-        self.alert_history.clear()
-        self.active_decoy_count = 0
-        self.decoy_engagement_steps = 0
-        self.attacker = AttackerState()
-        self.last_actions = {key: 0.5 for key in ACTION_PARAM_KEYS}
-    
+        self._update_address_map()
+        self.shuffle_count += 1
+        self.last_shuffle_step = self.step_count
+        
+        # Shuffle 후 공격자가 발견한 서비스 중 셔플된 것은 무효화
+        shuffled_names = {svc.target_name for svc in services_to_shuffle}
+        self.attack_progress.discovered_services -= shuffled_names
+        
+        return shuffled_count
+
+    def _calculate_diversity(self) -> float:
+        """
+        Diversity 계산 (Alavizadeh et al.)
+        = 현재 구성이 이전 구성들과 얼마나 다른가
+        """
+        current_config = set(svc.get_virtual_address() for svc in self.service_mappings if svc.active)
+        
+        if not self.config_history:
+            self.config_history.append(current_config)
+            return 1.0
+        
+        # 이전 구성들과의 차이 계산
+        total_diff = 0
+        for prev_config in self.config_history[-5:]:  # 최근 5개와 비교
+            diff = len(current_config.symmetric_difference(prev_config))
+            total_diff += diff / max(len(current_config), 1)
+        
+        diversity = total_diff / max(len(self.config_history[-5:]), 1)
+        
+        # 현재 구성 저장
+        self.config_history.append(current_config)
+        if len(self.config_history) > 10:
+            self.config_history.pop(0)
+        
+        return min(1.0, diversity)
+
+    def _calculate_redundancy(self) -> float:
+        """
+        Redundancy 계산 (Alavizadeh et al.)
+        = 활성 디코이 / 전체 디코이
+        """
+        decoys = [svc for svc in self.service_mappings if svc.is_decoy]
+        if not decoys:
+            return 0.0
+        active_decoys = sum(1 for svc in decoys if svc.active)
+        return active_decoys / len(decoys)
+
     def set_reward_profile(self, profile: str):
         if profile == "explore":
-            self.cost_weight = self.config.reward_model.cost_weight_explore
-        elif profile == "exploit":
-            self.cost_weight = self.config.reward_model.cost_weight_exploit
-    
-    def set_seeker_level(self, level: int):
-        self.seeker_level = level
-        self.seeker_profile = get_seeker_profile(level)
-    
-    def reset(self, seed: Optional[int] = None, options: Optional[Dict] = None) -> Tuple[np.ndarray, Dict]:
+            self.cost_weight = self.cfg.reward_model.cost_weight_explore
+        else:
+            self.cost_weight = self.cfg.reward_model.cost_weight_exploit
+
+    def reset(self, *, seed=None, options=None) -> Tuple[np.ndarray, Dict]:
         if seed is not None:
             self.rng = np.random.default_rng(seed)
-            super().reset(seed=seed)
+
+        # 서비스 매핑 재초기화
+        self._init_service_mappings()
         
-        self.current_step = 0
-        self._reset_counters()
-        self._initialize_endpoints()
+        # 공격 진행 상태 리셋
+        self.attack_progress = AttackProgress()
         
-        obs = self._get_observation()
-        info = self._get_info()
-        return obs, info
-    
+        # 환경 상태 리셋
+        self.step_count = 0
+        self.energy_used = 0.0
+        self.blacklist_ips.clear()
+        self.last_action = np.zeros(ACTION_DIM)
+        self.last_shuffle_step = 0
+        self.shuffle_count = 0
+        self.config_history.clear()
+        self.current_diversity = 1.0
+        self.stats = EpisodeStats()
+        
+        self._total_scans = 0
+        self._blocked_scans = 0
+        self._decoy_hits = 0
+        self._first_discovery_step = 0
+
+        # === Initial State Sampling ===
+        init_cfg = self.cfg.initial_state
+        if init_cfg.mode == "sample":
+            mode = self.rng.choice(["clean", "found", "near_breach"], p=init_cfg.mode_probs)
+        else:
+            mode = init_cfg.mode
+
+        if mode == "found":
+            # 이미 일부 탐색 공간을 스캔한 상태
+            ss = self.cfg.search_space
+            pre_scans = int(ss.total_search_space * init_cfg.pre_scanned_ratio)
+            for _ in range(pre_scans):
+                ip = self.rng.integers(ss.virtual_ip_start, ss.virtual_ip_end + 1)
+                port = self.rng.integers(ss.virtual_port_start, ss.virtual_port_end + 1)
+                self.attack_progress.scanned_addresses.add((ip, port))
+            
+            # 일부 서비스 이미 발견
+            real_services = [svc for svc in self.service_mappings if not svc.is_decoy]
+            discovered = self.rng.choice(real_services, min(init_cfg.pre_discovered_services, len(real_services)), replace=False)
+            for svc in discovered:
+                self.attack_progress.discovered_services.add(svc.target_name)
+                self.attack_progress.scanned_addresses.add(svc.get_virtual_address())
+            self.attack_progress.discovery = 0.5
+            self._first_discovery_step = 1
+
+        elif mode == "near_breach":
+            # Breach 직전 상태
+            real_services = [svc for svc in self.service_mappings if not svc.is_decoy]
+            target = self.rng.choice(real_services)
+            self.attack_progress.discovered_services.add(target.target_name)
+            self.attack_progress.scanned_addresses.add(target.get_virtual_address())
+            self.attack_progress.discovery = 1.0
+            self.attack_progress.exploitation = 0.8
+            self.attack_progress.compromise = self.rng.uniform(0.3, 0.6)
+            self._first_discovery_step = 1
+
+        return self._get_obs(), {"init_mode": mode}
+
     def step(self, action: np.ndarray) -> Tuple[np.ndarray, float, bool, bool, Dict]:
-        self.current_step += 1
+        self.step_count += 1
+        action = np.clip(action, -1, 1)
+        scaled = (action + 1) / 2  # [0, 1]
+
+        # Apply MTD actions
+        mtd_cost = self._apply_mtd(scaled)
         
-        mtd_result = self._apply_mtd_strategy(action)
-        attacker_action = self._determine_attacker_action()
-        outcome = self._resolve_interaction(mtd_result, attacker_action)
-        self._update_state(outcome, mtd_result, attacker_action)
-        reward = self._calculate_reward(outcome, mtd_result)
+        # Update diversity
+        self.current_diversity = self._calculate_diversity()
+
+        # Attacker step (실제 탐색)
+        outcome = self._attacker_step()
+
+        # Calculate reward
+        reward = self._calc_reward(outcome, mtd_cost)
+        self.last_action = action
+
+        # Check termination
+        terminated = self.attack_progress.compromised
+        truncated = self.step_count >= self.cfg.ppo.max_steps
+
+        # Update stats
+        self._update_stats(mtd_cost, terminated)
+
+        info = self.stats.as_dict()
+        info["outcome"] = outcome.name
+
+        return self._get_obs(), reward, terminated, truncated, info
+
+    def _apply_mtd(self, scaled: np.ndarray) -> Dict[str, float]:
+        shuffle, port_hop, decoy_ratio, bl_aggr, bl_dur, swap = scaled
+        th = self.cfg.thresholds
+        costs = {"total": 0.0, "latency_ms": 0.0, "energy": 0.0}
+
+        # IP Shuffle
+        if shuffle >= th.shuffle:
+            num_shuffled = self._shuffle_addresses(shuffle)
+            shuffle_cost = self.cfg.cost_model.calculate_shuffle_cost(shuffle, num_shuffled)
+            costs["latency_ms"] += shuffle_cost["latency_ms"]
+            costs["energy"] += shuffle_cost["energy"]
+            costs["total"] += shuffle_cost["total"]
+            self.energy_used += shuffle_cost["energy"]
+
+        # Port Hop (shuffle과 유사하지만 포트만)
+        if port_hop >= th.port_hop:
+            ss = self.cfg.search_space
+            for svc in self.service_mappings:
+                if svc.active and self.rng.random() < port_hop:
+                    svc.virtual_port = self.rng.integers(ss.virtual_port_start, ss.virtual_port_end + 1)
+            self._update_address_map()
+            costs["total"] += self.cfg.cost_model.port_hop_cpu * port_hop
+
+        # Decoy activation
+        if decoy_ratio >= th.decoy_activate:
+            decoys = [svc for svc in self.service_mappings if svc.is_decoy]
+            num_activate = int(len(decoys) * decoy_ratio)
+            for i, svc in enumerate(decoys):
+                svc.active = (i < num_activate)
+            self._update_address_map()
+            active_count = sum(1 for svc in decoys if svc.active)
+            decoy_cost = self.cfg.cost_model.calculate_decoy_cost(active_count)
+            costs["total"] += decoy_cost["total"]
+
+        # Blacklist
+        if bl_aggr >= th.blacklist:
+            # 공격자가 스캔한 IP 중 일부를 블랙리스트에 추가
+            num_to_block = int(bl_aggr * 10)
+            recent_scans = list(self.attack_progress.scanned_addresses)[-50:]
+            for addr in recent_scans[:num_to_block]:
+                self.blacklist_ips.add(addr[0])
+            costs["total"] += self.cfg.cost_model.blacklist_update * bl_aggr
+
+        return costs
+
+    def _attacker_step(self) -> Outcome:
+        """공격자의 실제 탐색 단계 (Urn Model)"""
+        prof = self.profile
+        ss = self.cfg.search_space
         
-        terminated = self._check_termination()
-        truncated = self.current_step >= self.max_episode_steps
+        # Time boost for level 2+
+        time_factor = 1.0
+        if prof.get("time_boost"):
+            time_factor = 1.0 + 0.3 * (self.step_count / self.cfg.ppo.max_steps)
         
-        obs = self._get_observation()
-        info = self._get_info()
-        info.update({
-            "outcome": outcome.value,
-            "mtd_result": {
-                "shuffle": mtd_result.shuffle_applied,
-                "port_hop": mtd_result.port_hop_applied,
-                "decoy": mtd_result.decoy_activated,
-                "blacklist": mtd_result.blacklist_updated,
-                "cost": mtd_result.total_cost,
-            },
-            "attacker": {
-                "action": self._get_attacker_action_str(attacker_action),
-                "target": attacker_action.get("target_name", "None"),
-                "blocked": self.attacker.is_blocked,
-            },
-            "reward": reward,
-        })
+        # Adaptive boost for level 3+
+        if prof.get("adaptive") and self._total_scans > 20:
+            success_rate = len(self.attack_progress.discovered_services) / max(1, self._total_scans / 100)
+            time_factor *= (1.0 + 0.2 * success_rate)
+
+        # 스텝당 스캔 수 결정
+        scans_this_step = int(prof["scans_per_step"] * time_factor)
+        effective_scans = int(scans_this_step * prof["scan_efficiency"])
         
-        for k, v in mtd_result.params.items():
-            info[f"Params/{k}"] = v
+        self._total_scans += scans_this_step
+        self.stats.total_scans = self._total_scans
+
+        outcome = Outcome.NOTHING
         
-        return obs, reward, terminated, truncated, info
-    
-    def _apply_mtd_strategy(self, action: np.ndarray) -> MTDActionResult:
-        result = MTDActionResult()
-        
-        params = {}
-        for i, key in enumerate(ACTION_PARAM_KEYS):
-            params[key] = self._scale_action(action[i])
-        
-        result.params = params
-        self.last_actions = params
-        
-        thresholds = self.config.thresholds
-        cost_model = self.config.cost_model
-        
-        if params["shuffle_intensity"] >= thresholds.shuffle_activation:
-            result.shuffle_applied = True
-            self.episode_metrics.shuffle_count += 1
-            for ep in self.endpoints:
-                if not ep.is_decoy:
-                    ep.reset_progress(partial=True)
-                    result.progress_reset_count += 1
-                    ep.last_shuffle_step = self.current_step
-            result.entropy_gained = calculate_entropy(
-                self.config.topology.shuffle_space_size
-            ) * params["shuffle_intensity"]
-        
-        if params["port_hop_intensity"] >= thresholds.port_hop_activation:
-            result.port_hop_applied = True
-            self.episode_metrics.port_hop_count += 1
-            for ep in self.endpoints:
-                if not ep.is_decoy:
-                    ep.attack_progress.discovery_progress *= (
-                        1.0 - params["port_hop_intensity"] * 0.5
-                    )
-        
-        if params["decoy_activation_level"] >= thresholds.decoy_activation:
-            result.decoy_activated = True
-            decoy_count = len([ep for ep in self.endpoints if ep.is_decoy])
-            self.active_decoy_count = int(decoy_count * params["decoy_activation_level"])
-        else:
-            self.active_decoy_count = 0
-        
-        if params["blacklist_aggression"] >= thresholds.blacklist_activation:
-            result.blacklist_updated = True
-            self.episode_metrics.blacklist_actions += 1
-            if len(self.alert_history) > 0:
-                alert_rate = sum(self.alert_history) / len(self.alert_history)
-                if alert_rate > (1.0 - params["blacklist_aggression"]):
-                    duration = int(10 + params["blacklist_duration"] * 190)
-                    self.blacklist[self.attacker.attacker_id] = duration
-                    self.attacker.is_blocked = True
-                    self.attacker.block_remaining_steps = duration
-        
-        result.costs = cost_model.calculate_total_cost(
-            shuffle_intensity=params["shuffle_intensity"] if result.shuffle_applied else 0,
-            port_hop_intensity=params["port_hop_intensity"] if result.port_hop_applied else 0,
-            decoy_ratio=params["decoy_activation_level"],
-            blacklist_aggression=params["blacklist_aggression"],
-            num_high_decoys=min(2, self.active_decoy_count),
-            num_low_decoys=max(0, self.active_decoy_count - 2),
-        )
-        result.total_cost = result.costs["total"]
-        
-        self.episode_metrics.total_mtd_cost += result.total_cost
-        self.energy_consumed += result.costs.get("energy", 0)
-        
-        return result
-    
-    def _determine_attacker_action(self) -> Dict[str, Any]:
-        action = {
-            "is_scan": False,
-            "is_exploit": False,
-            "is_breach": False,
-            "target_idx": None,
-            "target_name": None,
-        }
-        
-        if self.attacker.is_blocked:
-            self.attacker.block_remaining_steps -= 1
-            if self.attacker.block_remaining_steps <= 0:
-                self.attacker.is_blocked = False
-                self._attacker_change_ip()
-            return action
-        
-        profile = self.seeker_profile
-        target_idx = self._select_target()
-        if target_idx is None:
-            return action
-        
-        target = self.endpoints[target_idx]
-        action["target_idx"] = target_idx
-        action["target_name"] = target.name
-        
-        progress = target.attack_progress
-        
-        scan_interval = max(1, int(5 / (profile["scan_effort"] + 0.1)))
-        if self.current_step % scan_interval == 0:
-            action["is_scan"] = True
-            self.attacker.total_scans += 1
-            self.episode_metrics.total_scan_attempts += 1
-        
-        if progress.discovery_progress >= progress.DISCOVERY_THRESHOLD * 0.7:
-            exploit_threshold = 1.0 - profile["exploit_prob"]
-            if progress.discovery_progress >= exploit_threshold:
-                action["is_exploit"] = True
-                self.attacker.total_exploits += 1
-                self.episode_metrics.total_exploit_attempts += 1
-        
-        if progress.exploitation_progress >= progress.EXPLOITATION_THRESHOLD * 0.8:
-            breach_threshold = 1.0 - profile["breach_prob"]
-            if progress.exploitation_progress >= breach_threshold:
-                action["is_breach"] = True
-                self.attacker.total_breach_attempts += 1
-                self.episode_metrics.total_breach_attempts += 1
-        
-        return action
-    
-    def _select_target(self) -> Optional[int]:
-        if not self.endpoints:
-            return None
-        
-        profile = self.seeker_profile
-        attack_bias = profile["attack_bias"]
-        
-        scores = []
-        for i, ep in enumerate(self.endpoints):
-            score = 0.0
-            if ep.is_decoy:
-                if self.active_decoy_count > 0:
-                    score = (1.0 - attack_bias) * 0.5
-                else:
-                    score = 0.0
+        for _ in range(effective_scans):
+            # 스캔할 (IP, Port) 선택
+            if self.rng.random() < prof["smart_scan"] and self.attack_progress.scanned_addresses:
+                # Smart scan: 이전에 발견한 주소 근처 스캔
+                known = list(self.attack_progress.scanned_addresses)
+                base_addr = known[self.rng.integers(len(known))]
+                scan_ip = base_addr[0] + self.rng.integers(-5, 6)
+                scan_port = base_addr[1] + self.rng.integers(-50, 51)
+                scan_ip = max(ss.virtual_ip_start, min(ss.virtual_ip_end, scan_ip))
+                scan_port = max(ss.virtual_port_start, min(ss.virtual_port_end, scan_port))
             else:
-                progress_score = (
-                    ep.attack_progress.discovery_progress * 0.3 +
-                    ep.attack_progress.exploitation_progress * 0.5 +
-                    (1.0 if ep.is_critical else 0.5) * 0.2
-                )
-                score = 0.3 + progress_score * 0.7
-            scores.append(max(0.01, score))
+                # Random scan
+                scan_ip = self.rng.integers(ss.virtual_ip_start, ss.virtual_ip_end + 1)
+                scan_port = self.rng.integers(ss.virtual_port_start, ss.virtual_port_end + 1)
+            
+            scan_addr = (scan_ip, scan_port)
+            
+            # 블랙리스트 체크
+            if scan_ip in self.blacklist_ips:
+                self._blocked_scans += 1
+                outcome = Outcome.SCAN_BLOCKED
+                continue
+            
+            # 이미 스캔한 주소인지 확인
+            if scan_addr in self.attack_progress.scanned_addresses:
+                continue
+            
+            self.attack_progress.scanned_addresses.add(scan_addr)
+            self.stats.effective_scans = len(self.attack_progress.scanned_addresses)
+            
+            # 서비스 발견 여부 확인
+            if scan_addr in self.address_to_service:
+                svc = self.address_to_service[scan_addr]
+                
+                if svc.is_decoy:
+                    # 디코이 탐지 확률
+                    if self.rng.random() < prof["decoy_detect"]:
+                        continue  # 디코이 인식하고 무시
+                    self._decoy_hits += 1
+                    outcome = Outcome.SCAN_FOUND_DECOY
+                else:
+                    # 실제 서비스 발견!
+                    if svc.target_name not in self.attack_progress.discovered_services:
+                        self.attack_progress.discovered_services.add(svc.target_name)
+                        if self._first_discovery_step == 0:
+                            self._first_discovery_step = self.step_count
+                        outcome = Outcome.SCAN_FOUND_SERVICE
+            else:
+                outcome = Outcome.SCAN_MISS
+
+        # Discovery progress 업데이트
+        real_services = [svc for svc in self.service_mappings if not svc.is_decoy]
+        discovered_ratio = len(self.attack_progress.discovered_services) / max(len(real_services), 1)
+        self.attack_progress.discovery = discovered_ratio
+
+        # 발견한 서비스에 대해 exploit/breach 시도
+        if self.attack_progress.discovered_services:
+            outcome = self._attempt_exploit(outcome)
+
+        return outcome
+
+    def _attempt_exploit(self, current_outcome: Outcome) -> Outcome:
+        """발견한 서비스에 대해 exploit/breach 시도"""
+        prof = self.profile
+        prog = self.attack_progress
         
-        scores = np.array(scores)
-        probs = np.exp(scores * 3) / np.sum(np.exp(scores * 3))
-        return int(self.rng.choice(len(self.endpoints), p=probs))
-    
-    def _attacker_change_ip(self):
-        old_id = self.attacker.attacker_id
-        new_idx = self.rng.integers(0, 100)
-        self.attacker.attacker_id = f"ATTACKER_{new_idx}"
-        if old_id in self.blacklist:
-            del self.blacklist[old_id]
-    
-    def _resolve_interaction(self, mtd_result: MTDActionResult, attacker_action: Dict) -> StepOutcome:
-        if self.attacker.is_blocked:
-            if attacker_action["is_scan"]:
-                return StepOutcome.SCAN_BLOCKED
-            return StepOutcome.NOTHING
+        # Shuffle 이후 시간에 따른 보호 효과
+        steps_since_shuffle = self.step_count - self.last_shuffle_step
+        shuffle_protection = max(0, 1 - steps_since_shuffle / 15)
         
-        target_idx = attacker_action.get("target_idx")
-        if target_idx is None:
-            return StepOutcome.NOTHING
+        if prog.exploitation < AttackProgress.EXPLOITATION_THRESHOLD:
+            # Exploitation 단계
+            if self.rng.random() < shuffle_protection * 0.5:
+                return Outcome.EXPLOIT_BLOCKED
+            
+            if self.rng.random() < prof["exploit_prob"]:
+                prog.exploitation += self.rng.uniform(0.1, 0.25)
+                # 디코이에 대한 exploit인지 확인
+                discovered_decoys = [
+                    svc for svc in self.service_mappings 
+                    if svc.is_decoy and svc.target_name in prog.discovered_services
+                ]
+                if discovered_decoys and self.rng.random() < 0.5:
+                    return Outcome.EXPLOIT_DECOY
+                return Outcome.EXPLOIT_SUCCESS
         
-        target = self.endpoints[target_idx]
+        elif prog.compromise < AttackProgress.COMPROMISE_THRESHOLD:
+            # Breach 단계
+            if self.rng.random() < shuffle_protection * 0.3:
+                return Outcome.BREACH_BLOCKED
+            
+            if self.rng.random() < prof["breach_prob"]:
+                prog.compromise += self.rng.uniform(0.15, 0.35)
+                if prog.compromised:
+                    self.stats.time_to_breach = self.step_count
+                    return Outcome.BREACH_SUCCESS
         
-        if target.is_decoy and self.active_decoy_count > 0:
-            self.episode_metrics.decoy_engagement_count += 1
-            self.decoy_engagement_steps += 1
-            if attacker_action["is_exploit"]:
-                return StepOutcome.EXPLOIT_DECOY
-            elif attacker_action["is_scan"]:
-                return StepOutcome.SCAN_DECOY
-            return StepOutcome.NOTHING
-        
-        progress = target.attack_progress
-        shuffle_recency = self.current_step - target.last_shuffle_step
-        shuffle_protection = max(0, 1.0 - shuffle_recency / 10.0)
-        block_threshold = self.last_actions.get("blacklist_aggression", 0) * 0.5
-        
-        if attacker_action["is_breach"]:
-            self.episode_metrics.total_breach_attempts += 1
-            effective_defense = shuffle_protection + block_threshold
-            if progress.exploitation_progress >= progress.EXPLOITATION_THRESHOLD:
-                if effective_defense < 0.3:
-                    progress.compromise_progress += 0.4
-                    if progress.is_compromised:
-                        self.episode_metrics.successful_breaches += 1
-                        return StepOutcome.BREACH_SUCCESS
-                return StepOutcome.BREACH_BLOCKED
-            return StepOutcome.BREACH_BLOCKED
-        
-        if attacker_action["is_exploit"]:
-            if shuffle_protection > 0.5:
-                return StepOutcome.EXPLOIT_BLOCKED
-            progress_gain = self.seeker_profile["exploit_prob"] * 0.2
-            progress.exploitation_progress = min(1.0, progress.exploitation_progress + progress_gain)
-            if progress.exploitation_progress >= progress.EXPLOITATION_THRESHOLD:
-                return StepOutcome.EXPLOIT_SUCCESS
-            return StepOutcome.NOTHING
-        
-        if attacker_action["is_scan"]:
-            if mtd_result.shuffle_applied:
-                return StepOutcome.SCAN_BLOCKED
-            progress_gain = self.seeker_profile["scan_effort"] * 0.15
-            progress.discovery_progress = min(1.0, progress.discovery_progress + progress_gain)
-            if progress.discovery_progress >= progress.DISCOVERY_THRESHOLD:
-                return StepOutcome.SCAN_SUCCESS
-            return StepOutcome.NOTHING
-        
-        return StepOutcome.NOTHING
-    
-    def _update_state(self, outcome: StepOutcome, mtd_result: MTDActionResult, attacker_action: Dict):
-        is_suspicious = outcome in [
-            StepOutcome.SCAN_SUCCESS,
-            StepOutcome.EXPLOIT_SUCCESS,
-            StepOutcome.BREACH_SUCCESS,
-        ]
-        self.alert_history.append(1 if is_suspicious else 0)
-        
-        expired_ips = []
-        for ip, remaining in self.blacklist.items():
-            self.blacklist[ip] = remaining - 1
-            if self.blacklist[ip] <= 0:
-                expired_ips.append(ip)
-        for ip in expired_ips:
-            del self.blacklist[ip]
-        
-        if outcome == StepOutcome.BREACH_SUCCESS:
-            self.episode_metrics.successful_breaches += 1
-        
-        if outcome in [StepOutcome.SCAN_DECOY, StepOutcome.EXPLOIT_DECOY]:
-            self.episode_metrics.decoy_time_absorbed += 1
-    
-    def _calculate_reward(self, outcome: StepOutcome, mtd_result: MTDActionResult) -> float:
-        reward_model = self.config.reward_model
-        reward = 0.0
-        
-        outcome_rewards = {
-            StepOutcome.SCAN_BLOCKED: reward_model.reward_discovery_blocked,
-            StepOutcome.EXPLOIT_BLOCKED: reward_model.reward_exploitation_blocked,
-            StepOutcome.BREACH_BLOCKED: reward_model.reward_breach_blocked,
-            StepOutcome.SCAN_SUCCESS: reward_model.penalty_discovery_success,
-            StepOutcome.EXPLOIT_SUCCESS: reward_model.penalty_exploitation_success,
-            StepOutcome.BREACH_SUCCESS: reward_model.penalty_breach_success,
-            StepOutcome.SCAN_DECOY: reward_model.reward_decoy_scan,
-            StepOutcome.EXPLOIT_DECOY: reward_model.reward_decoy_exploit,
-            StepOutcome.NOTHING: reward_model.reward_survival_per_step,
+        return current_outcome
+
+    def _calc_reward(self, outcome: Outcome, costs: Dict[str, float]) -> float:
+        rm = self.cfg.reward_model
+        reward = rm.reward_survival
+
+        reward_map = {
+            Outcome.SCAN_BLOCKED: rm.reward_scan_blocked,
+            Outcome.SCAN_FOUND_SERVICE: rm.penalty_service_found,
+            Outcome.SCAN_FOUND_DECOY: rm.reward_decoy_scan,
+            Outcome.EXPLOIT_BLOCKED: rm.reward_exploit_blocked,
+            Outcome.EXPLOIT_SUCCESS: rm.penalty_exploit,
+            Outcome.EXPLOIT_DECOY: rm.reward_decoy_exploit,
+            Outcome.BREACH_BLOCKED: rm.reward_breach_blocked,
+            Outcome.BREACH_SUCCESS: rm.penalty_breach,
         }
+        reward += reward_map.get(outcome, 0)
+
+        # Cost penalty
+        reward -= self.cost_weight * costs["total"]
+
+        # Diversity bonus
+        reward += 0.5 * self.current_diversity
+
+        return reward
+
+    def _update_stats(self, costs: Dict[str, float], terminated: bool):
+        real_services = [svc for svc in self.service_mappings if not svc.is_decoy]
         
-        reward += outcome_rewards.get(outcome, 0.0)
-        reward -= mtd_result.total_cost * self.cost_weight
+        self.stats.defense_success_rate = self._blocked_scans / max(1, self._total_scans)
+        self.stats.breach_prevented = not terminated
+        self.stats.services_found = len(self.attack_progress.discovered_services)
+        self.stats.decoy_hits = self._decoy_hits
+        self.stats.scans_blocked = self._blocked_scans
+        self.stats.time_to_first_discovery = self._first_discovery_step
         
-        if reward_model.enable_shaping and mtd_result.shuffle_applied:
-            reward += reward_model.shaping_coefficient * mtd_result.progress_reset_count * 0.5
+        self.stats.avg_diversity = self.current_diversity
+        self.stats.min_diversity = min(self.stats.min_diversity, self.current_diversity)
+        self.stats.avg_redundancy = self._calculate_redundancy()
         
-        return float(reward)
-    
-    def _get_observation(self) -> np.ndarray:
-        obs = {}
+        self.stats.total_cost += costs["total"]
+        self.stats.total_latency_ms += costs.get("latency_ms", 0)
+        self.stats.total_energy = self.energy_used
         
-        obs["cti_alert_rate"] = sum(self.alert_history) / max(1, len(self.alert_history))
-        obs["blacklist_size_ratio"] = min(1.0, len(self.blacklist) / 20.0)
-        obs["service_uptime_ratio"] = 1.0 - (
-            self.episode_metrics.shuffle_count / max(1, self.current_step)
+        self.stats.compute_s_mtd()
+
+    def _get_obs(self) -> np.ndarray:
+        ss = self.cfg.search_space
+        real_services = [svc for svc in self.service_mappings if not svc.is_decoy]
+        
+        # 탐색 공간 중 스캔된 비율
+        scanned_ratio = len(self.attack_progress.scanned_addresses) / ss.total_search_space
+        
+        # 서비스 발견 비율
+        discovered_ratio = len(self.attack_progress.discovered_services) / max(len(real_services), 1)
+        
+        # 중요 자산 발견 여부
+        critical_names = {f"{name}:" for name in self.cfg.testbed.critical_assets}
+        critical_discovered = any(
+            any(cn in svc_name for cn in critical_names) 
+            for svc_name in self.attack_progress.discovered_services
         )
         
-        real_endpoints = [ep for ep in self.endpoints if not ep.is_decoy]
-        if real_endpoints:
-            obs["avg_discovery_progress"] = np.mean([
-                ep.attack_progress.discovery_progress for ep in real_endpoints
-            ])
-            obs["avg_exploitation_progress"] = np.mean([
-                ep.attack_progress.exploitation_progress for ep in real_endpoints
-            ])
-            obs["avg_compromise_progress"] = np.mean([
-                ep.attack_progress.compromise_progress for ep in real_endpoints
-            ])
-            obs["max_compromise_progress"] = max([
-                ep.attack_progress.compromise_progress for ep in real_endpoints
-            ])
-        else:
-            obs["avg_discovery_progress"] = 0.0
-            obs["avg_exploitation_progress"] = 0.0
-            obs["avg_compromise_progress"] = 0.0
-            obs["max_compromise_progress"] = 0.0
+        # 공격자 스캔 속도 추정
+        scan_rate = self._total_scans / max(1, self.step_count)
         
-        total_attacks = max(1, self.episode_metrics.total_exploit_attempts)
-        obs["decoy_engagement_rate"] = self.episode_metrics.decoy_engagement_count / total_attacks
-        obs["decoy_time_absorbed_ratio"] = self.decoy_engagement_steps / max(1, self.current_step)
-        
-        obs["energy_remaining_ratio"] = max(0, 1.0 - (self.energy_consumed / self.energy_budget))
-        obs["shuffle_entropy_bits"] = (
-            self.config.topology.shuffle_entropy_bits * 
-            self.last_actions.get("shuffle_intensity", 0)
-        )
-        
-        obs["estimated_scan_rate"] = self.attacker.total_scans / max(1, self.current_step)
-        obs["estimated_attack_sophistication"] = self.seeker_level / 4.0
-        
-        obs["last_shuffle_intensity"] = self.last_actions.get("shuffle_intensity", 0.5)
-        obs["last_port_hop_intensity"] = self.last_actions.get("port_hop_intensity", 0.5)
-        obs["last_decoy_ratio"] = self.last_actions.get("decoy_activation_level", 0.5)
-        obs["last_blacklist_aggression"] = self.last_actions.get("blacklist_aggression", 0.5)
-        
-        obs_vec = [obs.get(key, 0.0) for key in FEATURE_KEYS]
-        return np.array(obs_vec, dtype=np.float32)
-    
-    def _get_info(self) -> Dict:
-        total_attacks = (
-            self.episode_metrics.total_exploit_attempts +
-            self.episode_metrics.total_breach_attempts
-        )
-        blocked = (
-            self.episode_metrics.total_exploit_attempts -
-            self.episode_metrics.successful_breaches
-        )
-        
-        if total_attacks > 0:
-            self.episode_metrics.defense_success_rate = blocked / total_attacks
-            self.episode_metrics.breach_prevention_rate = 1.0 - (
-                self.episode_metrics.successful_breaches / 
-                max(1, self.episode_metrics.total_breach_attempts)
-            )
-        
-        self.episode_metrics.avg_cost_per_step = (
-            self.episode_metrics.total_mtd_cost / max(1, self.current_step)
-        )
-        self.episode_metrics.energy_consumed = self.energy_consumed
-        self.episode_metrics.avg_config_entropy = (
-            self.config.topology.shuffle_entropy_bits *
-            self.last_actions.get("shuffle_intensity", 0)
-        )
-        
-        return self.episode_metrics.to_dict()
-    
-    def _check_termination(self) -> bool:
-        for ep in self.endpoints:
-            if ep.is_critical and ep.is_compromised():
-                return True
-        if self.energy_consumed >= self.energy_budget:
-            return True
-        return False
-    
-    @staticmethod
-    def _scale_action(action: float, low: float = 0.0, high: float = 1.0) -> float:
-        return low + (action + 1.0) * 0.5 * (high - low)
-    
-    def _get_attacker_action_str(self, action: Dict) -> str:
-        if action.get("is_breach"):
-            return "Breach"
-        elif action.get("is_exploit"):
-            return "Exploit"
-        elif action.get("is_scan"):
-            return "Scan"
-        return "None"
+        obs = np.array([
+            min(1.0, scanned_ratio * 100),  # 정규화 (탐색 공간이 크므로)
+            discovered_ratio,
+            float(critical_discovered),
+            self.attack_progress.exploitation,
+            self.attack_progress.compromise,
+            self.current_diversity,
+            self._calculate_redundancy(),
+            self._decoy_hits / max(1, self._total_scans) * 10,
+            1 - (self.energy_used / self.cfg.cost_model.energy_budget_joule),
+            min(1.0, (self.step_count - self.last_shuffle_step) / 20),
+            min(1.0, scan_rate / 50),
+            self.last_action[0] if len(self.last_action) > 0 else 0,
+            self.last_action[1] if len(self.last_action) > 1 else 0,
+            self.last_action[2] if len(self.last_action) > 2 else 0,
+            self.last_action[3] if len(self.last_action) > 3 else 0,
+        ], dtype=np.float32)
+
+        return np.clip(obs, -1, 1)
+
+
+# Endpoint alias for backward compatibility
+@dataclass
+class Endpoint:
+    name: str
+    ip: str
+    is_decoy: bool = False

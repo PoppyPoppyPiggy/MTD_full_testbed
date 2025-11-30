@@ -1,0 +1,58 @@
+{
+  "args": {
+    "test": false,
+    "episodes": 1000,
+    "eval_episodes": 50,
+    "max_steps": 200,
+    "seed": 42,
+    "cpu": false,
+    "seeker_level": 1,
+    "seeker_levels": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "seeker_profiles_path": null,
+    "train_all_levels": false,
+    "eval_all_levels": false,
+    "curriculum": true,
+    "model": null,
+    "resume": null,
+    "checkpoint_dir": "checkpoints",
+    "save_interval": 100,
+    "log_interval": 10,
+    "wandb": true,
+    "wandb_project": "mtd_rl_v07",
+    "wandb_name": "v07_balanced"
+  },
+  "state_dim": 15,
+  "action_dim": 6,
+  "feature_keys": [
+    "search_space_scanned_ratio",
+    "services_discovered_ratio",
+    "critical_discovered",
+    "avg_exploitation_progress",
+    "avg_compromise_progress",
+    "current_diversity",
+    "current_redundancy",
+    "decoy_engagement_rate",
+    "energy_remaining_ratio",
+    "steps_since_shuffle",
+    "attacker_scan_rate",
+    "last_shuffle_intensity",
+    "last_port_hop_intensity",
+    "last_decoy_ratio",
+    "last_blacklist_aggression"
+  ],
+  "action_keys": [
+    "shuffle_intensity",
+    "port_hop_intensity",
+    "decoy_ratio",
+    "blacklist_aggression",
+    "blacklist_duration",
+    "service_swap_rate"
+  ],
+  "search_space": 5050
+}
