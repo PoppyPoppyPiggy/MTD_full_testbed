@@ -184,8 +184,10 @@ def run_experiment(
     agg_metrics = {}
     for key in all_metrics[0].keys():
         values = [m.get(key, 0) for m in all_metrics]
-        agg_metrics[f"{key}_mean"] = np.mean(values)
-        agg_metrics[f"{key}_std"] = np.std(values)
+        # 숫자 타입만 집계
+        if all(isinstance(v, (int, float, np.number)) for v in values):
+            agg_metrics[f"{key}_mean"] = float(np.mean(values))
+            agg_metrics[f"{key}_std"] = float(np.std(values))
 
     return ExperimentResult(
         seeker_level=seeker_level,

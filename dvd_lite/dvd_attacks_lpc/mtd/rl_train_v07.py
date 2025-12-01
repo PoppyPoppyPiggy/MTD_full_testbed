@@ -327,7 +327,23 @@ def train(args):
 
     with open(ckpt_dir / "training_metrics.json", "w") as f:
         json.dump(all_metrics, f, indent=2)
+    def convert_to_serializable(obj):
+    #"""numpy 타입을 Python 기본 타입으로 변환"""
+        if isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, dict):
+            return {k: convert_to_serializable(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [convert_to_serializable(i) for i in obj]
+        return obj
 
+    # JSON 저장 시:
+    with open(ckpt_dir / "training_metrics.json", "w") as f:
+        json.dump(convert_to_serializable(all_metrics), f, indent=2)
     print(f"\n{'='*70}")
     print(f"Training Complete!")
     print(f"Best avg reward: {best_reward:.1f}")
