@@ -1,0 +1,902 @@
+[
+  {
+    "scenario_name": "gps_spoofing",
+    "mtd_mode": "No MTD",
+    "seeker_level": 2,
+    "attacks_total": 3,
+    "attacks_detected": 1,
+    "attacks_blocked": 1,
+    "breaches": 0,
+    "total_duration": 0.003805398941040039,
+    "mttd": 5.984306335449219e-05,
+    "mttr": 4.744529724121094e-05,
+    "s_mtd_score": 0.43333333333333335,
+    "diversity_avg": 0.0,
+    "shuffle_count": 0,
+    "decoy_hits": 0,
+    "mtd_cost": 0.0,
+    "service_availability": 1.0,
+    "events": [
+      {
+        "timestamp": 1764781092.0640223,
+        "attack_name": "gps-spoofing",
+        "severity": 3,
+        "detected": false,
+        "blocked": false,
+        "detection_time": null,
+        "response_time": null
+      },
+      {
+        "timestamp": 1764781092.0674417,
+        "attack_name": "gps-data-injection",
+        "severity": 3,
+        "detected": true,
+        "blocked": true,
+        "detection_time": 1764781092.0675015,
+        "response_time": 1764781092.067549
+      },
+      {
+        "timestamp": 1764781092.0676148,
+        "attack_name": "satellite-spoofing",
+        "severity": 3,
+        "detected": false,
+        "blocked": false,
+        "detection_time": null,
+        "response_time": null
+      }
+    ],
+    "defense_rate": 0.3333333333333333,
+    "detection_rate": 0.3333333333333333,
+    "episode": 0
+  },
+  {
+    "scenario_name": "gps_spoofing",
+    "mtd_mode": "No MTD",
+    "seeker_level": 2,
+    "attacks_total": 3,
+    "attacks_detected": 3,
+    "attacks_blocked": 3,
+    "breaches": 0,
+    "total_duration": 0.0007638931274414062,
+    "mttd": 8.463859558105469e-05,
+    "mttr": 2.384185791015625e-05,
+    "s_mtd_score": 0.8,
+    "diversity_avg": 0.0,
+    "shuffle_count": 0,
+    "decoy_hits": 0,
+    "mtd_cost": 0.0,
+    "service_availability": 1.0,
+    "events": [
+      {
+        "timestamp": 1764781092.0682235,
+        "attack_name": "gps-spoofing",
+        "severity": 3,
+        "detected": true,
+        "blocked": true,
+        "detection_time": 1764781092.0682685,
+        "response_time": 1764781092.0682902
+      },
+      {
+        "timestamp": 1764781092.06838,
+        "attack_name": "gps-data-injection",
+        "severity": 3,
+        "detected": true,
+        "blocked": true,
+        "detection_time": 1764781092.068521,
+        "response_time": 1764781092.0685282
+      },
+      {
+        "timestamp": 1764781092.0686748,
+        "attack_name": "satellite-spoofing",
+        "severity": 3,
+        "detected": true,
+        "blocked": true,
+        "detection_time": 1764781092.0687428,
+        "response_time": 1764781092.0687854
+      }
+    ],
+    "defense_rate": 1.0,
+    "detection_rate": 1.0,
+    "episode": 1
+  },
+  {
+    "scenario_name": "gps_spoofing",
+    "mtd_mode": "No MTD",
+    "seeker_level": 2,
+    "attacks_total": 3,
+    "attacks_detected": 2,
+    "attacks_blocked": 2,
+    "breaches": 0,
+    "total_duration": 0.00045108795166015625,
+    "mttd": 3.3855438232421875e-05,
+    "mttr": 1.5497207641601562e-05,
+    "s_mtd_score": 0.6166666666666666,
+    "diversity_avg": 0.0,
+    "shuffle_count": 0,
+    "decoy_hits": 0,
+    "mtd_cost": 0.0,
+    "service_availability": 1.0,
+    "events": [
+      {
+        "timestamp": 1764781092.0695055,
+        "attack_name": "gps-spoofing",
+        "severity": 3,
+        "detected": true,
+        "blocked": true,
+        "detection_time": 1764781092.0695481,
+        "response_time": 1764781092.0695522
+      },
+      {
+        "timestamp": 1764781092.0696514,
+        "attack_name": "gps-data-injection",
+        "severity": 3,
+        "detected": false,
+        "blocked": false,
+        "detection_time": null,
+        "response_time": null
+      },
+      {
+        "timestamp": 1764781092.0697575,
+        "attack_name": "satellite-spoofing",
+        "severity": 3,
+        "detected": true,
+        "blocked": true,
+        "detection_time": 1764781092.0697825,
+        "response_time": 1764781092.0698094
+      }
+    ],
+    "defense_rate": 0.6666666666666666,
+    "detection_rate": 0.6666666666666666,
+    "episode": 2
+  },
+  {
+    "scenario_name": "gps_spoofing",
+    "mtd_mode": "Static MTD",
+    "seeker_level": 2,
+    "attacks_total": 3,
+    "attacks_detected": 1,
+    "attacks_blocked": 1,
+    "breaches": 0,
+    "total_duration": 0.7311863899230957,
+    "mttd": 2.9325485229492188e-05,
+    "mttr": 2.765655517578125e-05,
+    "s_mtd_score": 0.5927248366013071,
+    "diversity_avg": 0.8104575163398693,
+    "shuffle_count": 5,
+    "decoy_hits": 0,
+    "mtd_cost": 0.8999999999999999,
+    "service_availability": 1.0,
+    "events": [
+      {
+        "timestamp": 1764781092.0704021,
+        "attack_name": "gps-spoofing",
+        "severity": 3,
+        "detected": true,
+        "blocked": true,
+        "detection_time": 1764781092.0704315,
+        "response_time": 1764781092.0704591
+      },
+      {
+        "timestamp": 1764781092.2590067,
+        "attack_name": "gps-data-injection",
+        "severity": 3,
+        "detected": false,
+        "blocked": false,
+        "detection_time": null,
+        "response_time": null
+      },
+      {
+        "timestamp": 1764781092.4400575,
+        "attack_name": "satellite-spoofing",
+        "severity": 3,
+        "detected": false,
+        "blocked": false,
+        "detection_time": null,
+        "response_time": null
+      }
+    ],
+    "defense_rate": 0.3333333333333333,
+    "detection_rate": 0.3333333333333333,
+    "episode": 0
+  },
+  {
+    "scenario_name": "gps_spoofing",
+    "mtd_mode": "Static MTD",
+    "seeker_level": 2,
+    "attacks_total": 3,
+    "attacks_detected": 3,
+    "attacks_blocked": 3,
+    "breaches": 0,
+    "total_duration": 0.7979927062988281,
+    "mttd": 0.0001461505889892578,
+    "mttr": 1.7960866292317707e-05,
+    "s_mtd_score": 0.9593915032679738,
+    "diversity_avg": 0.8104575163398693,
+    "shuffle_count": 5,
+    "decoy_hits": 0,
+    "mtd_cost": 0.8999999999999999,
+    "service_availability": 1.0,
+    "events": [
+      {
+        "timestamp": 1764781092.957715,
+        "attack_name": "gps-spoofing",
+        "severity": 3,
+        "detected": true,
+        "blocked": true,
+        "detection_time": 1764781092.957783,
+        "response_time": 1764781092.9578178
+      },
+      {
+        "timestamp": 1764781093.156327,
+        "attack_name": "gps-data-injection",
+        "severity": 3,
+        "detected": true,
+        "blocked": true,
+        "detection_time": 1764781093.1566505,
+        "response_time": 1764781093.156664
+      },
+      {
+        "timestamp": 1764781093.3647883,
+        "attack_name": "satellite-spoofing",
+        "severity": 3,
+        "detected": true,
+        "blocked": true,
+        "detection_time": 1764781093.3648353,
+        "response_time": 1764781093.364841
+      }
+    ],
+    "defense_rate": 1.0,
+    "detection_rate": 1.0,
+    "episode": 1
+  },
+  {
+    "scenario_name": "gps_spoofing",
+    "mtd_mode": "Static MTD",
+    "seeker_level": 2,
+    "attacks_total": 3,
+    "attacks_detected": 1,
+    "attacks_blocked": 1,
+    "breaches": 0,
+    "total_duration": 0.7736876010894775,
+    "mttd": 0.00015473365783691406,
+    "mttr": 1.71661376953125e-05,
+    "s_mtd_score": 0.5927248366013071,
+    "diversity_avg": 0.8104575163398693,
+    "shuffle_count": 5,
+    "decoy_hits": 0,
+    "mtd_cost": 0.8999999999999999,
+    "service_availability": 1.0,
+    "events": [
+      {
+        "timestamp": 1764781093.945015,
+        "attack_name": "gps-spoofing",
+        "severity": 3,
+        "detected": false,
+        "blocked": false,
+        "detection_time": null,
+        "response_time": null
+      },
+      {
+        "timestamp": 1764781094.1068146,
+        "attack_name": "gps-data-injection",
+        "severity": 3,
+        "detected": false,
+        "blocked": false,
+        "detection_time": null,
+        "response_time": null
+      },
+      {
+        "timestamp": 1764781094.3156757,
+        "attack_name": "satellite-spoofing",
+        "severity": 3,
+        "detected": true,
+        "blocked": true,
+        "detection_time": 1764781094.3158305,
+        "response_time": 1764781094.3158476
+      }
+    ],
+    "defense_rate": 0.3333333333333333,
+    "detection_rate": 0.3333333333333333,
+    "episode": 2
+  },
+  {
+    "scenario_name": "gps_spoofing",
+    "mtd_mode": "Heuristic+CTI MTD",
+    "seeker_level": 2,
+    "attacks_total": 3,
+    "attacks_detected": 1,
+    "attacks_blocked": 1,
+    "breaches": 0,
+    "total_duration": 2.3576736450195312,
+    "mttd": 0.00014591217041015625,
+    "mttr": 0.18497490882873535,
+    "s_mtd_score": 0.6271233333333333,
+    "diversity_avg": 1.0,
+    "shuffle_count": 12,
+    "decoy_hits": 0,
+    "mtd_cost": 2.07,
+    "service_availability": 1.0,
+    "events": [
+      {
+        "timestamp": 1764781094.8857465,
+        "attack_name": "gps-spoofing",
+        "severity": 3,
+        "detected": false,
+        "blocked": false,
+        "detection_time": null,
+        "response_time": null
+      },
+      {
+        "timestamp": 1764781095.242338,
+        "attack_name": "gps-data-injection",
+        "severity": 3,
+        "detected": false,
+        "blocked": false,
+        "detection_time": null,
+        "response_time": null
+      },
+      {
+        "timestamp": 1764781096.2273884,
+        "attack_name": "satellite-spoofing",
+        "severity": 3,
+        "detected": true,
+        "blocked": true,
+        "detection_time": 1764781096.2275343,
+        "response_time": 1764781096.4125092
+      }
+    ],
+    "defense_rate": 0.3333333333333333,
+    "detection_rate": 0.3333333333333333,
+    "episode": 0
+  },
+  {
+    "scenario_name": "gps_spoofing",
+    "mtd_mode": "Heuristic+CTI MTD",
+    "seeker_level": 2,
+    "attacks_total": 3,
+    "attacks_detected": 3,
+    "attacks_blocked": 3,
+    "breaches": 0,
+    "total_duration": 2.6860384941101074,
+    "mttd": 0.0031747023264567056,
+    "mttr": 0.20871186256408691,
+    "s_mtd_score": 0.99433,
+    "diversity_avg": 1.0,
+    "shuffle_count": 11,
+    "decoy_hits": 0,
+    "mtd_cost": 1.8899999999999997,
+    "service_availability": 1.0,
+    "events": [
+      {
+        "timestamp": 1764781097.461484,
+        "attack_name": "gps-spoofing",
+        "severity": 3,
+        "detected": true,
+        "blocked": true,
+        "detection_time": 1764781097.4708867,
+        "response_time": 1764781097.709176
+      },
+      {
+        "timestamp": 1764781098.1387045,
+        "attack_name": "gps-data-injection",
+        "severity": 3,
+        "detected": true,
+        "blocked": true,
+        "detection_time": 1764781098.1387641,
+        "response_time": 1764781098.3496788
+      },
+      {
+        "timestamp": 1764781099.1718886,
+        "attack_name": "satellite-spoofing",
+        "severity": 3,
+        "detected": true,
+        "blocked": true,
+        "detection_time": 1764781099.1719503,
+        "response_time": 1764781099.348882
+      }
+    ],
+    "defense_rate": 1.0,
+    "detection_rate": 1.0,
+    "episode": 1
+  },
+  {
+    "scenario_name": "gps_spoofing",
+    "mtd_mode": "Heuristic+CTI MTD",
+    "seeker_level": 2,
+    "attacks_total": 3,
+    "attacks_detected": 2,
+    "attacks_blocked": 2,
+    "breaches": 0,
+    "total_duration": 2.257833480834961,
+    "mttd": 5.602836608886719e-05,
+    "mttr": 0.1946810483932495,
+    "s_mtd_score": 0.8109966666666667,
+    "diversity_avg": 1.0,
+    "shuffle_count": 11,
+    "decoy_hits": 0,
+    "mtd_cost": 1.8899999999999997,
+    "service_availability": 1.0,
+    "events": [
+      {
+        "timestamp": 1764781100.5772192,
+        "attack_name": "gps-spoofing",
+        "severity": 3,
+        "detected": false,
+        "blocked": false,
+        "detection_time": null,
+        "response_time": null
+      },
+      {
+        "timestamp": 1764781100.9544475,
+        "attack_name": "gps-data-injection",
+        "severity": 3,
+        "detected": true,
+        "blocked": true,
+        "detection_time": 1764781100.9545128,
+        "response_time": 1764781101.1857476
+      },
+      {
+        "timestamp": 1764781101.926217,
+        "attack_name": "satellite-spoofing",
+        "severity": 3,
+        "detected": true,
+        "blocked": true,
+        "detection_time": 1764781101.9262638,
+        "response_time": 1764781102.084391
+      }
+    ],
+    "defense_rate": 0.6666666666666666,
+    "detection_rate": 0.6666666666666666,
+    "episode": 2
+  },
+  {
+    "scenario_name": "gps_spoofing",
+    "mtd_mode": "No MTD",
+    "seeker_level": 3,
+    "attacks_total": 3,
+    "attacks_detected": 3,
+    "attacks_blocked": 3,
+    "breaches": 0,
+    "total_duration": 0.00054168701171875,
+    "mttd": 3.711382548014323e-05,
+    "mttr": 1.7563501993815105e-05,
+    "s_mtd_score": 0.8,
+    "diversity_avg": 0.0,
+    "shuffle_count": 0,
+    "decoy_hits": 0,
+    "mtd_cost": 0.0,
+    "service_availability": 1.0,
+    "events": [
+      {
+        "timestamp": 1764781103.1769361,
+        "attack_name": "gps-spoofing",
+        "severity": 3,
+        "detected": true,
+        "blocked": true,
+        "detection_time": 1764781103.1769924,
+        "response_time": 1764781103.177013
+      },
+      {
+        "timestamp": 1764781103.177126,
+        "attack_name": "gps-data-injection",
+        "severity": 3,
+        "detected": true,
+        "blocked": true,
+        "detection_time": 1764781103.1771548,
+        "response_time": 1764781103.1771677
+      },
+      {
+        "timestamp": 1764781103.1772559,
+        "attack_name": "satellite-spoofing",
+        "severity": 3,
+        "detected": true,
+        "blocked": true,
+        "detection_time": 1764781103.177282,
+        "response_time": 1764781103.1773014
+      }
+    ],
+    "defense_rate": 1.0,
+    "detection_rate": 1.0,
+    "episode": 0
+  },
+  {
+    "scenario_name": "gps_spoofing",
+    "mtd_mode": "No MTD",
+    "seeker_level": 3,
+    "attacks_total": 3,
+    "attacks_detected": 1,
+    "attacks_blocked": 1,
+    "breaches": 0,
+    "total_duration": 0.0003876686096191406,
+    "mttd": 2.288818359375e-05,
+    "mttr": 6.9141387939453125e-06,
+    "s_mtd_score": 0.43333333333333335,
+    "diversity_avg": 0.0,
+    "shuffle_count": 0,
+    "decoy_hits": 0,
+    "mtd_cost": 0.0,
+    "service_availability": 1.0,
+    "events": [
+      {
+        "timestamp": 1764781103.1778443,
+        "attack_name": "gps-spoofing",
+        "severity": 3,
+        "detected": true,
+        "blocked": true,
+        "detection_time": 1764781103.1778672,
+        "response_time": 1764781103.177874
+      },
+      {
+        "timestamp": 1764781103.1779652,
+        "attack_name": "gps-data-injection",
+        "severity": 3,
+        "detected": false,
+        "blocked": false,
+        "detection_time": null,
+        "response_time": null
+      },
+      {
+        "timestamp": 1764781103.1780615,
+        "attack_name": "satellite-spoofing",
+        "severity": 3,
+        "detected": false,
+        "blocked": false,
+        "detection_time": null,
+        "response_time": null
+      }
+    ],
+    "defense_rate": 0.3333333333333333,
+    "detection_rate": 0.3333333333333333,
+    "episode": 1
+  },
+  {
+    "scenario_name": "gps_spoofing",
+    "mtd_mode": "No MTD",
+    "seeker_level": 3,
+    "attacks_total": 3,
+    "attacks_detected": 2,
+    "attacks_blocked": 2,
+    "breaches": 0,
+    "total_duration": 0.00040650367736816406,
+    "mttd": 3.1948089599609375e-05,
+    "mttr": 2.5510787963867188e-05,
+    "s_mtd_score": 0.6166666666666666,
+    "diversity_avg": 0.0,
+    "shuffle_count": 0,
+    "decoy_hits": 0,
+    "mtd_cost": 0.0,
+    "service_availability": 1.0,
+    "events": [
+      {
+        "timestamp": 1764781103.1785326,
+        "attack_name": "gps-spoofing",
+        "severity": 3,
+        "detected": true,
+        "blocked": true,
+        "detection_time": 1764781103.1785736,
+        "response_time": 1764781103.1786063
+      },
+      {
+        "timestamp": 1764781103.178686,
+        "attack_name": "gps-data-injection",
+        "severity": 3,
+        "detected": true,
+        "blocked": true,
+        "detection_time": 1764781103.1787088,
+        "response_time": 1764781103.1787271
+      },
+      {
+        "timestamp": 1764781103.1787825,
+        "attack_name": "satellite-spoofing",
+        "severity": 3,
+        "detected": false,
+        "blocked": false,
+        "detection_time": null,
+        "response_time": null
+      }
+    ],
+    "defense_rate": 0.6666666666666666,
+    "detection_rate": 0.6666666666666666,
+    "episode": 2
+  },
+  {
+    "scenario_name": "gps_spoofing",
+    "mtd_mode": "Static MTD",
+    "seeker_level": 3,
+    "attacks_total": 3,
+    "attacks_detected": 3,
+    "attacks_blocked": 3,
+    "breaches": 0,
+    "total_duration": 0.7524864673614502,
+    "mttd": 0.00011038780212402344,
+    "mttr": 1.1682510375976562e-05,
+    "s_mtd_score": 0.9593915032679738,
+    "diversity_avg": 0.8104575163398693,
+    "shuffle_count": 5,
+    "decoy_hits": 0,
+    "mtd_cost": 0.8999999999999999,
+    "service_availability": 1.0,
+    "events": [
+      {
+        "timestamp": 1764781103.1792903,
+        "attack_name": "gps-spoofing",
+        "severity": 3,
+        "detected": true,
+        "blocked": true,
+        "detection_time": 1764781103.1793168,
+        "response_time": 1764781103.1793287
+      },
+      {
+        "timestamp": 1764781103.3963182,
+        "attack_name": "gps-data-injection",
+        "severity": 3,
+        "detected": true,
+        "blocked": true,
+        "detection_time": 1764781103.396547,
+        "response_time": 1764781103.3965576
+      },
+      {
+        "timestamp": 1764781103.567644,
+        "attack_name": "satellite-spoofing",
+        "severity": 3,
+        "detected": true,
+        "blocked": true,
+        "detection_time": 1764781103.5677197,
+        "response_time": 1764781103.5677323
+      }
+    ],
+    "defense_rate": 1.0,
+    "detection_rate": 1.0,
+    "episode": 0
+  },
+  {
+    "scenario_name": "gps_spoofing",
+    "mtd_mode": "Static MTD",
+    "seeker_level": 3,
+    "attacks_total": 3,
+    "attacks_detected": 0,
+    "attacks_blocked": 0,
+    "breaches": 0,
+    "total_duration": 0.8097283840179443,
+    "mttd": Infinity,
+    "mttr": Infinity,
+    "s_mtd_score": 0.4093915032679738,
+    "diversity_avg": 0.8104575163398693,
+    "shuffle_count": 5,
+    "decoy_hits": 0,
+    "mtd_cost": 0.8999999999999999,
+    "service_availability": 1.0,
+    "events": [
+      {
+        "timestamp": 1764781104.0851195,
+        "attack_name": "gps-spoofing",
+        "severity": 3,
+        "detected": false,
+        "blocked": false,
+        "detection_time": null,
+        "response_time": null
+      },
+      {
+        "timestamp": 1764781104.2970047,
+        "attack_name": "gps-data-injection",
+        "severity": 3,
+        "detected": false,
+        "blocked": false,
+        "detection_time": null,
+        "response_time": null
+      },
+      {
+        "timestamp": 1764781104.466534,
+        "attack_name": "satellite-spoofing",
+        "severity": 3,
+        "detected": false,
+        "blocked": false,
+        "detection_time": null,
+        "response_time": null
+      }
+    ],
+    "defense_rate": 0.0,
+    "detection_rate": 0.0,
+    "episode": 1
+  },
+  {
+    "scenario_name": "gps_spoofing",
+    "mtd_mode": "Static MTD",
+    "seeker_level": 3,
+    "attacks_total": 3,
+    "attacks_detected": 3,
+    "attacks_blocked": 3,
+    "breaches": 0,
+    "total_duration": 0.8250212669372559,
+    "mttd": 0.0001647472381591797,
+    "mttr": 1.7404556274414062e-05,
+    "s_mtd_score": 0.9593915032679738,
+    "diversity_avg": 0.8104575163398693,
+    "shuffle_count": 5,
+    "decoy_hits": 0,
+    "mtd_cost": 0.8999999999999999,
+    "service_availability": 1.0,
+    "events": [
+      {
+        "timestamp": 1764781105.0459077,
+        "attack_name": "gps-spoofing",
+        "severity": 3,
+        "detected": true,
+        "blocked": true,
+        "detection_time": 1764781105.0459824,
+        "response_time": 1764781105.04601
+      },
+      {
+        "timestamp": 1764781105.25939,
+        "attack_name": "gps-data-injection",
+        "severity": 3,
+        "detected": true,
+        "blocked": true,
+        "detection_time": 1764781105.2596679,
+        "response_time": 1764781105.259683
+      },
+      {
+        "timestamp": 1764781105.498543,
+        "attack_name": "satellite-spoofing",
+        "severity": 3,
+        "detected": true,
+        "blocked": true,
+        "detection_time": 1764781105.498685,
+        "response_time": 1764781105.4986944
+      }
+    ],
+    "defense_rate": 1.0,
+    "detection_rate": 1.0,
+    "episode": 2
+  },
+  {
+    "scenario_name": "gps_spoofing",
+    "mtd_mode": "Heuristic+CTI MTD",
+    "seeker_level": 3,
+    "attacks_total": 3,
+    "attacks_detected": 2,
+    "attacks_blocked": 2,
+    "breaches": 0,
+    "total_duration": 2.238494634628296,
+    "mttd": 0.00012230873107910156,
+    "mttr": 0.20169270038604736,
+    "s_mtd_score": 0.8109966666666667,
+    "diversity_avg": 1.0,
+    "shuffle_count": 11,
+    "decoy_hits": 0,
+    "mtd_cost": 1.8899999999999997,
+    "service_availability": 1.0,
+    "events": [
+      {
+        "timestamp": 1764781106.0496004,
+        "attack_name": "gps-spoofing",
+        "severity": 3,
+        "detected": false,
+        "blocked": false,
+        "detection_time": null,
+        "response_time": null
+      },
+      {
+        "timestamp": 1764781106.3988621,
+        "attack_name": "gps-data-injection",
+        "severity": 3,
+        "detected": true,
+        "blocked": true,
+        "detection_time": 1764781106.3990614,
+        "response_time": 1764781106.5804377
+      },
+      {
+        "timestamp": 1764781107.315705,
+        "attack_name": "satellite-spoofing",
+        "severity": 3,
+        "detected": true,
+        "blocked": true,
+        "detection_time": 1764781107.3157504,
+        "response_time": 1764781107.5377595
+      }
+    ],
+    "defense_rate": 0.6666666666666666,
+    "detection_rate": 0.6666666666666666,
+    "episode": 0
+  },
+  {
+    "scenario_name": "gps_spoofing",
+    "mtd_mode": "Heuristic+CTI MTD",
+    "seeker_level": 3,
+    "attacks_total": 3,
+    "attacks_detected": 3,
+    "attacks_blocked": 3,
+    "breaches": 0,
+    "total_duration": 2.441603899002075,
+    "mttd": 0.0036315123240152993,
+    "mttr": 0.20792253812154135,
+    "s_mtd_score": 0.99433,
+    "diversity_avg": 1.0,
+    "shuffle_count": 11,
+    "decoy_hits": 0,
+    "mtd_cost": 1.8899999999999997,
+    "service_availability": 1.0,
+    "events": [
+      {
+        "timestamp": 1764781108.6253731,
+        "attack_name": "gps-spoofing",
+        "severity": 3,
+        "detected": true,
+        "blocked": true,
+        "detection_time": 1764781108.6359606,
+        "response_time": 1764781108.8262966
+      },
+      {
+        "timestamp": 1764781109.1958208,
+        "attack_name": "gps-data-injection",
+        "severity": 3,
+        "detected": true,
+        "blocked": true,
+        "detection_time": 1764781109.196001,
+        "response_time": 1764781109.4081492
+      },
+      {
+        "timestamp": 1764781110.094764,
+        "attack_name": "satellite-spoofing",
+        "severity": 3,
+        "detected": true,
+        "blocked": true,
+        "detection_time": 1764781110.0948908,
+        "response_time": 1764781110.3161743
+      }
+    ],
+    "defense_rate": 1.0,
+    "detection_rate": 1.0,
+    "episode": 1
+  },
+  {
+    "scenario_name": "gps_spoofing",
+    "mtd_mode": "Heuristic+CTI MTD",
+    "seeker_level": 3,
+    "attacks_total": 3,
+    "attacks_detected": 3,
+    "attacks_blocked": 3,
+    "breaches": 0,
+    "total_duration": 2.6257097721099854,
+    "mttd": 0.0035129388173421225,
+    "mttr": 0.18781375885009766,
+    "s_mtd_score": 0.99433,
+    "diversity_avg": 1.0,
+    "shuffle_count": 11,
+    "decoy_hits": 0,
+    "mtd_cost": 1.8899999999999997,
+    "service_availability": 1.0,
+    "events": [
+      {
+        "timestamp": 1764781111.5173128,
+        "attack_name": "gps-spoofing",
+        "severity": 3,
+        "detected": true,
+        "blocked": true,
+        "detection_time": 1764781111.527727,
+        "response_time": 1764781111.7361472
+      },
+      {
+        "timestamp": 1764781112.1278443,
+        "attack_name": "gps-data-injection",
+        "severity": 3,
+        "detected": true,
+        "blocked": true,
+        "detection_time": 1764781112.1279278,
+        "response_time": 1764781112.3268297
+      },
+      {
+        "timestamp": 1764781113.1952343,
+        "attack_name": "satellite-spoofing",
+        "severity": 3,
+        "detected": true,
+        "blocked": true,
+        "detection_time": 1764781113.1952755,
+        "response_time": 1764781113.3513947
+      }
+    ],
+    "defense_rate": 1.0,
+    "detection_rate": 1.0,
+    "episode": 2
+  }
+]
