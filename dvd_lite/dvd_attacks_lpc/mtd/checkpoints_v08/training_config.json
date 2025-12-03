@@ -1,0 +1,60 @@
+{
+  "args": {
+    "test": false,
+    "episodes": 500,
+    "max_steps": 200,
+    "seed": 42,
+    "cpu": false,
+    "hidden_size": 256,
+    "seeker_level": 1,
+    "seeker_levels": [
+      0,
+      1,
+      2,
+      3,
+      4
+    ],
+    "train_all_levels": false,
+    "curriculum": true,
+    "model": null,
+    "resume": null,
+    "checkpoint_dir": "checkpoints_v08",
+    "save_interval": 100,
+    "log_interval": 10,
+    "eval_episodes": 50,
+    "eval_all_levels": false,
+    "wandb": true,
+    "wandb_project": "mtd-rl-v08",
+    "wandb_name": null
+  },
+  "state_dim": 15,
+  "action_dim": 6,
+  "feature_keys": [
+    "search_space_scanned_ratio",
+    "services_discovered_ratio",
+    "critical_discovered",
+    "exploitation_progress",
+    "compromise_progress",
+    "current_diversity",
+    "current_redundancy",
+    "decoy_engagement_rate",
+    "energy_remaining_ratio",
+    "steps_since_shuffle",
+    "attacker_scan_rate",
+    "last_shuffle_intensity",
+    "last_port_hop_intensity",
+    "last_decoy_ratio",
+    "last_blacklist_aggression"
+  ],
+  "action_keys": [
+    "shuffle_intensity",
+    "port_hop_intensity",
+    "decoy_ratio",
+    "blacklist_aggression",
+    "blacklist_duration",
+    "service_swap_rate"
+  ],
+  "search_space": 50200,
+  "best_reward": 2191.666259765625,
+  "total_episodes": 500
+}
