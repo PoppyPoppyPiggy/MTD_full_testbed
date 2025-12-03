@@ -1,215 +1,421 @@
-# -----------------------------------------------------------------
-# DVD 시나리오 자동화 플레이리스트 (v5.0 - CTI 데이터 수집 및 RL 평가)
+# =================================================================
+# DVD 시나리오 플레이리스트 v6.0 (Flexible Options)
+# =================================================================
 #
-# 목적: ML 분류기 학습을 위한 26가지 공격 데이터를 수집합니다.
-# -----------------------------------------------------------------
+# 사용법:
+#   python dvd_scenario_runner.py --scenario <시나리오명>
+#
+# 시나리오 카테고리:
+#   [A] 빠른 테스트 (Quick Test) - 2~3개 공격, 5분 이내
+#   [B] 카테고리별 (By Category) - 특정 공격 유형만
+#   [C] 밸런스드 (Balanced) - 각 카테고리에서 선별
+#   [D] 풀 스캔 (Full Scan) - 전체 26개 공격
+#   [E] 랜덤 (Random) - 동적 빌더 사용
+#
+# =================================================================
 
-# --- CTI 수집용 시나리오 (MTD Off, Seeker Off) ---
-# 공격당 duration_sec: 30초 균일 할당
-# ⭐️ [Reconnaissance], [Tampering], [DoS], [Injection], [Exfiltration] 26개 공격 포함
-s_cti_data_collection_core6:
-  description: "CTI 수집 (핵심 6 Attack, 각 120초) - wifi/gps/waypoint/log/exfil/satellite"
+
+# =================================================================
+# [A] 빠른 테스트 시나리오 (Quick Test) - 5분 이내
+# =================================================================
+
+# A1: 최소 테스트 (2개 공격) - 파이프라인 동작 확인용
+quick_minimal:
+  description: "[Quick] 최소 테스트 - GPS Spoofing + WiFi Deauth (2개)"
   steps:
-    # 0. 부팅 + 이륙
+    - { action: "http", endpoint: "stage/boot" }
+    - { action: "sleep", sec: 10 }
+    - { action: "http", endpoint: "stage/arm-and-takeoff", params: {alt: 10} }
+    - { action: "sleep", sec: 15 }
+    
+    - { action: "attack", name: "gps-spoofing", duration_sec: 20, params: {use_seeker: false} }
+    - { action: "sleep", sec: 3 }
+    - { action: "attack", name: "wifi-deauth-attack", duration_sec: 20, params: {use_seeker: false} }
+    
+    - { action: "http", endpoint: "stage/return-to-land" }
+    - { action: "sleep", sec: 10 }
+
+# A2: 핵심 3종 (Critical 3)
+quick_critical3:
+  description: "[Quick] 핵심 3종 - GPS/Waypoint/Flooding"
+  steps:
+    - { action: "http", endpoint: "stage/boot" }
+    - { action: "sleep", sec: 10 }
+    - { action: "http", endpoint: "stage/arm-and-takeoff", params: {alt: 10} }
+    - { action: "sleep", sec: 15 }
+    
+    - { action: "attack", name: "gps-spoofing", duration_sec: 25, params: {use_seeker: false} }
+    - { action: "sleep", sec: 3 }
+    - { action: "attack", name: "waypoint-injection", duration_sec: 25, params: {use_seeker: false} }
+    - { action: "sleep", sec: 3 }
+    - { action: "attack", name: "communication-link-flooding", duration_sec: 25, params: {use_seeker: false} }
+    
+    - { action: "http", endpoint: "stage/return-to-land" }
+
+# A3: 대표 5종 (Top 5 Representative)
+quick_top5:
+  description: "[Quick] 대표 5종 - 각 카테고리 대표 공격"
+  steps:
+    - { action: "http", endpoint: "stage/boot" }
+    - { action: "sleep", sec: 10 }
+    - { action: "http", endpoint: "stage/arm-and-takeoff", params: {alt: 10} }
+    - { action: "sleep", sec: 15 }
+    
+    # Recon 대표
+    - { action: "attack", name: "drone-discovery", duration_sec: 20, params: {use_seeker: false} }
+    - { action: "sleep", sec: 3 }
+    # Tampering 대표
+    - { action: "attack", name: "gps-spoofing", duration_sec: 20, params: {use_seeker: false} }
+    - { action: "sleep", sec: 3 }
+    # DoS 대표
+    - { action: "attack", name: "wifi-deauth-attack", duration_sec: 20, params: {use_seeker: false} }
+    - { action: "sleep", sec: 3 }
+    # Injection 대표
+    - { action: "attack", name: "waypoint-injection", duration_sec: 20, params: {use_seeker: false} }
+    - { action: "sleep", sec: 3 }
+    # Exfil 대표
+    - { action: "attack", name: "flight-log-extraction", duration_sec: 20, params: {use_seeker: false} }
+    
+    - { action: "http", endpoint: "stage/return-to-land" }
+
+
+# =================================================================
+# [B] 카테고리별 시나리오 (By Category)
+# =================================================================
+
+# B1: 정찰 공격만 (Reconnaissance Only) - 5개
+cat_recon:
+  description: "[Category] 정찰 공격 5종"
+  steps:
+    - { action: "http", endpoint: "stage/boot" }
+    - { action: "sleep", sec: 10 }
+    - { action: "http", endpoint: "stage/arm-and-takeoff", params: {alt: 10} }
+    - { action: "sleep", sec: 20 }
+    
+    - { action: "attack", name: "drone-discovery", duration_sec: 25, params: {use_seeker: false} }
+    - { action: "sleep", sec: 3 }
+    - { action: "attack", name: "companion-computer-discovery", duration_sec: 25, params: {use_seeker: false} }
+    - { action: "sleep", sec: 3 }
+    - { action: "attack", name: "ground-control-station-discovery", duration_sec: 25, params: {use_seeker: false} }
+    - { action: "sleep", sec: 3 }
+    - { action: "attack", name: "drone-gps-_-telemetry-detection", duration_sec: 25, params: {use_seeker: false} }
+    - { action: "sleep", sec: 3 }
+    - { action: "attack", name: "wifi-analysis-_-cracking", duration_sec: 25, params: {use_seeker: false} }
+    
+    - { action: "http", endpoint: "stage/return-to-land" }
+
+# B2: GPS/Navigation 공격만 - 4개
+cat_gps:
+  description: "[Category] GPS/Navigation 공격 4종"
+  steps:
+    - { action: "http", endpoint: "stage/boot" }
+    - { action: "sleep", sec: 10 }
+    - { action: "http", endpoint: "stage/autopilot-flight", params: {route: "A"} }
+    - { action: "sleep", sec: 20 }
+    
+    - { action: "attack", name: "gps-spoofing", duration_sec: 30, params: {use_seeker: false} }
+    - { action: "sleep", sec: 5 }
+    - { action: "attack", name: "gps-data-injection", duration_sec: 30, params: {use_seeker: false} }
+    - { action: "sleep", sec: 5 }
+    - { action: "attack", name: "gps-offset-glitching", duration_sec: 30, params: {use_seeker: false} }
+    - { action: "sleep", sec: 5 }
+    - { action: "attack", name: "satellite-spoofing", duration_sec: 30, params: {use_seeker: false} }
+    
+    - { action: "http", endpoint: "stage/return-to-land" }
+
+# B3: DoS 공격만 - 4개
+cat_dos:
+  description: "[Category] DoS 공격 4종"
+  steps:
+    - { action: "http", endpoint: "stage/boot" }
+    - { action: "sleep", sec: 10 }
+    - { action: "http", endpoint: "stage/arm-and-takeoff", params: {alt: 10} }
+    - { action: "sleep", sec: 15 }
+    
+    - { action: "attack", name: "wifi-deauth-attack", duration_sec: 30, params: {use_seeker: false} }
+    - { action: "sleep", sec: 5 }
+    - { action: "attack", name: "communication-link-flooding", duration_sec: 30, params: {use_seeker: false} }
+    - { action: "sleep", sec: 5 }
+    - { action: "attack", name: "geofencing-attack", duration_sec: 30, params: {use_seeker: false} }
+    - { action: "sleep", sec: 5 }
+    - { action: "attack", name: "denial-of-takeoff", duration_sec: 30, params: {use_seeker: false} }
+    
+    - { action: "http", endpoint: "stage/return-to-land" }
+
+# B4: 명령 주입만 (Command Injection) - 5개
+cat_injection:
+  description: "[Category] 명령 주입 공격 5종"
+  steps:
+    - { action: "http", endpoint: "stage/boot" }
+    - { action: "sleep", sec: 10 }
+    - { action: "http", endpoint: "stage/autopilot-flight", params: {route: "A"} }
+    - { action: "sleep", sec: 20 }
+    
+    - { action: "attack", name: "waypoint-injection", duration_sec: 30, params: {use_seeker: false} }
+    - { action: "sleep", sec: 5 }
+    - { action: "attack", name: "return-to-home-point-override", duration_sec: 30, params: {use_seeker: false} }
+    - { action: "sleep", sec: 5 }
+    - { action: "attack", name: "camera-gimbal-takeover", duration_sec: 30, params: {use_seeker: false} }
+    - { action: "sleep", sec: 5 }
+    - { action: "attack", name: "ground-control-station-spoofing", duration_sec: 30, params: {use_seeker: false} }
+    - { action: "sleep", sec: 5 }
+    - { action: "attack", name: "flight-termination", duration_sec: 30, params: {use_seeker: false} }
+    
+    - { action: "http", endpoint: "stage/return-to-land" }
+
+# B5: 데이터 유출만 (Exfiltration) - 3개
+cat_exfil:
+  description: "[Category] 데이터 유출 공격 3종"
+  steps:
+    - { action: "http", endpoint: "stage/boot" }
+    - { action: "sleep", sec: 10 }
+    - { action: "http", endpoint: "stage/autopilot-flight", params: {route: "B"} }
+    - { action: "sleep", sec: 20 }
+    
+    - { action: "attack", name: "wifi-client-data-leak", duration_sec: 30, params: {use_seeker: false} }
+    - { action: "sleep", sec: 5 }
+    - { action: "attack", name: "flight-log-extraction", duration_sec: 30, params: {use_seeker: false} }
+    - { action: "sleep", sec: 5 }
+    - { action: "attack", name: "mission-extraction", duration_sec: 30, params: {use_seeker: false} }
+    
+    - { action: "http", endpoint: "stage/return-to-land" }
+
+# B6: Spoofing만 (텔레메트리 조작) - 6개
+cat_spoofing:
+  description: "[Category] Spoofing/Tampering 공격 6종"
+  steps:
+    - { action: "http", endpoint: "stage/boot" }
+    - { action: "sleep", sec: 10 }
+    - { action: "http", endpoint: "stage/arm-and-takeoff", params: {alt: 10} }
+    - { action: "sleep", sec: 15 }
+    
+    - { action: "attack", name: "attitude-spoofing", duration_sec: 25, params: {use_seeker: false} }
+    - { action: "sleep", sec: 3 }
+    - { action: "attack", name: "battery-spoofing", duration_sec: 25, params: {use_seeker: false} }
+    - { action: "sleep", sec: 3 }
+    - { action: "attack", name: "vfr-hud-spoofing", duration_sec: 25, params: {use_seeker: false} }
+    - { action: "sleep", sec: 3 }
+    - { action: "attack", name: "critical-error-spoofing", duration_sec: 25, params: {use_seeker: false} }
+    - { action: "sleep", sec: 3 }
+    - { action: "attack", name: "emergency-status-spoofing", duration_sec: 25, params: {use_seeker: false} }
+    - { action: "sleep", sec: 3 }
+    - { action: "attack", name: "gps-spoofing", duration_sec: 25, params: {use_seeker: false} }
+    
+    - { action: "http", endpoint: "stage/return-to-land" }
+
+
+# =================================================================
+# [C] 밸런스드 시나리오 (Balanced) - 각 카테고리에서 선별
+# =================================================================
+
+# C1: 밸런스드 8종 (각 카테고리 1~2개씩)
+balanced_8:
+  description: "[Balanced] 8종 선별 - 각 카테고리 대표"
+  steps:
+    - { action: "http", endpoint: "stage/boot" }
+    - { action: "sleep", sec: 10 }
+    - { action: "http", endpoint: "stage/arm-and-takeoff", params: {alt: 10} }
+    - { action: "sleep", sec: 20 }
+    
+    # Recon (1)
+    - { action: "attack", name: "drone-discovery", duration_sec: 25, params: {use_seeker: false} }
+    - { action: "sleep", sec: 3 }
+    # GPS (2)
+    - { action: "attack", name: "gps-spoofing", duration_sec: 25, params: {use_seeker: false} }
+    - { action: "sleep", sec: 3 }
+    - { action: "attack", name: "satellite-spoofing", duration_sec: 25, params: {use_seeker: false} }
+    - { action: "sleep", sec: 3 }
+    # DoS (2)
+    - { action: "attack", name: "wifi-deauth-attack", duration_sec: 25, params: {use_seeker: false} }
+    - { action: "sleep", sec: 3 }
+    - { action: "attack", name: "communication-link-flooding", duration_sec: 25, params: {use_seeker: false} }
+    - { action: "sleep", sec: 3 }
+    # Injection (1)
+    - { action: "attack", name: "waypoint-injection", duration_sec: 25, params: {use_seeker: false} }
+    - { action: "sleep", sec: 3 }
+    # Exfil (1)
+    - { action: "attack", name: "flight-log-extraction", duration_sec: 25, params: {use_seeker: false} }
+    - { action: "sleep", sec: 3 }
+    # Critical (1)
+    - { action: "attack", name: "flight-termination", duration_sec: 25, params: {use_seeker: false} }
+    
+    - { action: "http", endpoint: "stage/return-to-land" }
+
+# C2: 밸런스드 12종 (더 다양한 샘플)
+balanced_12:
+  description: "[Balanced] 12종 선별 - 확장 버전"
+  steps:
+    - { action: "http", endpoint: "stage/boot" }
+    - { action: "sleep", sec: 10 }
+    - { action: "http", endpoint: "stage/arm-and-takeoff", params: {alt: 10} }
+    - { action: "sleep", sec: 20 }
+    
+    # Recon (2)
+    - { action: "attack", name: "drone-discovery", duration_sec: 20, params: {use_seeker: false} }
+    - { action: "sleep", sec: 3 }
+    - { action: "attack", name: "wifi-analysis-_-cracking", duration_sec: 20, params: {use_seeker: false} }
+    - { action: "sleep", sec: 3 }
+    # GPS/Nav (2)
+    - { action: "attack", name: "gps-spoofing", duration_sec: 20, params: {use_seeker: false} }
+    - { action: "sleep", sec: 3 }
+    - { action: "attack", name: "gps-data-injection", duration_sec: 20, params: {use_seeker: false} }
+    - { action: "sleep", sec: 3 }
+    # Spoofing (2)
+    - { action: "attack", name: "attitude-spoofing", duration_sec: 20, params: {use_seeker: false} }
+    - { action: "sleep", sec: 3 }
+    - { action: "attack", name: "battery-spoofing", duration_sec: 20, params: {use_seeker: false} }
+    - { action: "sleep", sec: 3 }
+    # DoS (2)
+    - { action: "attack", name: "wifi-deauth-attack", duration_sec: 20, params: {use_seeker: false} }
+    - { action: "sleep", sec: 3 }
+    - { action: "attack", name: "communication-link-flooding", duration_sec: 20, params: {use_seeker: false} }
+    - { action: "sleep", sec: 3 }
+    # Injection (2)
+    - { action: "attack", name: "waypoint-injection", duration_sec: 20, params: {use_seeker: false} }
+    - { action: "sleep", sec: 3 }
+    - { action: "attack", name: "camera-gimbal-takeover", duration_sec: 20, params: {use_seeker: false} }
+    - { action: "sleep", sec: 3 }
+    # Exfil (2)
+    - { action: "attack", name: "flight-log-extraction", duration_sec: 20, params: {use_seeker: false} }
+    - { action: "sleep", sec: 3 }
+    - { action: "attack", name: "mission-extraction", duration_sec: 20, params: {use_seeker: false} }
+    
+    - { action: "http", endpoint: "stage/return-to-land" }
+
+
+# =================================================================
+# [D] 풀 스캔 시나리오 (Full Scan) - 전체 공격
+# =================================================================
+
+# D1: 전체 26종 (기존 s_cti_data_collection_full과 동일)
+full_all26:
+  description: "[Full] 전체 26종 공격 + 정상 상태"
+  steps:
+    # 정상 상태 (120초)
     - { action: "http", endpoint: "stage/boot" }
     - { action: "sleep", sec: 15 }
     - { action: "http", endpoint: "stage/arm-and-takeoff", params: {alt: 10} }
     - { action: "sleep", sec: 30 }
-
-    # 1) wifi-deauth-attack (DoS)
-    - { action: "attack", name: "wifi-deauth-attack", duration_sec: 30, params: {use_seeker: false} }
-    - { action: "sleep", sec: 5 }
-
-    # 2) gps-spoofing (navigation tampering)
-    - { action: "attack", name: "gps-spoofing", duration_sec: 20, params: {use_seeker: false} }
-    - { action: "sleep", sec: 5 }
-
-    # 3) waypoint-injection (command injection)
-    - { action: "attack", name: "waypoint-injection", duration_sec: 15, params: {use_seeker: false} }
-    - { action: "sleep", sec: 5 }
-
-    # 4) wifi-client-data-leak (data exfil)
-    - { action: "attack", name: "wifi-client-data-leak", duration_sec: 20, params: {use_seeker: false} }
-    - { action: "sleep", sec: 5 }
-
-    # 5) flight-log-extraction (log exfil)
-    - { action: "attack", name: "flight-log-extraction", duration_sec: 30, params: {use_seeker: false} }
-    - { action: "sleep", sec: 5 }
-
-    # 6) satellite-spoofing (GNSS / advanced)
-    - { action: "attack", name: "satellite-spoofing", duration_sec: 25, params: {use_seeker: false} }
-    - { action: "sleep", sec: 5 }
-
-    # 착륙 + post-analysis
+    - { action: "http", endpoint: "stage/autopilot-flight", params: {route: "A"} }
+    - { action: "sleep", sec: 120 }
     - { action: "http", endpoint: "stage/return-to-land" }
     - { action: "sleep", sec: 15 }
+    
+    # Recon (5)
+    - { action: "http", endpoint: "stage/boot" }
+    - { action: "sleep", sec: 10 }
+    - { action: "http", endpoint: "stage/arm-and-takeoff", params: {alt: 10} }
+    - { action: "sleep", sec: 20 }
+    - { action: "attack", name: "drone-discovery", duration_sec: 25, params: {use_seeker: false} }
+    - { action: "attack", name: "companion-computer-discovery", duration_sec: 25, params: {use_seeker: false} }
+    - { action: "attack", name: "ground-control-station-discovery", duration_sec: 25, params: {use_seeker: false} }
+    - { action: "attack", name: "drone-gps-_-telemetry-detection", duration_sec: 25, params: {use_seeker: false} }
+    - { action: "attack", name: "wifi-analysis-_-cracking", duration_sec: 25, params: {use_seeker: false} }
+    - { action: "http", endpoint: "stage/return-to-land" }
+    - { action: "sleep", sec: 10 }
+    
+    # Spoofing/Tampering (8)
+    - { action: "http", endpoint: "stage/boot" }
+    - { action: "sleep", sec: 10 }
+    - { action: "http", endpoint: "stage/arm-and-takeoff", params: {alt: 10} }
+    - { action: "sleep", sec: 20 }
+    - { action: "attack", name: "attitude-spoofing", duration_sec: 25, params: {use_seeker: false} }
+    - { action: "attack", name: "battery-spoofing", duration_sec: 25, params: {use_seeker: false} }
+    - { action: "attack", name: "gps-spoofing", duration_sec: 25, params: {use_seeker: false} }
+    - { action: "attack", name: "critical-error-spoofing", duration_sec: 25, params: {use_seeker: false} }
+    - { action: "attack", name: "emergency-status-spoofing", duration_sec: 25, params: {use_seeker: false} }
+    - { action: "attack", name: "vfr-hud-spoofing", duration_sec: 25, params: {use_seeker: false} }
+    - { action: "attack", name: "gps-data-injection", duration_sec: 25, params: {use_seeker: false} }
+    - { action: "attack", name: "satellite-spoofing", duration_sec: 25, params: {use_seeker: false} }
+    - { action: "http", endpoint: "stage/return-to-land" }
+    - { action: "sleep", sec: 10 }
+    
+    # DoS (5)
+    - { action: "http", endpoint: "stage/boot" }
+    - { action: "sleep", sec: 10 }
+    - { action: "http", endpoint: "stage/arm-and-takeoff", params: {alt: 10} }
+    - { action: "sleep", sec: 20 }
+    - { action: "attack", name: "wifi-deauth-attack", duration_sec: 25, params: {use_seeker: false} }
+    - { action: "attack", name: "geofencing-attack", duration_sec: 25, params: {use_seeker: false} }
+    - { action: "attack", name: "gps-offset-glitching", duration_sec: 25, params: {use_seeker: false} }
+    - { action: "attack", name: "denial-of-takeoff", duration_sec: 25, params: {use_seeker: false} }
+    - { action: "attack", name: "communication-link-flooding", duration_sec: 25, params: {use_seeker: false} }
+    - { action: "http", endpoint: "stage/return-to-land" }
+    - { action: "sleep", sec: 10 }
+    
+    # Injection (5)
+    - { action: "http", endpoint: "stage/boot" }
+    - { action: "sleep", sec: 10 }
+    - { action: "http", endpoint: "stage/autopilot-flight", params: {route: "A"} }
+    - { action: "sleep", sec: 20 }
+    - { action: "attack", name: "waypoint-injection", duration_sec: 25, params: {use_seeker: false} }
+    - { action: "attack", name: "return-to-home-point-override", duration_sec: 25, params: {use_seeker: false} }
+    - { action: "attack", name: "camera-gimbal-takeover", duration_sec: 25, params: {use_seeker: false} }
+    - { action: "attack", name: "ground-control-station-spoofing", duration_sec: 25, params: {use_seeker: false} }
+    - { action: "attack", name: "flight-termination", duration_sec: 25, params: {use_seeker: false} }
+    - { action: "http", endpoint: "stage/return-to-land" }
+    - { action: "sleep", sec: 10 }
+    
+    # Exfil (3)
+    - { action: "http", endpoint: "stage/boot" }
+    - { action: "sleep", sec: 10 }
+    - { action: "http", endpoint: "stage/autopilot-flight", params: {route: "B"} }
+    - { action: "sleep", sec: 20 }
+    - { action: "attack", name: "wifi-client-data-leak", duration_sec: 25, params: {use_seeker: false} }
+    - { action: "attack", name: "flight-log-extraction", duration_sec: 25, params: {use_seeker: false} }
+    - { action: "attack", name: "mission-extraction", duration_sec: 25, params: {use_seeker: false} }
+    - { action: "http", endpoint: "stage/return-to-land" }
     - { action: "http", endpoint: "stage/post_analysis" }
 
-s1_cti_recon_tampering:
-  description: "CTI 수집 (정찰 & 기본 스푸핑) - 7 Attacks"
+
+# =================================================================
+# [E] 정상 상태 전용 (Normal Only)
+# =================================================================
+
+normal_short:
+  description: "[Normal] 정상 비행 60초"
   steps:
     - { action: "http", endpoint: "stage/boot" }
-    - { action: "sleep", sec: 15 }
-    - { action: "http", endpoint: "stage/arm-and-takeoff", params: {alt: 10} }
-    - { action: "sleep", sec: 25 } # 고도 안정화 대기
-    
-    # Reconnaissance (5) + Tampering (2)
-    - { action: "attack", name: "drone-discovery", duration_sec: 30, params: {use_seeker: false} }
-    - { action: "attack", name: "companion-computer-discovery", duration_sec: 30, params: {use_seeker: false} }
-    - { action: "attack", name: "ground-control-station-discovery", duration_sec: 30, params: {use_seeker: false} }
-    - { action: "attack", name: "drone-gps-telemetry-detection", duration_sec: 30, params: {use_seeker: false} }
-    - { action: "attack", name: "wifi-analysis-cracking", duration_sec: 30, params: {use_seeker: false} } # ⭐️ 추가
-    - { action: "attack", name: "attitude-spoofing", duration_sec: 30, params: {use_seeker: false} }
-    - { action: "attack", name: "battery-spoofing", duration_sec: 30, params: {use_seeker: false} }
-    
-    - { action: "http", endpoint: "stage/return-to-land" }
-
-
-s2_cti_adv_tampering_injection:
-  description: "CTI 수집 (고급 스푸핑 & 명령 주입) - 6 Attacks"
-  steps:
-    - { action: "http", endpoint: "stage/boot" }
-    - { action: "sleep", sec: 15 }
-    - { action: "http", endpoint: "stage/autopilot-flight", params: {route: "A"} }
-    - { action: "sleep", sec: 30 } # 자율비행 안정화 대기
-    
-    # Tampering (3) + Injection (3)
-    - { action: "attack", name: "gps-spoofing", duration_sec: 30, params: {use_seeker: false} }
-    - { action: "attack", name: "critical-error-spoofing", duration_sec: 30, params: {use_seeker: false} }
-    - { action: "attack", name: "emergency-status-spoofing", duration_sec: 30, params: {use_seeker: false} }
-    - { action: "attack", name: "ground-control-station-spoofing", duration_sec: 30, params: {use_seeker: false} }
-    - { action: "attack", name: "camera-gimbal-takeover", duration_sec: 30, params: {use_seeker: false} }
-    - { action: "attack", name: "gps-data-injection", duration_sec: 30, params: {use_seeker: false} }
-    
-    - { action: "http", endpoint: "stage/return-to-land" }
-
-
-s3_cti_dos_injection:
-  description: "CTI 수집 (DoS & 고급 주입) - 7 Attacks"
-  steps:
-    - { action: "http", endpoint: "stage/boot" }
-    - { action: "sleep", sec: 15 }
+    - { action: "sleep", sec: 10 }
     - { action: "http", endpoint: "stage/arm-and-takeoff", params: {alt: 10} }
     - { action: "sleep", sec: 20 }
-    
-    # DoS (5) + Injection (2)
-    - { action: "attack", name: "wifi-deauth-attack", duration_sec: 30, params: {use_seeker: false} }
-    - { action: "attack", name: "geofencing-attack", duration_sec: 30, params: {use_seeker: false} }
-    - { action: "attack", name: "gps-offset-glitching", duration_sec: 30, params: {use_seeker: false} }
-    - { action: "attack", name: "flight-termination", duration_sec: 30, params: {use_seeker: false} } # ⭐️ 추가
-    - { action: "attack", name: "denial-of-takeoff", duration_sec: 30, params: {use_seeker: false} }
-    - { action: "attack", name: "return-to-home-point-override", duration_sec: 30, params: {use_seeker: false} }
-    - { action: "attack", name: "waypoint-injection", duration_sec: 30, params: {use_seeker: false} }
-
+    - { action: "http", endpoint: "stage/autopilot-flight", params: {route: "A"} }
+    - { action: "sleep", sec: 60 }
     - { action: "http", endpoint: "stage/return-to-land" }
 
-
-s4_cti_exfil_advanced:
-  description: "CTI 수집 (정보 유출 & 고급 공격) - 6 Attacks"
+normal_long:
+  description: "[Normal] 정상 비행 180초"
   steps:
     - { action: "http", endpoint: "stage/boot" }
-    - { action: "sleep", sec: 15 }
-    - { action: "http", endpoint: "stage/autopilot-flight", params: {route: "B"} }
-    - { action: "sleep", sec: 30 }
-    
-    # Exfiltration (3) + Others (3)
-    - { action: "attack", name: "wifi-client-data-leak", duration_sec: 30, params: {use_seeker: false} }
-    - { action: "attack", name: "flight-log-extraction", duration_sec: 30, params: {use_seeker: false} }
-    - { action: "attack", name: "mission-extraction", duration_sec: 30, params: {use_seeker: false} }
-    - { action: "attack", name: "vfr-hud-spoofing", duration_sec: 30, params: {use_seeker: false} }
-    - { action: "attack", name: "satellite-spoofing", duration_sec: 30, params: {use_seeker: false} }
-    - { action: "attack", name: "communication-link-flooding", duration_sec: 30, params: {use_seeker: false} }
-
-    - { action: "http", endpoint: "stage/return-to-land" }
-
-
-s5_cti_normal:
-  description: "CTI 수집 (정상 상태): NO MTD, No Seeker - Baseline"
-  steps:
-    - { action: "http", endpoint: "stage/boot" }
-    - { action: "sleep", sec: 15 }
-    - { action: "http", endpoint: "stage/arm-and-takeoff", params: {alt: 10} }
-    - { action: "sleep", sec: 30 }
-    - { action: "http", endpoint: "stage/autopilot-flight", params: {route: "A"} }
-    - { action: "sleep", sec: 120 } # 긴 정상 비행 시간
-    - { action: "http", endpoint: "stage/return-to-land" }
-    - { action: "sleep", sec: 15 }
-    
-    
-# --- [C] 최종 데이터 수집 및 학습 통합 시나리오 (마스터 실행 키) ---
-# 이 시나리오를 실행하면 모든 CTI 데이터가 수집되고, 종료 시 ML 파이프라인이 실행됩니다.
-# (이 시나리오 키를 run_full_cti_pipeline.sh에서 사용합니다.)
-s_cti_data_collection_full:
-  description: "통합 CTI 데이터 수집 및 ML 학습: 모든 공격(26종) 및 정상 상태를 포함."
-  steps:
-    # 1. 시나리오 S5 (긴 정상 상태 데이터 수집)
-    - { action: "http", endpoint: "stage/boot" }
-    - { action: "sleep", sec: 15 }
-    - { action: "http", endpoint: "stage/arm-and-takeoff", params: {alt: 10} }
-    - { action: "sleep", sec: 30 }
-    - { action: "http", endpoint: "stage/autopilot-flight", params: {route: "A"} }
-    - { action: "sleep", sec: 120 } # 120초 정상 데이터
-    - { action: "http", endpoint: "stage/return-to-land" }
-    - { action: "sleep", sec: 15 }
-    
-    # 2. 시나리오 S1 실행
-    - { action: "http", endpoint: "stage/boot" }
-    - { action: "sleep", sec: 15 }
-    - { action: "http", endpoint: "stage/arm-and-takeoff", params: {alt: 10} }
-    - { action: "sleep", sec: 25 }
-    - { action: "attack", name: "drone-discovery", duration_sec: 30, params: {use_seeker: false} }
-    - { action: "attack", name: "companion-computer-discovery", duration_sec: 30, params: {use_seeker: false} }
-    - { action: "attack", name: "ground-control-station-discovery", duration_sec: 30, params: {use_seeker: false} }
-    - { action: "attack", name: "drone-gps-telemetry-detection", duration_sec: 30, params: {use_seeker: false} }
-    - { action: "attack", name: "wifi-analysis-cracking", duration_sec: 30, params: {use_seeker: false} } 
-    - { action: "attack", name: "attitude-spoofing", duration_sec: 30, params: {use_seeker: false} }
-    - { action: "attack", name: "battery-spoofing", duration_sec: 30, params: {use_seeker: false} }
-    - { action: "http", endpoint: "stage/return-to-land" }
-    - { action: "sleep", sec: 15 }
-
-    # 3. 시나리오 S2 실행
-    - { action: "http", endpoint: "stage/boot" }
-    - { action: "sleep", sec: 15 }
-    - { action: "http", endpoint: "stage/autopilot-flight", params: {route: "A"} }
-    - { action: "sleep", sec: 30 }
-    - { action: "attack", name: "gps-spoofing", duration_sec: 30, params: {use_seeker: false} }
-    - { action: "attack", name: "critical-error-spoofing", duration_sec: 30, params: {use_seeker: false} }
-    - { action: "attack", name: "emergency-status-spoofing", duration_sec: 30, params: {use_seeker: false} }
-    - { action: "attack", name: "ground-control-station-spoofing", duration_sec: 30, params: {use_seeker: false} }
-    - { action: "attack", name: "camera-gimbal-takeover", duration_sec: 30, params: {use_seeker: false} }
-    - { action: "attack", name: "gps-data-injection", duration_sec: 30, params: {use_seeker: false} }
-    - { action: "http", endpoint: "stage/return-to-land" }
-    - { action: "sleep", sec: 15 }
-
-    # 4. 시나리오 S3 실행
-    - { action: "http", endpoint: "stage/boot" }
-    - { action: "sleep", sec: 15 }
+    - { action: "sleep", sec: 10 }
     - { action: "http", endpoint: "stage/arm-and-takeoff", params: {alt: 10} }
     - { action: "sleep", sec: 20 }
-    - { action: "attack", name: "wifi-deauth-attack", duration_sec: 30, params: {use_seeker: false} }
-    - { action: "attack", name: "geofencing-attack", duration_sec: 30, params: {use_seeker: false} }
-    - { action: "attack", name: "gps-offset-glitching", duration_sec: 30, params: {use_seeker: false} }
-    - { action: "attack", name: "flight-termination", duration_sec: 30, params: {use_seeker: false} }
-    - { action: "attack", name: "denial-of-takeoff", duration_sec: 30, params: {use_seeker: false} }
-    - { action: "attack", name: "return-to-home-point-override", duration_sec: 30, params: {use_seeker: false} }
-    - { action: "attack", name: "waypoint-injection", duration_sec: 30, params: {use_seeker: false} }
+    - { action: "http", endpoint: "stage/autopilot-flight", params: {route: "A"} }
+    - { action: "sleep", sec: 180 }
     - { action: "http", endpoint: "stage/return-to-land" }
-    - { action: "sleep", sec: 15 }
 
-    # 5. 시나리오 S4 실행
+
+# =================================================================
+# [F] 레거시 호환 (기존 시나리오명 유지)
+# =================================================================
+
+s_cti_data_collection_core6:
+  description: "[Legacy] 핵심 6종 공격"
+  steps:
     - { action: "http", endpoint: "stage/boot" }
     - { action: "sleep", sec: 15 }
-    - { action: "http", endpoint: "stage/autopilot-flight", params: {route: "B"} }
+    - { action: "http", endpoint: "stage/arm-and-takeoff", params: {alt: 10} }
     - { action: "sleep", sec: 30 }
-    - { action: "attack", name: "wifi-client-data-leak", duration_sec: 30, params: {use_seeker: false} }
+    - { action: "attack", name: "wifi-deauth-attack", duration_sec: 30, params: {use_seeker: false} }
+    - { action: "sleep", sec: 5 }
+    - { action: "attack", name: "gps-spoofing", duration_sec: 20, params: {use_seeker: false} }
+    - { action: "sleep", sec: 5 }
+    - { action: "attack", name: "waypoint-injection", duration_sec: 15, params: {use_seeker: false} }
+    - { action: "sleep", sec: 5 }
+    - { action: "attack", name: "wifi-client-data-leak", duration_sec: 20, params: {use_seeker: false} }
+    - { action: "sleep", sec: 5 }
     - { action: "attack", name: "flight-log-extraction", duration_sec: 30, params: {use_seeker: false} }
-    - { action: "attack", name: "mission-extraction", duration_sec: 30, params: {use_seeker: false} }
-    - { action: "attack", name: "vfr-hud-spoofing", duration_sec: 30, params: {use_seeker: false} }
-    - { action: "attack", name: "satellite-spoofing", duration_sec: 30, params: {use_seeker: false} }
-    - { action: "attack", name: "communication-link-flooding", duration_sec: 30, params: {use_seeker: false} }
+    - { action: "sleep", sec: 5 }
+    - { action: "attack", name: "satellite-spoofing", duration_sec: 25, params: {use_seeker: false} }
     - { action: "http", endpoint: "stage/return-to-land" }
-    - { action: "sleep", sec: 15 }
-    
-    # 6. ML 파이프라인 실행을 위한 후처리 단계
-    # dvd_scenario_runner.py의 finally 블록에서 ML 파이프라인이 호출됩니다.
     - { action: "http", endpoint: "stage/post_analysis" }

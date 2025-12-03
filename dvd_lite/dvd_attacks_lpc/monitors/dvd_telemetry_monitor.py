@@ -2,9 +2,10 @@
 # -*- coding: utf-8 -*-
 
 """
-DVD Telemetry Monitor
+DVD Telemetry Monitor (Fixed)
 - MAVLink 텔레메트리 메시지 수신
 - CTI 에이전트가 읽는 bus_telemetry.log로 로깅
+- Python 3.12+ 호환 (deprecated utcfromtimestamp 수정)
 """
 
 import time
@@ -12,7 +13,7 @@ import json
 import os
 import logging
 from pymavlink import mavutil
-from datetime import datetime
+from datetime import datetime, timezone
 import threading
 
 # 로깅 설정
@@ -103,8 +104,11 @@ def log_to_bus(message_type: str, data: dict):
             sanitized_data[key] = value
 
     current_time = time.time()
+    # ✅ Python 3.12+ 호환: utcfromtimestamp → fromtimestamp with timezone.utc
+    current_time_dt = datetime.fromtimestamp(current_time, timezone.utc)
+    
     log_entry = {
-        "timestamp": datetime.utcfromtimestamp(current_time).isoformat() + "Z",
+        "timestamp": current_time_dt.isoformat().replace('+00:00', 'Z'),
         "ts": current_time,  # Unix timestamp
         "source": "dvd_telemetry_monitor",
         "type": f"mavlink_{message_type.lower()}",
@@ -158,8 +162,6 @@ def setup_data_streams(conn):
     request_data_stream(conn, mavutil.mavlink.MAV_DATA_STREAM_EXTRA1, 5)
     request_data_stream(conn, mavutil.mavlink.MAV_DATA_STREAM_EXTRA2, 2)
     request_data_stream(conn, mavutil.mavlink.MAV_DATA_STREAM_EXTRA3, 2)
-    # 필요 시 ALL 스트림:
-    # request_data_stream(conn, mavutil.mavlink.MAV_DATA_STREAM_ALL, 1)
 
 
 def mavlink_receive_loop(connection):

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-MTD RL v08 Configuration - Complete Redesign for Effective Learning
+MTD RL v08 Configuration - Complete Redesign with Service Swap
 
 주요 개선사항:
 1. 세 가지 정답지(Real/Virtual/Attacker Belief) 명시적 모델링
@@ -9,9 +9,16 @@ MTD RL v08 Configuration - Complete Redesign for Effective Learning
 3. 보상 함수 완전 재설계 (survival 축소, 방어 보상 확대)
 4. Actor-Critic 역할 명확화를 위한 상태/액션 재정의
 5. Level별 공격자 전략 세분화
+6. **[NEW] Service Swap 기능 추가 - 레퍼런스 기반 파라미터**
+
+Service Swap References:
+- Container Live Migration: 10-100ms downtime (Govindaraj & Artemenko, IEEE ETFA 2018)
+- MiGrror Migration: <10ms downtime with minimal bandwidth overhead (arXiv:2305.10977)
+- SDN-based MTD: <7% overhead for resilience (ScienceDirect Topics)
+- Service Migration Latency: 50-150ms typical (IEEE/ACM ToN 2019)
 
 저자: MTD-RL Research Team
-버전: 0.8.0
+버전: 0.8.1
 """
 from __future__ import annotations
 
@@ -45,7 +52,7 @@ class MTDActionType(Enum):
     DECOY_ACTIVATE = auto()
     DECOY_DEACTIVATE = auto()
     BLACKLIST_ADD = auto()
-    SERVICE_SWAP = auto()
+    SERVICE_SWAP = auto()      # 서비스 스왑 (실제 서비스 간 역할 교환)
     HONEYPOT_DEPLOY = auto()
 
 
@@ -62,6 +69,7 @@ class DefenseOutcome(Enum):
     BREACH_BLOCKED = auto()
     BREACH_SUCCESS = auto()
     MTD_SHUFFLE_SUCCESS = auto()
+    MTD_SERVICE_SWAP_SUCCESS = auto()  # 서비스 스왑 성공
     DECOY_ENGAGED = auto()
 
 
@@ -112,6 +120,14 @@ class DVDTestbedConfig:
         "TARGET_GCS": ["PORT_MAVLINK", "PORT_WEB"],
         "TARGET_SIM": ["PORT_SITL", "PORT_ROS"],
     })
+    
+    # [NEW] 스왑 가능한 서비스 쌍 정의
+    # 동일한 역할을 수행할 수 있는 서비스들끼리 스왑 가능
+    swappable_service_pairs: List[Tuple[str, str]] = field(default_factory=lambda: [
+        ("TARGET_FC", "DECOY_FC"),      # FC와 FC 디코이
+        ("TARGET_GCS", "DECOY_GCS"),    # GCS와 GCS 디코이
+        ("TARGET_CC", "TARGET_SIM"),    # CC와 시뮬레이터 (일부 기능)
+    ])
 
 
 # =============================================================================
@@ -187,6 +203,11 @@ class ServiceMapping:
     last_shuffle_step: int = 0
     times_discovered: int = 0
     
+    # [NEW] 서비스 스왑 관련
+    swap_count: int = 0
+    last_swap_step: int = 0
+    original_role: Optional[str] = None  # 원래 역할 기록
+    
     def get_virtual_address(self) -> Tuple[int, int]:
         return (self.virtual_ip, self.virtual_port)
     
@@ -196,6 +217,11 @@ class ServiceMapping:
         self.virtual_port = new_port
         self.shuffle_count += 1
         self.last_shuffle_step = current_step
+    
+    def record_swap(self, current_step: int):
+        """서비스 스왑 기록"""
+        self.swap_count += 1
+        self.last_swap_step = current_step
 
 
 # =============================================================================
@@ -226,11 +252,16 @@ class AttackerBelief:
     # 블랙리스트로 차단된 IP들 (공격자 관점)
     blocked_ips: Set[int] = field(default_factory=set)
     
+    # [NEW] 서비스 스왑으로 인한 혼란도
+    confusion_level: float = 0.0
+    
     def add_discovery(self, address: Tuple[int, int], service_name: str):
         """서비스 발견 시 belief 업데이트"""
         self.discovered_addresses.add(address)
         self.estimated_locations[service_name] = address
         self.confidence = min(1.0, self.confidence + 0.1)
+        # 발견하면 혼란도 감소
+        self.confusion_level = max(0.0, self.confusion_level - 0.05)
     
     def invalidate_by_shuffle(self, shuffled_services: Set[str], decay: float = 0.5):
         """MTD 셔플 시 belief 무효화"""
@@ -241,6 +272,15 @@ class AttackerBelief:
                 del self.estimated_locations[svc]
         self.confidence *= decay
     
+    def invalidate_by_swap(self, swapped_services: Set[str], confusion_increase: float = 0.3):
+        """서비스 스왑 시 belief 무효화 및 혼란 증가"""
+        for svc in swapped_services:
+            if svc in self.estimated_locations:
+                # 주소는 같지만 서비스 내용이 바뀜 -> 더 혼란스러움
+                del self.estimated_locations[svc]
+        self.confidence *= 0.3  # 스왑은 더 강한 무효화
+        self.confusion_level = min(1.0, self.confusion_level + confusion_increase)
+    
     def reset(self):
         """belief 초기화"""
         self.discovered_addresses.clear()
@@ -248,6 +288,7 @@ class AttackerBelief:
         self.scanned_addresses.clear()
         self.blocked_ips.clear()
         self.confidence = 0.0
+        self.confusion_level = 0.0
 
 
 # =============================================================================
@@ -332,6 +373,7 @@ class AttackProgress:
 - breach_prob: 익스플로잇 후 침투 성공 확률
 - decoy_detect: 디코이 식별 확률
 - smart_scan: 지능적 스캔 비율 (발견한 주소 근처 스캔)
+- swap_detect: [NEW] 서비스 스왑 감지 확률
 """
 
 SEEKER_PROFILES: Dict[int, Dict[str, Any]] = {
@@ -352,6 +394,7 @@ SEEKER_PROFILES: Dict[int, Dict[str, Any]] = {
         
         # 방어 회피
         "decoy_detect": 0.05,         # 디코이 인식 확률 (낮음)
+        "swap_detect": 0.02,          # [NEW] 서비스 스왑 감지 확률
         "ip_change_prob": 0.02,       # IP 변경 확률
         "stealth_factor": 0.0,
         
@@ -375,6 +418,7 @@ SEEKER_PROFILES: Dict[int, Dict[str, Any]] = {
         "exploit_cooldown": 4,
         
         "decoy_detect": 0.15,
+        "swap_detect": 0.08,          # [NEW]
         "ip_change_prob": 0.05,
         "stealth_factor": 0.1,
         
@@ -397,6 +441,7 @@ SEEKER_PROFILES: Dict[int, Dict[str, Any]] = {
         "exploit_cooldown": 3,
         
         "decoy_detect": 0.25,
+        "swap_detect": 0.15,          # [NEW]
         "ip_change_prob": 0.08,
         "stealth_factor": 0.2,
         
@@ -423,6 +468,7 @@ SEEKER_PROFILES: Dict[int, Dict[str, Any]] = {
         "exploit_cooldown": 2,
         
         "decoy_detect": 0.40,
+        "swap_detect": 0.30,          # [NEW]
         "ip_change_prob": 0.12,
         "stealth_factor": 0.5,
         
@@ -452,6 +498,7 @@ SEEKER_PROFILES: Dict[int, Dict[str, Any]] = {
         "exploit_cooldown": 1,
         
         "decoy_detect": 0.60,
+        "swap_detect": 0.45,          # [NEW]
         "ip_change_prob": 0.15,
         "stealth_factor": 0.7,
         
@@ -482,7 +529,7 @@ def load_seeker_profiles(path: Optional[str] = None) -> Dict[int, Dict]:
 
 
 # =============================================================================
-# Cost Model (MTD 비용 모델)
+# Cost Model (MTD 비용 모델) - Service Swap 추가
 # =============================================================================
 @dataclass
 class MTDCostModel:
@@ -493,11 +540,18 @@ class MTDCostModel:
     - 셔플은 보안성↑ but 지연↑, 에너지↑
     - 디코이는 탐지↑ but 리소스↑
     - 블랙리스트는 차단↑ but 오탐↑
+    - [NEW] 서비스 스왑은 혼란↑ but 가용성↓, 동기화 비용↑
+    
+    References:
+    - Container Live Migration: 10-100ms downtime (IEEE ETFA 2018)
+    - MiGrror: <10ms downtime for microservices (arXiv:2305.10977)
+    - SDN MTD: <7% overhead (ScienceDirect)
+    - Service Migration: 50-150ms typical latency (IEEE/ACM ToN 2019)
     """
     # IP Shuffle 비용
-    shuffle_latency_ms: float = 50.0
-    shuffle_bandwidth_loss: float = 0.002
-    shuffle_sync_overhead: float = 0.01
+    shuffle_latency_ms: float = 50.0        # Ref: SDN-based MTD typical
+    shuffle_bandwidth_loss: float = 0.002   # 0.2% bandwidth loss
+    shuffle_sync_overhead: float = 0.01     # 1% sync overhead
     shuffle_energy_joule: float = 0.05
     
     # Port Hop 비용
@@ -512,6 +566,19 @@ class MTDCostModel:
     # Blacklist 비용
     blacklist_fp_rate: float = 0.02   # 오탐률
     blacklist_update_cost: float = 0.001
+    
+    # [NEW] Service Swap 비용 - 레퍼런스 기반
+    # Container migration typically: 10-100ms downtime
+    swap_latency_ms: float = 75.0           # 평균 75ms downtime
+    swap_bandwidth_overhead: float = 0.05   # 5% bandwidth overhead during swap
+    swap_sync_time_ms: float = 25.0         # 상태 동기화 시간
+    swap_connection_reset_prob: float = 0.15  # 연결 리셋 확률 15%
+    swap_energy_joule: float = 0.12         # 셔플보다 높은 에너지 소모
+    swap_cpu_overhead: float = 0.08         # 8% CPU overhead
+    swap_memory_overhead_mb: float = 64.0   # 임시 메모리 사용
+    
+    # Service availability impact
+    swap_availability_impact: float = 0.02  # 2% availability reduction
     
     # 에너지 예산
     energy_budget_joule: float = 100.0
@@ -550,10 +617,74 @@ class MTDCostModel:
             "memory_gb": memory, 
             "total": base + memory * 0.1
         }
+    
+    def calculate_swap_cost(
+        self,
+        intensity: float,
+        num_swaps: int
+    ) -> Dict[str, float]:
+        """
+        [NEW] 서비스 스왑 비용 계산
+        
+        Based on references:
+        - IEEE ETFA 2018: Container live migration 10-100ms
+        - arXiv:2305.10977: MiGrror <10ms downtime
+        - IEEE/ACM ToN 2019: Service migration 50-150ms
+        
+        Args:
+            intensity: 스왑 강도 (0-1)
+            num_swaps: 스왑할 서비스 쌍 수
+        
+        Returns:
+            비용 정보 딕셔너리
+        """
+        # 기본 레이턴시 (intensity에 비례)
+        base_latency = self.swap_latency_ms * intensity
+        sync_latency = self.swap_sync_time_ms * intensity
+        total_latency = (base_latency + sync_latency) * num_swaps
+        
+        # 대역폭 오버헤드
+        bandwidth = self.swap_bandwidth_overhead * intensity * num_swaps
+        
+        # 연결 리셋으로 인한 손실
+        connection_loss = self.swap_connection_reset_prob * intensity * num_swaps
+        
+        # CPU/메모리 오버헤드
+        cpu_overhead = self.swap_cpu_overhead * intensity
+        memory_overhead = (self.swap_memory_overhead_mb * num_swaps) / 1024  # GB
+        
+        # 에너지 소모
+        energy = self.swap_energy_joule * intensity * num_swaps
+        
+        # 가용성 영향
+        availability_loss = self.swap_availability_impact * intensity * num_swaps
+        
+        # 총 비용 (정규화된 값)
+        total = (
+            total_latency / 1000 +  # ms → s
+            bandwidth +
+            connection_loss * 0.5 +  # 연결 손실 가중치
+            cpu_overhead +
+            memory_overhead * 0.1 +
+            energy +
+            availability_loss * 2.0  # 가용성 손실 높은 가중치
+        )
+        
+        return {
+            "latency_ms": total_latency,
+            "sync_latency_ms": sync_latency * num_swaps,
+            "bandwidth_overhead": bandwidth,
+            "connection_loss_prob": connection_loss,
+            "cpu_overhead": cpu_overhead,
+            "memory_overhead_gb": memory_overhead,
+            "energy": energy,
+            "availability_loss": availability_loss,
+            "total": total
+        }
 
 
 # =============================================================================
-# Reward Model (보상 함수 - 완전 재설계)
+# Reward Model (보상 함수 - Service Swap 추가)
 # =============================================================================
 @dataclass
 class RewardModel:
@@ -565,6 +696,7 @@ class RewardModel:
     3. 공격 성공 페널티 확대: 실패 비용 명확화
     4. 다양성 보너스: MTD 핵심 지표
     5. 비용 효율성: Trade-off 학습
+    6. [NEW] 서비스 스왑 효과: 혼란 유발 보상
     """
     
     # === 방어 성공 보상 (상향) ===
@@ -583,12 +715,17 @@ class RewardModel:
     reward_decoy_exploit: float = 50.0      # 디코이 익스플로잇 유도
     reward_decoy_time_absorbed: float = 2.0 # 스텝당 디코이 시간 소모
     
+    # === [NEW] 서비스 스왑 효과 보상 ===
+    reward_swap_confusion: float = 35.0     # 스왑으로 인한 공격자 혼란
+    reward_swap_exploit_failed: float = 60.0  # 스왑 후 익스플로잇 실패 유도
+    
     # === 생존 보상 (대폭 축소) ===
     reward_survival: float = 0.01           # 0.2 → 0.01 (20배 축소!)
     
     # === 다양성/엔트로피 보너스 ===
     diversity_bonus_weight: float = 1.0     # 다양성 보너스 가중치
     entropy_bonus_weight: float = 0.5       # 엔트로피 보너스 가중치
+    redundancy_bonus_weight: float = 0.3    # [NEW] 중복성 보너스 가중치
     
     # === 조기 탐지 보너스 ===
     early_detection_bonus: float = 15.0     # 공격 초기 차단 시 추가 보상
@@ -602,10 +739,14 @@ class RewardModel:
     mtd_activity_bonus: float = 0.5         # MTD 액션 수행 시 소량 보너스
     mtd_inactivity_penalty: float = -0.3    # 장기 미활동 페널티
     mtd_inactivity_threshold: int = 25      # 미활동 임계 스텝
+    
+    # === [NEW] 서비스 스왑 특별 보너스 ===
+    swap_timing_bonus: float = 20.0         # 적절한 타이밍에 스왑 시 보너스
+    swap_critical_protection: float = 40.0  # Critical 자산 스왑 보호 보너스
 
 
 # =============================================================================
-# MTD Thresholds (액션 활성화 임계값)
+# MTD Thresholds (액션 활성화 임계값) - Service Swap 추가
 # =============================================================================
 @dataclass
 class MTDThresholds:
@@ -617,7 +758,7 @@ class MTDThresholds:
     port_hop: float = 0.25         # Port Hop 임계값
     decoy_activate: float = 0.15   # 디코이 활성화 임계값
     blacklist: float = 0.20        # 블랙리스트 추가 임계값
-    service_swap: float = 0.30     # 서비스 스왑 임계값
+    service_swap: float = 0.35     # [NEW] 서비스 스왑 임계값 (비용이 높으므로 높은 임계값)
 
 
 # =============================================================================
@@ -677,10 +818,10 @@ class PPOConfig:
 
 
 # =============================================================================
-# State/Action Dimensions
+# State/Action Dimensions - Service Swap 반영
 # =============================================================================
 """
-상태 벡터 설계 (15차원):
+상태 벡터 설계 (17차원으로 확장):
 - Actor가 MTD 전략을 결정하는 데 필요한 정보
 - Critic이 상태 가치를 추정하는 데 필요한 정보
 """
@@ -692,23 +833,25 @@ FEATURE_KEYS: List[str] = [
     "exploitation_progress",          # 익스플로잇 진행도
     "compromise_progress",            # 침투 진행도
     
-    # 방어 상태 (4개)
+    # 방어 상태 (5개로 확장)
     "current_diversity",              # 현재 다양성 지표
     "current_redundancy",             # 디코이 활성화 비율
     "decoy_engagement_rate",          # 디코이 유인 비율
     "energy_remaining_ratio",         # 잔여 에너지 비율
+    "swap_active_ratio",              # [NEW] 활성 서비스 스왑 비율
     
-    # 시간/행동 컨텍스트 (6개)
+    # 시간/행동 컨텍스트 (7개로 확장)
     "steps_since_shuffle",            # 마지막 셔플 후 스텝
+    "steps_since_swap",               # [NEW] 마지막 스왑 후 스텝
     "attacker_scan_rate",             # 공격자 스캔 속도 추정
     "last_shuffle_intensity",         # 직전 셔플 강도
     "last_port_hop_intensity",        # 직전 Port Hop 강도
     "last_decoy_ratio",               # 직전 디코이 비율
-    "last_blacklist_aggression",      # 직전 블랙리스트 공격성
+    "last_swap_intensity",            # [NEW] 직전 스왑 강도
 ]
 
 """
-액션 벡터 설계 (6차원):
+액션 벡터 설계 (7차원으로 확장):
 - 연속 값 [-1, 1] → 환경에서 [0, 1]로 스케일링
 - 각 값이 임계값 이상이면 해당 MTD 액션 수행
 """
@@ -718,15 +861,16 @@ ACTION_PARAM_KEYS: List[str] = [
     "decoy_ratio",             # 디코이 활성화 비율
     "blacklist_aggression",    # 블랙리스트 공격성
     "blacklist_duration",      # 블랙리스트 지속 시간 (0: 짧음, 1: 길음)
-    "service_swap_rate",       # 서비스 스왑 비율
+    "service_swap_intensity",  # [NEW] 서비스 스왑 강도
+    "service_swap_target",     # [NEW] 스왑 대상 선택 (0: 랜덤, 1: Critical 우선)
 ]
 
-STATE_DIM = len(FEATURE_KEYS)   # 15
-ACTION_DIM = len(ACTION_PARAM_KEYS)  # 6
+STATE_DIM = len(FEATURE_KEYS)   # 17
+ACTION_DIM = len(ACTION_PARAM_KEYS)  # 7
 
 
 # =============================================================================
-# Episode Statistics
+# Episode Statistics - Service Swap 반영
 # =============================================================================
 @dataclass
 class EpisodeStats:
@@ -762,6 +906,11 @@ class EpisodeStats:
     decoy_activations: int = 0
     blacklist_additions: int = 0
     
+    # [NEW] 서비스 스왑 지표
+    swap_count: int = 0
+    swap_confusion_caused: float = 0.0
+    swap_exploit_prevented: int = 0
+    
     # 종합 점수
     s_mtd: float = 0.0
     
@@ -769,22 +918,28 @@ class EpisodeStats:
         """
         S_MTD 종합 점수 계산
         
-        공식:
-        S_MTD = 0.4 * defense_rate 
-              + 0.25 * decoy_effectiveness 
+        공식 (Service Swap 반영):
+        S_MTD = 0.35 * defense_rate 
+              + 0.20 * decoy_effectiveness 
               + 0.15 * diversity 
-              + 0.1 * survival_bonus 
-              - 0.1 * cost_penalty
+              + 0.10 * redundancy
+              + 0.10 * survival_bonus 
+              - 0.10 * cost_penalty
         """
         decoy_rate = self.decoy_hits / max(1, self.total_scans)
         cost_penalty = min(self.total_cost / 15.0, 1.0)
         survival_bonus = 1.0 if self.breach_prevented else 0.0
         
+        # [NEW] 스왑 효과 반영
+        swap_effectiveness = self.swap_confusion_caused / max(1, self.swap_count) if self.swap_count > 0 else 0.0
+        
         self.s_mtd = (
-            0.40 * self.defense_success_rate +
-            0.25 * decoy_rate +
+            0.35 * self.defense_success_rate +
+            0.20 * decoy_rate +
             0.15 * self.avg_diversity +
-            0.10 * survival_bonus -
+            0.10 * self.avg_redundancy +
+            0.05 * swap_effectiveness +  # 스왑 효과
+            0.05 * survival_bonus -
             0.10 * cost_penalty
         )
         return self.s_mtd
@@ -817,6 +972,11 @@ class EpisodeStats:
             "MTD/PortHopCount": float(self.port_hop_count),
             "MTD/DecoyActivations": float(self.decoy_activations),
             "MTD/BlacklistAdditions": float(self.blacklist_additions),
+            
+            # [NEW] 서비스 스왑 통계
+            "MTD/SwapCount": float(self.swap_count),
+            "MTD/SwapConfusion": float(self.swap_confusion_caused),
+            "MTD/SwapExploitPrevented": float(self.swap_exploit_prevented),
         }
 
 
@@ -852,6 +1012,47 @@ class CurriculumConfig:
 
 
 # =============================================================================
+# [NEW] Service Swap Configuration
+# =============================================================================
+@dataclass
+class ServiceSwapConfig:
+    """
+    서비스 스왑 설정
+    
+    References:
+    - Container Live Migration: 10-100ms downtime (IEEE ETFA 2018)
+    - MiGrror Migration: <10ms downtime with pre-copy optimization (arXiv:2305.10977)
+    - SDN-based MTD: <7% overhead in resilient environments (ScienceDirect)
+    - Service Migration typical latency: 50-150ms (IEEE/ACM ToN 2019)
+    """
+    # 스왑 주기 설정
+    min_swap_interval: int = 15         # 최소 스왑 간격 (스텝)
+    max_swap_interval: int = 60         # 최대 스왑 간격 (스텝)
+    
+    # 스왑 성능 파라미터 (레퍼런스 기반)
+    swap_downtime_ms: float = 75.0      # 평균 다운타임 (10-100ms range)
+    swap_migration_time_ms: float = 150.0  # 총 마이그레이션 시간
+    swap_bandwidth_mbps: float = 100.0  # 스왑 시 필요 대역폭
+    
+    # 연결 영향
+    connection_reset_prob: float = 0.15  # TCP 연결 리셋 확률
+    connection_recovery_ms: float = 500.0  # 연결 복구 시간
+    
+    # 보안 효과
+    confusion_duration_steps: int = 20   # 공격자 혼란 지속 시간
+    belief_invalidation_factor: float = 0.3  # belief 무효화 비율
+    
+    # 스왑 가능 조건
+    min_energy_for_swap: float = 0.2    # 스왑에 필요한 최소 에너지
+    max_active_swaps: int = 2           # 동시 활성 스왑 수
+    
+    # 보호 효과 (레퍼런스 기반)
+    # Container migration reduces response time by ~74% (IEEE ETFA 2018)
+    exploit_protection_factor: float = 0.25  # 스왑 직후 익스플로잇 성공률 감소
+    protection_duration_steps: int = 10      # 보호 효과 지속 시간
+
+
+# =============================================================================
 # Main Configuration Class
 # =============================================================================
 class MTDConfig:
@@ -865,6 +1066,7 @@ class MTDConfig:
     initial_state = InitialStateConfig()
     ppo = PPOConfig()
     curriculum = CurriculumConfig()
+    service_swap = ServiceSwapConfig()  # [NEW]
     
     STATE_DIM = STATE_DIM
     ACTION_DIM = ACTION_DIM
@@ -889,7 +1091,7 @@ def print_config_summary():
     """설정 요약 출력"""
     cfg = MTDConfig()
     print("\n" + "=" * 60)
-    print("MTD RL v08 Configuration Summary")
+    print("MTD RL v08.1 Configuration Summary (with Service Swap)")
     print("=" * 60)
     print(f"Search Space: {cfg.search_space.total_search_space:,} "
           f"({cfg.search_space.ip_pool_size} IPs × {cfg.search_space.port_pool_size} Ports)")
@@ -907,6 +1109,14 @@ def print_config_summary():
               f"Efficiency: {profile['scan_efficiency']}")
         print(f"    - Exploit: {profile['exploit_prob']}, "
               f"Breach: {profile['breach_prob']}")
+        print(f"    - Swap Detect: {profile['swap_detect']}")  # [NEW]
+    
+    print("\n" + "=" * 60)
+    print("Service Swap Configuration (Reference-based):")
+    print(f"  Downtime: {cfg.service_swap.swap_downtime_ms}ms (Ref: 10-100ms)")
+    print(f"  Migration Time: {cfg.service_swap.swap_migration_time_ms}ms (Ref: 50-150ms)")
+    print(f"  Connection Reset Prob: {cfg.service_swap.connection_reset_prob*100}%")
+    print(f"  Exploit Protection: {cfg.service_swap.exploit_protection_factor*100}% reduction")
     print("=" * 60 + "\n")
 
 
