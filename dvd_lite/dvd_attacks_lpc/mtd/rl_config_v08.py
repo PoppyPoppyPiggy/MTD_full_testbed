@@ -1,22 +1,23 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-MTD-RL Configuration v09 - Fixed Version
+MTD-RL Configuration v08 - Fixed Version
 =========================================
 
 수정사항:
-1. 보상 함수 가중치 재설계 (Breach 패널티 대폭 증가)
-2. 액션 Threshold 하향 조정 (Shuffle 등)
-3. CDI/NED 계산을 위한 설정 추가
-4. Curriculum Learning 파라미터 개선
+1. scale_action 함수 추가
+2. SearchSpaceConfig 추가
+3. PPOConfig 누락 필드 추가
+4. CurriculumConfig 누락 필드 추가
+5. RewardWeights 누락 필드 추가
 
 저자: MTD-RL Research Team
-버전: 0.9.0
+버전: 0.8.5 (Fixed)
 """
 from __future__ import annotations
 
 from dataclasses import dataclass, field, asdict
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 import numpy as np
 import json
 
@@ -61,66 +62,125 @@ ACTION_PARAM_KEYS = [
 
 
 # =============================================================================
-# Action Thresholds (v09: 대폭 하향 조정)
+# Utility Functions
+# =============================================================================
+def scale_action(action: np.ndarray) -> np.ndarray:
+    """
+    액션을 [-1, 1] 범위에서 [0, 1] 범위로 스케일링
+    
+    Args:
+        action: [-1, 1] 범위의 액션 배열
+        
+    Returns:
+        [0, 1] 범위로 스케일된 액션 배열
+    """
+    return (np.array(action) + 1.0) / 2.0
+
+
+def unscale_action(scaled_action: np.ndarray) -> np.ndarray:
+    """
+    스케일된 액션을 [0, 1] 범위에서 [-1, 1] 범위로 역스케일링
+    
+    Args:
+        scaled_action: [0, 1] 범위의 스케일된 액션 배열
+        
+    Returns:
+        [-1, 1] 범위의 액션 배열
+    """
+    return np.array(scaled_action) * 2.0 - 1.0
+
+
+def to_serializable(obj: Any) -> Any:
+    """객체를 JSON 직렬화 가능한 형태로 변환"""
+    if isinstance(obj, np.ndarray):
+        return obj.tolist()
+    elif isinstance(obj, np.integer):
+        return int(obj)
+    elif isinstance(obj, np.floating):
+        return float(obj)
+    elif isinstance(obj, set):
+        return list(obj)
+    elif isinstance(obj, dict):
+        return {k: to_serializable(v) for k, v in obj.items()}
+    elif isinstance(obj, list):
+        return [to_serializable(v) for v in obj]
+    return obj
+
+
+# =============================================================================
+# Action Thresholds
 # =============================================================================
 @dataclass
 class ActionThresholds:
     """
-    액션 실행 임계값 - v09에서 대폭 낮춤
-    이전 버전에서 RL이 shuffle을 전혀 사용하지 않은 문제 해결
+    액션 실행 임계값
     """
-    shuffle: float = 0.10          # v08: 0.25 → v09: 0.10 (더 쉽게 트리거)
-    port_hop: float = 0.15         # v08: 0.35 → v09: 0.15
-    decoy: float = 0.20            # v08: 0.40 → v09: 0.20
-    blacklist: float = 0.30        # v08: 0.60 → v09: 0.30
-    service_swap: float = 0.15     # v08: 0.30 → v09: 0.15
+    shuffle: float = 0.10          # 셔플 실행 임계값
+    port_hop: float = 0.15         # 포트 호핑 임계값
+    decoy: float = 0.20            # 디코이 활성화 임계값
+    blacklist: float = 0.30        # 블랙리스트 임계값
+    service_swap: float = 0.15     # 서비스 스왑 임계값
 
 
 # =============================================================================
-# Reward Weights (v09: 완전 재설계)
+# Search Space Configuration
+# =============================================================================
+@dataclass
+class SearchSpaceConfig:
+    """
+    공격자 탐색 공간 설정
+    """
+    ip_range: int = 254            # IP 주소 범위 (10.13.0.1 ~ 10.13.0.254)
+    port_range: int = 65535        # 포트 범위
+    num_services: int = 9          # 서비스 수
+    
+    @property
+    def total_search_space(self) -> int:
+        """총 탐색 공간 크기"""
+        return self.ip_range * self.port_range
+
+
+# =============================================================================
+# Reward Weights
 # =============================================================================
 @dataclass
 class RewardWeights:
     """
-    보상 함수 가중치 - v09에서 완전 재설계
-    
-    문제점:
-    - v08에서 No MTD가 가장 높은 reward를 받음
-    - Cost 패널티가 너무 커서 방어 액션을 억제
-    - Breach 패널티가 불충분
-    
-    해결:
-    - Survival 보상 대폭 증가
-    - Cost 패널티 대폭 감소
-    - Breach 패널티 대폭 증가
-    - 액션 다양성 보상 추가
+    보상 함수 가중치
     """
     # === Survival/Breach (가장 중요) ===
-    survival_bonus: float = 500.0       # v08: 100 → v09: 500 (5배)
-    breach_penalty: float = -800.0      # v08: -100 → v09: -800 (8배)
+    survival_bonus: float = 500.0       # 에피소드 생존 보너스
+    breach_penalty: float = -800.0      # 침투 발생 시 패널티
+    
+    # === Step-level Rewards ===
+    survival_per_step: float = 1.0      # 스텝당 생존 보상
+    step_no_discovery: float = 0.5      # 발견 없을 때 보상
     
     # === Defense Effectiveness ===
-    des_weight: float = 200.0           # v08: 50 → v09: 200 (4배)
+    des_weight: float = 200.0           # DES 가중치
     mttc_weight: float = 2.0            # MTTC당 보상
     asr_weight: float = 50.0            # ASR 보상
     
-    # === Cost (대폭 감소) ===
-    cost_penalty: float = -0.05         # v08: -0.2 → v09: -0.05 (1/4)
+    # === Cost ===
+    cost_penalty: float = -0.05         # 비용 패널티
+    cost_weight: float = 0.1            # 비용 가중치 (reward 계산용)
     
-    # === Action Diversity Bonus (신규) ===
+    # === Action Diversity Bonus ===
     action_diversity_bonus: float = 30.0    # 다양한 액션 사용 시 보상
-    shuffle_usage_bonus: float = 10.0       # Shuffle 사용 보너스 (학습 유도)
-    
-    # === Step Rewards ===
-    step_survival: float = 1.0          # 스텝당 생존 보상
-    step_no_discovery: float = 0.5      # 발견 없을 때 보상
+    shuffle_usage_bonus: float = 10.0       # Shuffle 사용 보너스
     
     # === Attack Progress Penalties ===
     discovery_penalty: float = -5.0     # 서비스 발견당 패널티
     exploit_penalty: float = -20.0      # 익스플로잇당 패널티
     
+    # === MTD Bonuses ===
+    diversity_bonus: float = 20.0       # 다양성 보너스
+    redundancy_bonus: float = 15.0      # 중복성 보너스
+    confusion_bonus: float = 10.0       # 공격자 혼란 보너스
+    
     # === Decoy Rewards ===
-    decoy_hit_reward: float = 15.0      # 디코이 히트 보상 (v08: 5 → v09: 15)
+    decoy_hit_reward: float = 15.0      # 디코이 히트 보상
+    decoy_engagement_bonus: float = 10.0  # 디코이 유인 보너스
     decoy_active_reward: float = 2.0    # 활성 디코이당 보상
     
     # === Confusion Reward ===
@@ -128,37 +188,27 @@ class RewardWeights:
 
 
 # =============================================================================
-# Cost Configuration (v09: 비용 감소)
+# Cost Configuration
 # =============================================================================
 @dataclass
 class CostConfig:
     """
-    MTD 액션별 비용 - v09에서 감소
-    비용이 너무 높으면 RL이 방어 액션을 회피함
+    MTD 액션별 비용
     """
-    shuffle: float = 0.05           # v08: 0.1 → v09: 0.05
-    port_hop: float = 0.03          # v08: 0.05 → v09: 0.03
-    decoy: float = 0.02             # v08: 0.03 → v09: 0.02
-    blacklist: float = 0.02         # v08: 0.02 (유지)
-    service_swap: float = 0.05      # v08: 0.08 → v09: 0.05
+    shuffle: float = 0.05           # 셔플 비용
+    port_hop: float = 0.03          # 포트 호핑 비용
+    decoy: float = 0.02             # 디코이 비용
+    blacklist: float = 0.02         # 블랙리스트 비용
+    service_swap: float = 0.05      # 서비스 스왑 비용
 
 
 # =============================================================================
-# Curriculum Learning Configuration (v09: 개선)
+# Curriculum Learning Configuration
 # =============================================================================
 @dataclass
 class CurriculumConfig:
     """
-    Curriculum Learning 설정 - v09에서 개선
-    
-    문제점:
-    - v08에서 고수준 공격자에 대한 일반화 실패
-    - Phase 전환이 너무 급격
-    
-    해결:
-    - Phase별 에피소드 수 증가
-    - 더 점진적인 난이도 증가
-    - 복습 메커니즘 추가
+    Curriculum Learning 설정
     """
     # Phase별 에피소드 수 (총 800 에피소드)
     phase_episodes: List[int] = field(default_factory=lambda: [150, 150, 150, 200, 150])
@@ -169,7 +219,7 @@ class CurriculumConfig:
         [0, 1],        # Phase 1: + Hobbyist
         [1, 2],        # Phase 2: + Professional
         [2, 3],        # Phase 3: + Expert
-        [1, 2, 3, 4],  # Phase 4: 전체 (L0 제외하여 어려움 유지)
+        [1, 2, 3, 4],  # Phase 4: 전체 (L0 제외)
     ])
     
     # Phase별 Entropy coefficient (exploration 제어)
@@ -178,34 +228,51 @@ class CurriculumConfig:
         0.04,    # Phase 1
         0.03,    # Phase 2
         0.025,   # Phase 3
-        0.02,    # Phase 4: 여전히 적당한 exploration 유지
+        0.02,    # Phase 4
     ])
     
-    # 복습 비율 (이전 레벨 샘플링 비율)
+    # 복습 비율
     review_ratio: float = 0.2
+    
+    @property
+    def phases(self) -> List[Tuple[int, ...]]:
+        """Phase별 레벨을 튜플로 반환"""
+        return [tuple(levels) for levels in self.phase_levels]
+    
+    @property
+    def entropy_schedule(self) -> List[float]:
+        """Entropy 스케줄 반환"""
+        return self.phase_entropy
 
 
 # =============================================================================
-# PPO Hyperparameters (v09: 조정)
+# PPO Hyperparameters
 # =============================================================================
 @dataclass 
 class PPOConfig:
-    """PPO 하이퍼파라미터 - v09에서 exploration 강화"""
+    """PPO 하이퍼파라미터"""
     learning_rate: float = 3e-4
     gamma: float = 0.99
     gae_lambda: float = 0.95
     clip_epsilon: float = 0.2
     value_coef: float = 0.5
+    value_loss_coef: float = 0.5      # 별칭
     
-    # Entropy (v09: 증가)
-    entropy_coef_start: float = 0.05     # v08: 0.03 → v09: 0.05
-    entropy_coef_end: float = 0.02       # v08: 0.01 → v09: 0.02
-    entropy_decay_episodes: int = 600    # v08: 400 → v09: 600 (더 천천히 감소)
+    # Entropy
+    entropy_coef_start: float = 0.05
+    entropy_coef_end: float = 0.02
+    entropy_coef_final: float = 0.02  # 별칭
+    entropy_decay_episodes: int = 600
     
+    # Training
     max_grad_norm: float = 0.5
     update_epochs: int = 10
     batch_size: int = 64
     hidden_size: int = 256
+    
+    # Episodes
+    total_episodes: int = 500
+    max_steps: int = 200
 
 
 # =============================================================================
@@ -217,6 +284,7 @@ SEEKER_PROFILES = {
         "scan_rate": 0.03,
         "discovery_rate": 0.15,
         "exploit_rate": 0.08,
+        "exploit_success": 0.08,
         "lateral_rate": 0.02,
         "stealth": 0.1,
         "persistence": 0.2,
@@ -230,6 +298,7 @@ SEEKER_PROFILES = {
         "scan_rate": 0.05,
         "discovery_rate": 0.25,
         "exploit_rate": 0.12,
+        "exploit_success": 0.12,
         "lateral_rate": 0.05,
         "stealth": 0.25,
         "persistence": 0.35,
@@ -243,6 +312,7 @@ SEEKER_PROFILES = {
         "scan_rate": 0.08,
         "discovery_rate": 0.35,
         "exploit_rate": 0.20,
+        "exploit_success": 0.20,
         "lateral_rate": 0.10,
         "stealth": 0.5,
         "persistence": 0.5,
@@ -256,6 +326,7 @@ SEEKER_PROFILES = {
         "scan_rate": 0.12,
         "discovery_rate": 0.50,
         "exploit_rate": 0.30,
+        "exploit_success": 0.30,
         "lateral_rate": 0.15,
         "stealth": 0.7,
         "persistence": 0.7,
@@ -269,6 +340,7 @@ SEEKER_PROFILES = {
         "scan_rate": 0.15,
         "discovery_rate": 0.65,
         "exploit_rate": 0.40,
+        "exploit_success": 0.40,
         "lateral_rate": 0.20,
         "stealth": 0.85,
         "persistence": 0.9,
@@ -301,14 +373,12 @@ MTD_METRICS = {
         "reference": "Evans et al., ACSAC 2011",
         "range": "[0, 1]",
         "higher_better": True,
-        "note": "v09: 실제 설정 변경 반영하도록 수정",
     },
     "NED": {
         "name": "Normalized Entropy of Defense",
         "reference": "Cho et al., IEEE CNS 2020",
         "range": "[0, 1]",
         "higher_better": True,
-        "note": "v09: 방어 액션 엔트로피 기반으로 수정",
     },
     "ASP": {
         "name": "Attack Success Probability",
@@ -340,18 +410,25 @@ class MTDConfig:
     # Sub-configs
     thresholds: ActionThresholds = field(default_factory=ActionThresholds)
     rewards: RewardWeights = field(default_factory=RewardWeights)
+    reward: RewardWeights = field(default_factory=RewardWeights)  # 별칭
     cost: CostConfig = field(default_factory=CostConfig)
     curriculum: CurriculumConfig = field(default_factory=CurriculumConfig)
     ppo: PPOConfig = field(default_factory=PPOConfig)
+    search_space: SearchSpaceConfig = field(default_factory=SearchSpaceConfig)
     
     # Environment settings
     max_steps: int = 200
     num_services: int = 9
     num_decoys: int = 4
     
-    # Diversity tracking (v09 신규)
+    # Diversity tracking
     track_config_history: bool = True
     config_history_size: int = 50
+    
+    def __post_init__(self):
+        """Post-initialization to sync aliases"""
+        # reward와 rewards 동기화
+        self.reward = self.rewards
     
     def to_dict(self) -> Dict[str, Any]:
         return asdict(self)
@@ -382,35 +459,19 @@ class EpisodeStats:
     total_blacklist_updates: int = 0
     breach_occurred: bool = False
     breach_step: int = -1
+    total_steps: int = 0
     
-    # v09 신규: 액션 다양성 추적
+    # 액션 다양성 추적
     action_types_used: set = field(default_factory=set)
     config_change_count: int = 0
     
-    # v09 신규: 설정 변경 히스토리
+    # 설정 변경 히스토리
     config_history: List[str] = field(default_factory=list)
 
 
 # =============================================================================
-# Utility Functions
+# Helper Functions
 # =============================================================================
-def to_serializable(obj: Any) -> Any:
-    """객체를 JSON 직렬화 가능한 형태로 변환"""
-    if isinstance(obj, np.ndarray):
-        return obj.tolist()
-    elif isinstance(obj, np.integer):
-        return int(obj)
-    elif isinstance(obj, np.floating):
-        return float(obj)
-    elif isinstance(obj, set):
-        return list(obj)
-    elif isinstance(obj, dict):
-        return {k: to_serializable(v) for k, v in obj.items()}
-    elif isinstance(obj, list):
-        return [to_serializable(v) for v in obj]
-    return obj
-
-
 def get_default_config() -> MTDConfig:
     """기본 설정 반환"""
     return MTDConfig()
@@ -419,16 +480,16 @@ def get_default_config() -> MTDConfig:
 # =============================================================================
 # Version Info
 # =============================================================================
-VERSION = "0.9.0"
+VERSION = "0.8.5"
 VERSION_NOTES = """
-v09 주요 변경사항:
-1. 보상 함수 완전 재설계 (Breach 패널티 8배, Survival 보상 5배)
-2. 액션 Threshold 대폭 하향 (Shuffle 0.25→0.10)
-3. Cost 패널티 1/4로 감소
-4. CDI/NED 계산 로직 수정 예정 (environment에서)
-5. Curriculum Learning 개선 (총 800 에피소드, 복습 메커니즘)
-6. Entropy coefficient 증가 (exploration 강화)
-7. 액션 다양성 보상 추가
+v08.5 수정사항:
+1. scale_action 함수 추가
+2. SearchSpaceConfig 클래스 추가
+3. PPOConfig에 누락 필드 추가 (max_steps, total_episodes, value_loss_coef, entropy_coef_final)
+4. CurriculumConfig에 phases, entropy_schedule 프로퍼티 추가
+5. RewardWeights에 누락 필드 추가 (survival_per_step, cost_weight, diversity_bonus 등)
+6. MTDConfig에 search_space 필드 추가
+7. SEEKER_PROFILES에 exploit_success 필드 추가
 """
 
 if __name__ == "__main__":
@@ -446,6 +507,20 @@ if __name__ == "__main__":
     print(f"Breach Penalty: {config.rewards.breach_penalty}")
     print(f"Cost Penalty: {config.rewards.cost_penalty}")
     
+    print("\n=== Search Space ===")
+    print(f"Total Search Space: {config.search_space.total_search_space:,}")
+    
+    print("\n=== PPO Config ===")
+    print(f"Max Steps: {config.ppo.max_steps}")
+    print(f"Total Episodes: {config.ppo.total_episodes}")
+    
     print("\n=== Curriculum ===")
     print(f"Phase Episodes: {config.curriculum.phase_episodes}")
+    print(f"Phases: {config.curriculum.phases}")
     print(f"Total Episodes: {sum(config.curriculum.phase_episodes)}")
+    
+    print("\n=== Test scale_action ===")
+    test_action = np.array([-1, 0, 1, 0.5, -0.5, 0.3, -0.7])
+    scaled = scale_action(test_action)
+    print(f"Original: {test_action}")
+    print(f"Scaled:   {scaled}")

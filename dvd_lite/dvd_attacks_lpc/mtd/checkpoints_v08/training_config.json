@@ -40,23 +40,23 @@
   "state_dim": 17,
   "action_dim": 7,
   "feature_keys": [
-    "search_space_scanned_ratio",
-    "services_discovered_ratio",
-    "critical_discovered",
-    "exploitation_progress",
+    "scanned_ratio",
+    "services_found_ratio",
+    "critical_found_ratio",
+    "exploit_progress",
     "compromise_progress",
-    "current_diversity",
-    "current_redundancy",
-    "decoy_engagement_rate",
-    "energy_remaining_ratio",
-    "swap_active_ratio",
-    "steps_since_shuffle",
-    "steps_since_swap",
-    "attacker_scan_rate",
-    "last_shuffle_intensity",
-    "last_port_hop_intensity",
-    "last_decoy_ratio",
-    "last_swap_intensity"
+    "diversity_score",
+    "redundancy_score",
+    "time_since_shuffle",
+    "time_since_swap",
+    "active_decoys",
+    "decoy_hits",
+    "attacker_energy",
+    "episode_progress",
+    "config_changes",
+    "defense_entropy",
+    "attack_phase",
+    "threat_level"
   ],
   "action_keys": [
     "shuffle_intensity",
@@ -67,8 +67,8 @@
     "service_swap_intensity",
     "service_swap_target"
   ],
-  "search_space": 50200,
-  "best_reward": 260.15562688651335,
+  "search_space": 16645890,
+  "best_reward": 18752.312437083758,
   "best_des": 0.85,
-  "total_episodes": 500
+  "total_episodes": 800
 }
