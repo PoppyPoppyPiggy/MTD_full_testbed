@@ -1,0 +1,22 @@
+# W&B Sweep - Network Architecture Search
+# 네트워크 크기 최적화
+
+program: rl_train_v08.py
+method: grid
+metric:
+  name: best_reward
+  goal: maximize
+
+parameters:
+  hidden_size:
+    values: [64, 128, 256, 384, 512]
+
+command:
+  - ${env}
+  - python
+  - ${program}
+  - --curriculum
+  - --episodes=500
+  - --wandb
+  - --wandb-project=mtd-rl-arch-sweep
+  - --hidden-size=${hidden_size}

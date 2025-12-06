@@ -1,8 +1,8 @@
 {
   "args": {
     "test": false,
-    "episodes": 500,
-    "max_steps": 300,
+    "episodes": 1000,
+    "max_steps": 200,
     "seed": 42,
     "cpu": false,
     "hidden_size": 256,
@@ -14,8 +14,8 @@
       3,
       4
     ],
-    "train_all_levels": true,
-    "curriculum": false,
+    "train_all_levels": false,
+    "curriculum": true,
     "model": null,
     "resume": null,
     "checkpoint_dir": "checkpoints_v08",
@@ -25,7 +25,17 @@
     "eval_all_levels": false,
     "wandb": true,
     "wandb_project": "mtd-rl-v08",
-    "wandb_name": "all-levels-001"
+    "wandb_name": "exp_curriculum_final",
+    "wandb_tags": "curriculum,final,v08",
+    "wandb_notes": "\ucd5c\uc885 \uc2e4\ud5d8",
+    "wandb_save_model": true,
+    "sweep": false,
+    "sweep_agent": false,
+    "sweep_id": null,
+    "sweep_count": 10,
+    "hidden-size": 256,
+    "learning-rate": 0.0003,
+    "batch-size": 64
   },
   "state_dim": 17,
   "action_dim": 7,
@@ -58,6 +68,7 @@
     "service_swap_target"
   ],
   "search_space": 50200,
-  "best_reward": 331.642333984375,
+  "best_reward": 260.15562688651335,
+  "best_des": 0.85,
   "total_episodes": 500
 }
