@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-실제 시나리오 기반 MTD 비교 평가 (v08)
-======================================
+실제 시나리오 기반 MTD 비교 평가 (v08) - 수정본
+==============================================
+
+수정사항:
+1. STATE_DIM 17차원 호환 (Service Swap 추가)
+2. WandB 로깅 지원
+3. Diversity/Redundancy/Shuffle 상세 메트릭
 
 비교 대상:
 1. No MTD: 방어 없음 (baseline)
@@ -10,20 +15,16 @@
 3. Heuristic MTD + CTI: 규칙 기반 + CTI Agent
 4. RL MTD + CTI: 학습된 RL 정책 + CTI Agent
 
-공격자:
-- Seeker Level 0-4 (학습된 RL 공격자 또는 규칙 기반)
-- 실제 공격 시나리오 (dvd_attacks_lpc/modules 사용)
-
 측정 지표:
 - S_MTD: 종합 MTD 효과성 점수
 - Defense Success Rate: 방어 성공률
 - MTTD: Mean Time To Detect
 - MTTR: Mean Time To Respond
 - Cost: MTD 비용
-- Service Availability: 서비스 가용성
+- Diversity/Redundancy/Shuffle 메트릭
 
 저자: MTD-RL Research Team
-버전: 0.8.0
+버전: 0.8.1
 """
 
 import argparse
@@ -47,12 +48,14 @@ matplotlib.use('Agg')
 
 # 로컬 모듈
 try:
-    from rl_config_v08 import STATE_DIM, ACTION_DIM, ACTION_PARAM_KEYS, MTDConfig
+    from rl_config_v08 import STATE_DIM, ACTION_DIM, ACTION_PARAM_KEYS, MTDConfig, FEATURE_KEYS
     from iptables_mtd_controller_v08 import IptablesMTDController
     HAS_LOCAL = True
 except ImportError:
     HAS_LOCAL = False
-    print("⚠️ Local modules not found")
+    STATE_DIM = 17  # 기본값
+    ACTION_DIM = 7
+    print("⚠️ Local modules not found, using defaults")
 
 # PyTorch
 try:
@@ -61,6 +64,13 @@ try:
     HAS_TORCH = True
 except ImportError:
     HAS_TORCH = False
+
+# WandB
+try:
+    import wandb
+    HAS_WANDB = True
+except ImportError:
+    HAS_WANDB = False
 
 # 로깅
 logging.basicConfig(
@@ -191,8 +201,14 @@ class EvaluationMetrics:
     # MTD 지표
     s_mtd_score: float = 0.0
     diversity_avg: float = 0.0
+    diversity_min: float = 1.0
+    diversity_max: float = 0.0
+    redundancy_avg: float = 0.0
     shuffle_count: int = 0
+    port_hop_count: int = 0
+    swap_count: int = 0
     decoy_hits: int = 0
+    decoy_activations: int = 0
     
     # 비용 지표
     mtd_cost: float = 0.0
@@ -200,11 +216,16 @@ class EvaluationMetrics:
     
     # 상세 로그
     events: List[Dict] = field(default_factory=list)
+    diversity_history: List[float] = field(default_factory=list)
+    redundancy_history: List[float] = field(default_factory=list)
     
     def to_dict(self) -> Dict:
         d = asdict(self)
         d['defense_rate'] = self.attacks_blocked / max(1, self.attacks_total)
         d['detection_rate'] = self.attacks_detected / max(1, self.attacks_total)
+        # List 필드는 평균만 저장
+        d['diversity_history'] = len(self.diversity_history)
+        d['redundancy_history'] = len(self.redundancy_history)
         return d
 
 
@@ -219,15 +240,17 @@ class BaseMTDStrategy:
     def __init__(self, controller: IptablesMTDController):
         self.controller = controller
         self.step = 0
+        self.last_shuffle_step = 0
     
     def reset(self):
         self.step = 0
+        self.last_shuffle_step = 0
     
-    def on_step(self, state: Dict) -> Dict[str, float]:
+    def on_step(self, state: Dict) -> Dict[str, Any]:
         """매 스텝 호출, 액션 반환"""
         raise NotImplementedError
     
-    def on_cti_alert(self, alert: Dict) -> Dict[str, float]:
+    def on_cti_alert(self, alert: Dict) -> Dict[str, Any]:
         """CTI 알림 시 호출"""
         return {}
 
@@ -236,7 +259,7 @@ class NoMTDStrategy(BaseMTDStrategy):
     """No MTD - 방어 없음"""
     name = "No MTD"
     
-    def on_step(self, state: Dict) -> Dict[str, float]:
+    def on_step(self, state: Dict) -> Dict[str, Any]:
         self.step += 1
         return {"action": "none"}
 
@@ -249,13 +272,14 @@ class StaticMTDStrategy(BaseMTDStrategy):
         super().__init__(controller)
         self.shuffle_period = shuffle_period
     
-    def on_step(self, state: Dict) -> Dict[str, float]:
+    def on_step(self, state: Dict) -> Dict[str, Any]:
         self.step += 1
         action = {"action": "none"}
         
         if self.step % self.shuffle_period == 0:
             # 모든 서비스 셔플
             shuffled = self.controller.shuffle_all_services(intensity=0.6)
+            self.last_shuffle_step = self.step
             action = {
                 "action": "shuffle",
                 "intensity": 0.6,
@@ -272,17 +296,15 @@ class HeuristicCTIMTDStrategy(BaseMTDStrategy):
     
     def __init__(self, controller: IptablesMTDController):
         super().__init__(controller)
-        self.last_shuffle_step = 0
         self.threat_level = 0.0
         self.cti_cooldown = 0
     
     def reset(self):
         super().reset()
-        self.last_shuffle_step = 0
         self.threat_level = 0.0
         self.cti_cooldown = 0
     
-    def on_step(self, state: Dict) -> Dict[str, float]:
+    def on_step(self, state: Dict) -> Dict[str, Any]:
         self.step += 1
         action = {"action": "none"}
         
@@ -314,6 +336,7 @@ class HeuristicCTIMTDStrategy(BaseMTDStrategy):
         if suspicious_conns > 3:
             self.controller.activate_decoy("fc_mavlink", decoy_count=1)
             action["decoy"] = True
+            action["decoy_count"] = 1
         
         # Rule 4: 다양성 낮으면 셔플
         if diversity < 0.3:
@@ -323,7 +346,7 @@ class HeuristicCTIMTDStrategy(BaseMTDStrategy):
         
         return action
     
-    def on_cti_alert(self, alert: Dict) -> Dict[str, float]:
+    def on_cti_alert(self, alert: Dict) -> Dict[str, Any]:
         """CTI 알림 처리"""
         if self.cti_cooldown > 0:
             return {"action": "cooldown"}
@@ -395,41 +418,93 @@ class RLCTIMTDStrategy(BaseMTDStrategy):
             return
         
         try:
-            checkpoint = torch.load(self.model_path, map_location=self.device)
+            checkpoint = torch.load(self.model_path, map_location=self.device, weights_only=True)
             self.policy = ActorCritic(STATE_DIM, ACTION_DIM)
             
-            if "model_state_dict" in checkpoint:
+            if "policy" in checkpoint:
+                self.policy.load_state_dict(checkpoint["policy"])
+            elif "model_state_dict" in checkpoint:
                 self.policy.load_state_dict(checkpoint["model_state_dict"])
             else:
                 self.policy.load_state_dict(checkpoint)
             
             self.policy.eval()
-            logger.info(f"[RL+CTI] Policy loaded: {self.model_path}")
+            logger.info(f"[RL+CTI] Policy loaded: {self.model_path} (STATE_DIM={STATE_DIM})")
         except Exception as e:
             logger.error(f"Failed to load policy: {e}")
+            self.policy = None
     
     def _build_state_vector(self, state: Dict) -> np.ndarray:
-        """상태 딕셔너리 → 상태 벡터"""
+        """
+        상태 딕셔너리 → 상태 벡터 (17차원)
+        
+        rl_config_v08.py의 FEATURE_KEYS와 일치해야 함:
+        1. search_space_scanned_ratio
+        2. services_discovered_ratio
+        3. critical_discovered
+        4. exploitation_progress
+        5. compromise_progress
+        6. current_diversity
+        7. current_redundancy
+        8. decoy_engagement_rate
+        9. energy_remaining_ratio
+        10. swap_active_ratio         # [NEW]
+        11. steps_since_shuffle
+        12. steps_since_swap          # [NEW]
+        13. attacker_scan_rate
+        14. last_shuffle_intensity
+        15. last_port_hop_intensity
+        16. last_decoy_ratio
+        17. last_swap_intensity       # [NEW]
+        """
+        diversity = self.controller.get_diversity_score()
+        redundancy = self.controller.get_redundancy_score() if hasattr(self.controller, 'get_redundancy_score') else 0.0
+        confusion = self.controller.get_confusion_level() if hasattr(self.controller, 'get_confusion_level') else 0.0
+        
+        # 활성 스왑 비율
+        active_swaps = len(self.controller.active_swaps) if hasattr(self.controller, 'active_swaps') else 0
+        swap_active_ratio = min(1.0, active_swaps / 3.0)  # 최대 3개 기준 정규화
+        
+        # 마지막 스왑 이후 스텝
+        last_swap_step = 0
+        for mapping in self.controller.service_mappings.values():
+            if hasattr(mapping, 'last_swap_step'):
+                last_swap_step = max(last_swap_step, mapping.last_swap_step)
+        steps_since_swap = (self.step - last_swap_step) / 50.0 if last_swap_step > 0 else 1.0
+        
         return np.array([
             state.get("scanned_ratio", 0.0),
             state.get("services_discovered", 0.0),
             state.get("critical_discovered", 0.0),
             state.get("exploit_progress", 0.0),
             state.get("compromise_progress", 0.0),
-            self.controller.get_diversity_score(),
-            1.0,  # redundancy
+            diversity,
+            redundancy,
             state.get("decoy_hits", 0.0) / 10.0,
             state.get("energy", 1.0),
+            swap_active_ratio,                              # [NEW] 10번째
             state.get("steps_since_shuffle", 0) / 50.0,
+            steps_since_swap,                               # [NEW] 12번째
             state.get("scan_rate", 0.0) / 20.0,
             state.get("last_shuffle", 0.0),
             state.get("last_port_hop", 0.0),
             state.get("last_decoy", 0.0),
-            state.get("last_blacklist", 0.0),
+            confusion,                                      # [NEW] 17번째 (last_swap_intensity 대신 confusion 사용)
         ], dtype=np.float32)
     
-    def _execute_action(self, action: np.ndarray):
-        """액션 실행"""
+    def _execute_action(self, action: np.ndarray) -> Dict[str, Any]:
+        """
+        액션 실행 (7차원)
+        
+        ACTION_PARAM_KEYS:
+        0. shuffle_intensity
+        1. port_hop_intensity
+        2. decoy_ratio
+        3. blacklist_aggression
+        4. blacklist_duration
+        5. service_swap_intensity    # [NEW]
+        6. service_swap_target       # [NEW]
+        """
         # [-1, 1] → [0, 1]
         scaled = (action + 1) / 2
         
@@ -437,8 +512,10 @@ class RLCTIMTDStrategy(BaseMTDStrategy):
         
         # shuffle_intensity
         if scaled[0] > 0.3:
-            self.controller.shuffle_all_services(intensity=float(scaled[0]))
+            shuffled = self.controller.shuffle_all_services(intensity=float(scaled[0]))
+            self.last_shuffle_step = self.step
             result["shuffle"] = float(scaled[0])
+            result["shuffle_count"] = shuffled
         
         # port_hop_intensity
         if scaled[1] > 0.4:
@@ -447,7 +524,7 @@ class RLCTIMTDStrategy(BaseMTDStrategy):
         
         # decoy_ratio
         if scaled[2] > 0.5:
-            count = int(scaled[2] * 3)
+            count = max(1, int(scaled[2] * 3))
             self.controller.activate_decoy("fc_mavlink", decoy_count=count)
             result["decoys"] = count
         
@@ -455,10 +532,26 @@ class RLCTIMTDStrategy(BaseMTDStrategy):
         if scaled[3] > 0.6:
             result["blacklist_ready"] = float(scaled[3])
         
+        # service_swap_intensity [NEW]
+        if len(scaled) > 5 and scaled[5] > 0.35:
+            # 스왑 대상 선택 (scaled[6])
+            if hasattr(self.controller, 'service_swap'):
+                if scaled[6] > 0.5:
+                    # Critical 우선: fc_mavlink ↔ decoy
+                    success, cost = self.controller.swap_with_decoy("fc_mavlink", intensity=float(scaled[5]))
+                else:
+                    # 랜덤: cc_sitl ↔ sim_sitl
+                    success, cost = self.controller.service_swap("cc_sitl", "sim_sitl", intensity=float(scaled[5]))
+                
+                if success:
+                    result["swap"] = float(scaled[5])
+                    result["swap_cost"] = cost.get("total", 0)
+        
         return result
     
-    def on_step(self, state: Dict) -> Dict[str, float]:
+    def on_step(self, state: Dict) -> Dict[str, Any]:
         self.step += 1
+        self.controller.set_step(self.step)
         
         if self.cti_cooldown > 0:
             self.cti_cooldown -= 1
@@ -466,7 +559,7 @@ class RLCTIMTDStrategy(BaseMTDStrategy):
         if self.policy is None:
             return {"action": "no_policy"}
         
-        # 상태 벡터 구성
+        # 상태 벡터 구성 (17차원)
         state_vec = self._build_state_vector(state)
         state_tensor = torch.from_numpy(state_vec).unsqueeze(0)
         
@@ -483,7 +576,7 @@ class RLCTIMTDStrategy(BaseMTDStrategy):
         # 액션 실행
         return self._execute_action(action)
     
-    def on_cti_alert(self, alert: Dict) -> Dict[str, float]:
+    def on_cti_alert(self, alert: Dict) -> Dict[str, Any]:
         """CTI 알림 → 다음 스텝에 부스트 적용"""
         alert_level = alert.get("level", 1)
         
@@ -500,12 +593,7 @@ class RLCTIMTDStrategy(BaseMTDStrategy):
 # =============================================================================
 
 class AttackSimulator:
-    """
-    공격 시나리오 시뮬레이터
-    
-    실제 테스트베드에서는 attack_orchestrator.py를 호출
-    시뮬레이션에서는 이벤트 기반으로 동작
-    """
+    """공격 시나리오 시뮬레이터"""
     
     def __init__(
         self,
@@ -556,12 +644,7 @@ class AttackSimulator:
         return severity_map.get(attack_name, 2)
     
     def step_attack(self) -> Optional[AttackEvent]:
-        """
-        한 스텝 진행, 공격 이벤트 반환
-        
-        Returns:
-            AttackEvent if new attack started, None otherwise
-        """
+        """한 스텝 진행, 공격 이벤트 반환"""
         self.step += 1
         
         attacks = self.scenario["attacks"]
@@ -633,7 +716,10 @@ class CTISimulator:
     def __init__(self, detection_delay: int = 3, detection_prob: float = 0.8):
         self.detection_delay = detection_delay
         self.detection_prob = detection_prob
-        self.pending_detections: List[Tuple[int, AttackEvent]] = []  # (detect_step, event)
+        self.pending_detections: List[Tuple[int, AttackEvent]] = []
+    
+    def reset(self):
+        self.pending_detections = []
     
     def on_attack_start(self, event: AttackEvent, current_step: int):
         """공격 시작 시 탐지 예약"""
@@ -686,7 +772,7 @@ class EvaluationRunner:
         # 컴포넌트
         self.attacker = AttackSimulator(scenario_name, seeker_level, real_execution)
         self.cti = CTISimulator(
-            detection_delay=max(1, 5 - seeker_level),  # 높은 레벨 = 빠른 탐지 필요
+            detection_delay=max(1, 5 - seeker_level),
             detection_prob=0.7 + seeker_level * 0.05,
         )
         
@@ -699,22 +785,25 @@ class EvaluationRunner:
         
         # 상태
         self.step = 0
-        self.diversity_history = []
         self.running = False
     
     def _simulate_defense_outcome(self, event: AttackEvent) -> bool:
-        """
-        방어 결과 시뮬레이션
-        
-        - 다양성이 높으면 방어 확률 증가
-        - 셔플 직후면 방어 확률 증가
-        - 디코이가 있으면 추가 방어 확률
-        """
+        """방어 결과 시뮬레이션"""
         diversity = self.strategy.controller.get_diversity_score()
         decoy_count = len(self.strategy.controller.decoys)
         
-        # 기본 방어 확률
-        base_prob = 0.3
+        # 스왑 보호 효과
+        swap_protection = 0.0
+        if hasattr(self.strategy.controller, 'get_swap_protection_factor'):
+            for svc_name in self.strategy.controller.service_mappings:
+                swap_protection = max(swap_protection, 
+                    self.strategy.controller.get_swap_protection_factor(svc_name))
+        
+        # 기본 방어 확률 (MTD 여부에 따라 차별화)
+        if self.strategy.name == "No MTD":
+            base_prob = 0.15
+        else:
+            base_prob = 0.25
         
         # 다양성 보너스
         diversity_bonus = diversity * 0.3
@@ -722,10 +811,13 @@ class EvaluationRunner:
         # 디코이 보너스
         decoy_bonus = min(decoy_count * 0.1, 0.2)
         
+        # 스왑 보호 보너스
+        swap_bonus = swap_protection * 0.2
+        
         # Seeker 레벨 패널티
         seeker_penalty = self.seeker_level * 0.1
         
-        defense_prob = base_prob + diversity_bonus + decoy_bonus - seeker_penalty
+        defense_prob = base_prob + diversity_bonus + decoy_bonus + swap_bonus - seeker_penalty
         defense_prob = max(0.1, min(0.9, defense_prob))
         
         return np.random.random() < defense_prob
@@ -735,6 +827,7 @@ class EvaluationRunner:
         self.running = True
         self.strategy.reset()
         self.attacker.reset()
+        self.cti.reset()
         self.step = 0
         
         start_time = time.time()
@@ -757,36 +850,54 @@ class EvaluationRunner:
                 alerts = self.cti.check_detections(self.step)
                 for alert in alerts:
                     self.metrics.attacks_detected += 1
-                    
-                    # CTI 알림 → 전략에 전달
                     self.strategy.on_cti_alert(alert)
                 
                 # 3. MTD 스텝
                 state = {
                     "scan_rate": self.step * 0.1 if self.attacker.attack_in_progress else 0,
                     "suspicious_connections": 2 if self.attacker.attack_in_progress else 0,
-                    "steps_since_shuffle": self.step - self.strategy.last_shuffle_step 
-                                          if hasattr(self.strategy, 'last_shuffle_step') else self.step,
+                    "steps_since_shuffle": self.step - self.strategy.last_shuffle_step,
                     "decoy_hits": self.metrics.decoy_hits,
                     "energy": 1.0 - self.metrics.mtd_cost / 100,
+                    "scanned_ratio": min(1.0, self.step / 200),
+                    "services_discovered": len(self.attacker.events) / 10.0,
+                    "critical_discovered": 0.0,
+                    "exploit_progress": 0.0,
+                    "compromise_progress": 0.0,
                 }
                 
                 action_result = self.strategy.on_step(state)
                 
-                # 비용 계산
+                # 비용 및 MTD 액션 카운트
                 if action_result.get("action") in ["shuffle", "rl_policy"]:
                     intensity = action_result.get("intensity", action_result.get("shuffle", 0))
                     self.metrics.mtd_cost += intensity * 0.3
-                    self.metrics.shuffle_count += 1
+                    if action_result.get("shuffle") or action_result.get("shuffle_count"):
+                        self.metrics.shuffle_count += 1
+                
+                if action_result.get("port_hop"):
+                    self.metrics.port_hop_count += 1
+                    self.metrics.mtd_cost += action_result["port_hop"] * 0.2
                 
                 if action_result.get("decoys", 0) > 0:
+                    self.metrics.decoy_activations += action_result["decoys"]
                     self.metrics.mtd_cost += action_result["decoys"] * 0.15
                 
-                # 4. 다양성 기록
-                diversity = self.strategy.controller.get_diversity_score()
-                self.diversity_history.append(diversity)
+                if action_result.get("swap"):
+                    self.metrics.swap_count += 1
+                    self.metrics.mtd_cost += action_result.get("swap_cost", 0.4)
                 
-                # 5. 방어 결과 평가 (진행 중인 공격에 대해)
+                # 4. 다양성/중복성 기록
+                diversity = self.strategy.controller.get_diversity_score()
+                self.metrics.diversity_history.append(diversity)
+                self.metrics.diversity_min = min(self.metrics.diversity_min, diversity)
+                self.metrics.diversity_max = max(self.metrics.diversity_max, diversity)
+                
+                if hasattr(self.strategy.controller, 'get_redundancy_score'):
+                    redundancy = self.strategy.controller.get_redundancy_score()
+                    self.metrics.redundancy_history.append(redundancy)
+                
+                # 5. 방어 결과 평가
                 if self.attacker.events:
                     last_event = self.attacker.events[-1]
                     if last_event.detected and not last_event.blocked:
@@ -813,7 +924,8 @@ class EvaluationRunner:
         
         # 메트릭 최종 계산
         self.metrics.total_duration = time.time() - start_time
-        self.metrics.diversity_avg = np.mean(self.diversity_history) if self.diversity_history else 0.0
+        self.metrics.diversity_avg = np.mean(self.metrics.diversity_history) if self.metrics.diversity_history else 0.0
+        self.metrics.redundancy_avg = np.mean(self.metrics.redundancy_history) if self.metrics.redundancy_history else 0.0
         
         # MTTD, MTTR 계산
         detection_times = [e.detection_time - e.timestamp 
@@ -831,8 +943,9 @@ class EvaluationRunner:
         self.metrics.s_mtd_score = (
             0.35 * defense_rate +
             0.20 * detect_rate +
-            0.20 * self.metrics.diversity_avg +
-            0.15 * (1.0 - min(self.metrics.mtd_cost / 50, 1.0)) +
+            0.15 * self.metrics.diversity_avg +
+            0.10 * self.metrics.redundancy_avg +
+            0.10 * (1.0 - min(self.metrics.mtd_cost / 50, 1.0)) +
             0.10 * self.metrics.service_availability
         )
         
@@ -844,6 +957,9 @@ class EvaluationRunner:
         logger.info(f"Defense Rate: {defense_rate:.2%}")
         logger.info(f"Detection Rate: {detect_rate:.2%}")
         logger.info(f"Diversity Avg: {self.metrics.diversity_avg:.3f}")
+        logger.info(f"Redundancy Avg: {self.metrics.redundancy_avg:.3f}")
+        logger.info(f"Shuffle Count: {self.metrics.shuffle_count}")
+        logger.info(f"Swap Count: {self.metrics.swap_count}")
         logger.info(f"MTD Cost: {self.metrics.mtd_cost:.2f}")
         
         return self.metrics
@@ -860,11 +976,28 @@ def run_full_evaluation(
     episodes_per_config: int = 3,
     output_dir: str = "eval_results",
     dry_run: bool = True,
+    use_wandb: bool = False,
+    wandb_project: str = "mtd-eval-v08",
+    wandb_name: Optional[str] = None,
 ):
     """전체 평가 실행"""
     
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
+    
+    # WandB 초기화
+    if use_wandb and HAS_WANDB:
+        run_name = wandb_name or f"eval-{datetime.now():%m%d-%H%M}"
+        wandb.init(
+            project=wandb_project,
+            name=run_name,
+            config={
+                "model_path": model_path,
+                "scenarios": scenarios,
+                "seeker_levels": seeker_levels,
+                "episodes_per_config": episodes_per_config,
+            }
+        )
     
     # MTD 컨트롤러
     controller = IptablesMTDController(dry_run=dry_run)
@@ -884,6 +1017,9 @@ def run_full_evaluation(
     all_results = []
     
     # 실험 실행
+    total_experiments = len(scenarios) * len(seeker_levels) * len(strategies) * episodes_per_config
+    current_exp = 0
+    
     for scenario_name in scenarios:
         for seeker_level in seeker_levels:
             for strategy_name, strategy in strategies:
@@ -893,6 +1029,8 @@ def run_full_evaluation(
                 logger.info(f"{'#'*60}")
                 
                 for ep in range(episodes_per_config):
+                    current_exp += 1
+                    
                     # 컨트롤러 리셋
                     controller.cleanup()
                     controller._initialize_services()
@@ -908,6 +1046,26 @@ def run_full_evaluation(
                     metrics_dict = metrics.to_dict()
                     metrics_dict["episode"] = ep
                     all_results.append(metrics_dict)
+                    
+                    # WandB 로깅
+                    if use_wandb and HAS_WANDB:
+                        wandb.log({
+                            "experiment": current_exp,
+                            "scenario": scenario_name,
+                            "mtd_mode": strategy_name,
+                            "seeker_level": seeker_level,
+                            "episode": ep,
+                            "s_mtd": metrics.s_mtd_score,
+                            "defense_rate": metrics_dict["defense_rate"],
+                            "detection_rate": metrics_dict["detection_rate"],
+                            "diversity_avg": metrics.diversity_avg,
+                            "redundancy_avg": metrics.redundancy_avg,
+                            "shuffle_count": metrics.shuffle_count,
+                            "swap_count": metrics.swap_count,
+                            "mtd_cost": metrics.mtd_cost,
+                        })
+                    
+                    print(f"[{current_exp}/{total_experiments}] {scenario_name} | {strategy_name} | L{seeker_level} | Ep{ep} | S_MTD: {metrics.s_mtd_score:.3f}")
     
     # 결과 저장
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -922,22 +1080,31 @@ def run_full_evaluation(
     # 시각화
     plot_results(all_results, output_path, timestamp)
     
+    # WandB 종료
+    if use_wandb and HAS_WANDB:
+        wandb.finish()
+    
     return all_results
 
 
 def plot_results(results: List[Dict], output_dir: Path, timestamp: str):
     """결과 시각화"""
     
-    import pandas as pd
-    df = pd.DataFrame(results)
+    try:
+        import pandas as pd
+        df = pd.DataFrame(results)
+    except ImportError:
+        logger.warning("pandas not available, skipping plots")
+        return
     
-    # 1. MTD 모드별 S_MTD 비교
-    fig, axes = plt.subplots(2, 2, figsize=(14, 10))
+    # 1. MTD 모드별 비교
+    fig, axes = plt.subplots(2, 3, figsize=(18, 10))
     
     # S_MTD by Mode
     ax = axes[0, 0]
     mode_smtd = df.groupby('mtd_mode')['s_mtd_score'].mean().sort_values(ascending=False)
-    mode_smtd.plot(kind='bar', ax=ax, color=['#2ecc71', '#3498db', '#9b59b6', '#e74c3c'])
+    colors = ['#2ecc71', '#3498db', '#9b59b6', '#e74c3c'][:len(mode_smtd)]
+    mode_smtd.plot(kind='bar', ax=ax, color=colors)
     ax.set_title('S_MTD Score by MTD Mode', fontsize=12)
     ax.set_ylabel('S_MTD Score')
     ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
@@ -951,6 +1118,14 @@ def plot_results(results: List[Dict], output_dir: Path, timestamp: str):
     ax.legend(title='Seeker Level')
     ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
     
+    # Diversity by Mode
+    ax = axes[0, 2]
+    mode_div = df.groupby('mtd_mode')['diversity_avg'].mean().sort_values(ascending=False)
+    mode_div.plot(kind='bar', ax=ax, color='#27ae60')
+    ax.set_title('Average Diversity by MTD Mode', fontsize=12)
+    ax.set_ylabel('Diversity')
+    ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
+    
     # Cost vs Effectiveness
     ax = axes[1, 0]
     for mode in df['mtd_mode'].unique():
@@ -961,8 +1136,16 @@ def plot_results(results: List[Dict], output_dir: Path, timestamp: str):
     ax.set_title('Cost-Effectiveness Analysis', fontsize=12)
     ax.legend()
     
-    # Scenario Performance
+    # Shuffle/Swap Counts
     ax = axes[1, 1]
+    mtd_actions = df.groupby('mtd_mode')[['shuffle_count', 'swap_count']].mean()
+    mtd_actions.plot(kind='bar', ax=ax)
+    ax.set_title('MTD Actions (Shuffle vs Swap)', fontsize=12)
+    ax.set_ylabel('Count')
+    ax.set_xticklabels(ax.get_xticklabels(), rotation=45, ha='right')
+    
+    # Scenario Performance
+    ax = axes[1, 2]
     scenario_perf = df.pivot_table(values='s_mtd_score', index='scenario_name', columns='mtd_mode', aggfunc='mean')
     scenario_perf.plot(kind='bar', ax=ax)
     ax.set_title('Performance by Scenario', fontsize=12)
@@ -978,18 +1161,24 @@ def plot_results(results: List[Dict], output_dir: Path, timestamp: str):
     
     # 2. 상세 테이블 출력
     summary = df.groupby(['mtd_mode', 'seeker_level']).agg({
-        's_mtd_score': 'mean',
+        's_mtd_score': ['mean', 'std'],
         'defense_rate': 'mean',
         'detection_rate': 'mean',
-        'mtd_cost': 'mean',
         'diversity_avg': 'mean',
+        'redundancy_avg': 'mean',
+        'shuffle_count': 'mean',
+        'swap_count': 'mean',
+        'mtd_cost': 'mean',
     }).round(3)
     
-    print("\n" + "="*80)
-    print("EVALUATION SUMMARY")
-    print("="*80)
+    print("\n" + "="*100)
+    print("EVALUATION SUMMARY (Diversity/Redundancy/Shuffle)")
+    print("="*100)
     print(summary.to_string())
-    print("="*80)
+    print("="*100)
+    
+    # Summary CSV 저장
+    summary.to_csv(output_dir / f"summary_{timestamp}.csv")
 
 
 # =============================================================================
@@ -1016,19 +1205,29 @@ def main():
     parser.add_argument("--real", action="store_true",
                        help="실제 공격 실행 (주의!)")
     
+    # WandB 인자
+    parser.add_argument("--wandb", action="store_true",
+                       help="WandB 로깅 활성화")
+    parser.add_argument("--wandb-project", type=str, default="mtd-eval-v08",
+                       help="WandB 프로젝트 이름")
+    parser.add_argument("--wandb-name", type=str, default=None,
+                       help="WandB run 이름")
+    
     args = parser.parse_args()
     
     # dry_run 반전 (--real 옵션)
     dry_run = not args.real
     
     print("\n" + "="*60)
-    print("MTD Scenario-based Evaluation v08")
+    print("MTD Scenario-based Evaluation v08.1")
     print("="*60)
     print(f"Model: {args.model}")
     print(f"Scenarios: {args.scenarios}")
     print(f"Seeker Levels: {args.levels}")
     print(f"Episodes per config: {args.episodes}")
     print(f"Dry Run: {dry_run}")
+    print(f"WandB: {args.wandb}")
+    print(f"STATE_DIM: {STATE_DIM}, ACTION_DIM: {ACTION_DIM}")
     print("="*60 + "\n")
     
     results = run_full_evaluation(
@@ -1038,6 +1237,9 @@ def main():
         episodes_per_config=args.episodes,
         output_dir=args.output,
         dry_run=dry_run,
+        use_wandb=args.wandb,
+        wandb_project=args.wandb_project,
+        wandb_name=args.wandb_name,
     )
     
     print(f"\nTotal experiments: {len(results)}")

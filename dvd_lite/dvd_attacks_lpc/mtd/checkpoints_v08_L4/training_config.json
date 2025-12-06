@@ -1,12 +1,12 @@
 {
   "args": {
     "test": false,
-    "episodes": 500,
-    "max_steps": 300,
+    "episodes": 600,
+    "max_steps": 200,
     "seed": 42,
     "cpu": false,
     "hidden_size": 256,
-    "seeker_level": 1,
+    "seeker_level": 4,
     "seeker_levels": [
       0,
       1,
@@ -14,18 +14,18 @@
       3,
       4
     ],
-    "train_all_levels": true,
+    "train_all_levels": false,
     "curriculum": false,
     "model": null,
     "resume": null,
-    "checkpoint_dir": "checkpoints_v08",
-    "save_interval": 100,
+    "checkpoint_dir": "checkpoints_v08_L4",
+    "save_interval": 50,
     "log_interval": 10,
     "eval_episodes": 50,
     "eval_all_levels": false,
     "wandb": true,
-    "wandb_project": "mtd-rl-v08",
-    "wandb_name": "all-levels-001"
+    "wandb_project": "mtd-rl-v08-levels",
+    "wandb_name": "L4-apt"
   },
   "state_dim": 17,
   "action_dim": 7,
@@ -58,6 +58,6 @@
     "service_swap_target"
   ],
   "search_space": 50200,
-  "best_reward": 331.642333984375,
-  "total_episodes": 500
+  "best_reward": 383.8793029785156,
+  "total_episodes": 600
 }
