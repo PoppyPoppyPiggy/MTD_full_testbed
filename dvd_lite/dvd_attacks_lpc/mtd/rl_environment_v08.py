@@ -8,9 +8,10 @@ MTD RL Environment v08 - 강화학습 환경 (학술적 지표 포함)
 2. Shannon Entropy 기반 다양성 계산
 3. 적극적 방어 유도를 위한 보상 체계 개선
 4. 공격자 시뮬레이션 현실성 개선
+5. [v0.8.7] MTD 액션이 방어 확률에 직접 영향하도록 수정
 
 저자: MTD-RL Research Team
-버전: 0.8.3
+버전: 0.8.7
 """
 from __future__ import annotations
 
@@ -86,7 +87,7 @@ class AttackerState:
 # =============================================================================
 class MTDEnvironment(gym.Env):
     """
-    MTD 강화학습 환경 v08.3 - 학술적 지표 포함
+    MTD 강화학습 환경 v08.7 - MTD 액션이 방어에 직접 영향
     
     학술적 MTD 지표:
     - MTTC: Mean Time To Compromise
@@ -141,6 +142,9 @@ class MTDEnvironment(gym.Env):
         self.diversity_history: List[float] = []
         self.redundancy_history: List[float] = []
         self.action_history: List[np.ndarray] = []
+        
+        # [v0.8.7] MTD 액션 기록 (방어 확률 계산용)
+        self.recent_mtd_actions: List[Dict] = []
 
         # 보상 프로파일
         self.reward_profile = "balanced"
@@ -149,6 +153,9 @@ class MTDEnvironment(gym.Env):
         self.last_action = np.zeros(ACTION_DIM)
         self.last_shuffle_step = 0
         self.last_swap_step = 0
+        
+        # [v0.8.7] 현재 스텝의 MTD 액션 효과
+        self.current_mtd_effect = 0.0
 
         # 초기화
         self._init_services()
@@ -220,9 +227,11 @@ class MTDEnvironment(gym.Env):
         self.diversity_history = []
         self.redundancy_history = []
         self.action_history = []
+        self.recent_mtd_actions = []  # [v0.8.7]
         self.last_action = np.zeros(ACTION_DIM)
         self.last_shuffle_step = 0
         self.last_swap_step = 0
+        self.current_mtd_effect = 0.0  # [v0.8.7]
 
         return self._get_state(), self._get_info()
 
@@ -232,10 +241,11 @@ class MTDEnvironment(gym.Env):
         self.last_action = action.copy()
         self.action_history.append(action.copy())
 
-        # 1. MTD 액션 실행
-        mtd_cost = self._execute_mtd_action(action)
+        # 1. MTD 액션 실행 및 효과 계산
+        mtd_cost, mtd_effect = self._execute_mtd_action(action)
+        self.current_mtd_effect = mtd_effect  # [v0.8.7]
 
-        # 2. 공격자 행동 시뮬레이션
+        # 2. 공격자 행동 시뮬레이션 (MTD 효과 반영)
         attack_result = self._simulate_attacker()
 
         # 3. 메트릭 기록
@@ -256,10 +266,16 @@ class MTDEnvironment(gym.Env):
 
         return self._get_state(), reward, terminated, truncated, self._get_info()
 
-    def _execute_mtd_action(self, action: np.ndarray) -> float:
-        """MTD 액션 실행"""
+    def _execute_mtd_action(self, action: np.ndarray) -> Tuple[float, float]:
+        """
+        MTD 액션 실행
+        
+        Returns:
+            (total_cost, mtd_effect): 총 비용과 MTD 방어 효과
+        """
         scaled = scale_action(action)
         total_cost = 0.0
+        mtd_effect = 0.0  # [v0.8.7] MTD 방어 효과 누적
 
         # 1. Network Shuffle
         shuffle_intensity = scaled[0]
@@ -267,18 +283,29 @@ class MTDEnvironment(gym.Env):
             cost = self._do_shuffle(shuffle_intensity)
             total_cost += cost
             self.last_shuffle_step = self.step_count
+            # [v0.8.7] Shuffle 효과
+            mtd_effect += 0.35 * shuffle_intensity
+            self.recent_mtd_actions.append({
+                'step': self.step_count,
+                'type': 'shuffle',
+                'intensity': shuffle_intensity
+            })
 
         # 2. Port Hop
         port_hop_intensity = scaled[1]
         if port_hop_intensity > 0.35:
             cost = self._do_port_hop(port_hop_intensity)
             total_cost += cost
+            # [v0.8.7] Port Hop 효과
+            mtd_effect += 0.20 * port_hop_intensity
 
         # 3. Decoy Activation
         decoy_ratio = scaled[2]
         if decoy_ratio > 0.4:
             cost = self._activate_decoys(decoy_ratio)
             total_cost += cost
+            # [v0.8.7] Decoy 효과
+            mtd_effect += 0.15 * decoy_ratio
 
         # 4. Blacklist
         blacklist_aggression = scaled[3]
@@ -286,6 +313,7 @@ class MTDEnvironment(gym.Env):
         if blacklist_aggression > 0.6:
             cost = self._update_blacklist(blacklist_aggression, blacklist_duration)
             total_cost += cost
+            mtd_effect += 0.10 * blacklist_aggression
 
         # 5. Service Swap
         swap_intensity = scaled[5]
@@ -294,8 +322,19 @@ class MTDEnvironment(gym.Env):
             cost = self._do_service_swap(swap_intensity, swap_target)
             total_cost += cost
             self.last_swap_step = self.step_count
+            # [v0.8.7] Swap 효과 (가장 강력)
+            mtd_effect += 0.45 * swap_intensity
+            self.recent_mtd_actions.append({
+                'step': self.step_count,
+                'type': 'swap',
+                'intensity': swap_intensity
+            })
 
-        return total_cost
+        # [v0.8.7] 최근 액션 유지 (최대 20개)
+        if len(self.recent_mtd_actions) > 20:
+            self.recent_mtd_actions = self.recent_mtd_actions[-20:]
+
+        return total_cost, min(1.0, mtd_effect)
 
     def _do_shuffle(self, intensity: float) -> float:
         """네트워크 셔플 실행"""
@@ -427,14 +466,57 @@ class MTDEnvironment(gym.Env):
 
         return aggression * duration * self.config.cost.blacklist * 0.5
 
+    def _calculate_defense_probability(self) -> float:
+        """
+        [v0.8.7] 방어 확률 계산 - MTD 액션이 직접 영향
+        
+        핵심 원칙:
+        - MTD 액션 없으면 기본 방어 확률 25%
+        - 액션 수행 시 방어 확률 증가
+        - 최근 액션의 효과가 감쇠하면서 유지
+        """
+        # 기본 방어 확률 (MTD 없이는 낮음!)
+        base_defense = 0.25
+        
+        # 공격자 레벨에 따른 난이도 (레벨이 높을수록 방어 어려움)
+        level_modifier = 1.0 - (self.seeker_level * 0.08)  # L0: 1.0, L4: 0.68
+        
+        # 현재 스텝의 MTD 효과
+        current_effect = self.current_mtd_effect
+        
+        # 최근 액션의 잔여 효과 (감쇠)
+        recent_effect = 0.0
+        for action in self.recent_mtd_actions[-10:]:
+            steps_ago = self.step_count - action['step']
+            if steps_ago > 0:
+                decay = 0.9 ** steps_ago  # 매 스텝 10% 감쇠
+                if action['type'] == 'shuffle':
+                    recent_effect += 0.15 * action['intensity'] * decay
+                elif action['type'] == 'swap':
+                    recent_effect += 0.20 * action['intensity'] * decay
+        
+        # Diversity/Redundancy 보너스
+        diversity = self._compute_cdi()
+        redundancy = self._get_redundancy_score()
+        diversity_bonus = diversity * 0.15
+        redundancy_bonus = redundancy * 0.10
+        
+        # 최종 방어 확률
+        defense_prob = (base_defense + current_effect + recent_effect + 
+                       diversity_bonus + redundancy_bonus) * level_modifier
+        
+        return max(0.10, min(0.95, defense_prob))
+
     def _simulate_attacker(self) -> Dict[str, Any]:
-        """공격자 행동 시뮬레이션"""
+        """공격자 행동 시뮬레이션 - [v0.8.7] MTD 효과 반영"""
         profile = self.attacker_profile
         result = {
             "discovered": False,
             "exploited": False,
             "breach": False,
             "decoy_hit": False,
+            "attack_defended": False,  # [v0.8.7]
+            "attack_attempted": False,  # [v0.8.7]
         }
 
         # 혼란도 감쇠
@@ -443,6 +525,9 @@ class MTDEnvironment(gym.Env):
         # 혼란도에 따른 효율 감소
         confusion_penalty = min(0.5, self.attacker.confusion_level * 0.4)
         effective_rate = max(0.1, 1.0 - confusion_penalty)
+
+        # [v0.8.7] 방어 확률 계산
+        defense_prob = self._calculate_defense_probability()
 
         if self.attacker.current_phase == "reconnaissance":
             self.attacker.scan_rate = profile["scan_rate"] * effective_rate
@@ -470,6 +555,13 @@ class MTDEnvironment(gym.Env):
                     continue
 
                 if svc.virtual_ip in self.attacker.scanned_ips:
+                    result["attack_attempted"] = True  # [v0.8.7]
+                    
+                    # [v0.8.7] 방어 확률 적용
+                    if random.random() < defense_prob:
+                        result["attack_defended"] = True
+                        continue  # 방어 성공 - 발견 실패
+                    
                     discover_prob = profile["discovery_rate"] * effective_rate
                     if random.random() < discover_prob:
                         svc.is_discovered = True
@@ -495,6 +587,13 @@ class MTDEnvironment(gym.Env):
                         del self.attacker.known_mappings[svc_name]
                         continue
 
+                result["attack_attempted"] = True  # [v0.8.7]
+                
+                # [v0.8.7] 방어 확률 적용 (exploitation 단계)
+                if random.random() < defense_prob * 0.8:  # exploitation은 조금 더 어려움
+                    result["attack_defended"] = True
+                    continue  # 방어 성공 - exploit 실패
+
                 exploit_prob = (
                     profile["exploit_success"] *
                     svc.vulnerability_score *
@@ -510,14 +609,20 @@ class MTDEnvironment(gym.Env):
                         self.attacker.current_phase = "persistence"
 
         elif self.attacker.current_phase == "persistence":
-            exploited_critical = any(
-                self.services[s].is_critical
-                for s in self.attacker.exploited_services
-                if s in self.services
-            )
+            result["attack_attempted"] = True  # [v0.8.7]
+            
+            # [v0.8.7] 최종 breach도 방어 확률 적용
+            if random.random() < defense_prob * 0.6:
+                result["attack_defended"] = True
+            else:
+                exploited_critical = any(
+                    self.services[s].is_critical
+                    for s in self.attacker.exploited_services
+                    if s in self.services
+                )
 
-            if exploited_critical:
-                result["breach"] = True
+                if exploited_critical:
+                    result["breach"] = True
 
         self.attacker.energy -= 0.01
         return result
@@ -694,16 +799,16 @@ class MTDEnvironment(gym.Env):
     # =========================================================================
 
     def _compute_reward(self, mtd_cost: float, attack_result: Dict) -> float:
-        """보상 계산"""
+        """보상 계산 - [v0.8.7] MTD 효율성 반영"""
         reward = 0.0
         cfg = self.config.reward
 
         # 1. 기본 생존 보상
         reward += cfg.survival_per_step * 1.5
 
-        # 2. 비용 패널티 (완화)
-        if mtd_cost > 0.5:
-            reward -= (mtd_cost - 0.5) * cfg.cost_weight
+        # 2. 비용 패널티 (강화)
+        if mtd_cost > 0:
+            reward -= mtd_cost * cfg.cost_weight * 0.5
 
         # 3. 공격 결과
         if attack_result["breach"]:
@@ -714,6 +819,17 @@ class MTDEnvironment(gym.Env):
             reward -= cfg.discovery_penalty * 0.5
         else:
             reward += 0.3
+
+        # [v0.8.7] 방어 성공 보너스
+        if attack_result.get("attack_defended", False):
+            reward += 3.0  # 방어 성공 시 큰 보상
+            
+        # [v0.8.7] 불필요한 액션 페널티
+        if self.current_mtd_effect > 0 and not attack_result.get("attack_attempted", False):
+            # 공격이 없는데 MTD 액션 수행 → 약간의 페널티
+            threat_level = self.attacker.confusion_level + len(self.attacker.discovered_services) / len(self.services)
+            if threat_level < 0.2:
+                reward -= 0.5 * self.current_mtd_effect
 
         # 4. 디코이 유인 보너스
         if attack_result["decoy_hit"]:
@@ -731,7 +847,7 @@ class MTDEnvironment(gym.Env):
         # 7. 공격자 혼란 보너스
         reward += self.attacker.confusion_level * cfg.confusion_bonus * 2
 
-        # 8. MTD 활동 보너스
+        # 8. MTD 활동 보너스 (적절한 양)
         if self.stats.total_shuffles > 0:
             shuffle_bonus = min(0.2, self.stats.total_shuffles * 0.02)
             reward += shuffle_bonus
@@ -921,7 +1037,7 @@ class MTDEnvironment(gym.Env):
 # Test
 # =============================================================================
 if __name__ == "__main__":
-    print("=== MTD Environment v08.3 Test ===")
+    print("=== MTD Environment v08.7 Test ===")
     print(f"STATE_DIM: {STATE_DIM}")
     print(f"ACTION_DIM: {ACTION_DIM}")
 

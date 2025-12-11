@@ -1,7 +1,7 @@
 {
   "args": {
     "test": false,
-    "episodes": 1000,
+    "episodes": 800,
     "max_steps": 200,
     "seed": 42,
     "cpu": false,
@@ -18,17 +18,17 @@
     "curriculum": true,
     "model": null,
     "resume": null,
-    "checkpoint_dir": "checkpoints_v08",
+    "checkpoint_dir": "checkpoints_v08_wandb",
     "save_interval": 100,
     "log_interval": 10,
     "eval_episodes": 50,
     "eval_all_levels": false,
     "wandb": true,
     "wandb_project": "mtd-rl-paper",
-    "wandb_name": null,
-    "wandb_tags": null,
+    "wandb_name": "v08_curriculum_training",
+    "wandb_tags": "v08,curriculum,full",
     "wandb_notes": null,
-    "wandb_save_model": false,
+    "wandb_save_model": true,
     "sweep": false,
     "sweep_agent": false,
     "sweep_id": null,
@@ -68,7 +68,7 @@
     "service_swap_target"
   ],
   "search_space": 16645890,
-  "best_reward": 3315.2666358991637,
-  "best_des": 0.8497777777777777,
+  "best_reward": 6452.16714521951,
+  "best_des": 0.85,
   "total_episodes": 800
 }
