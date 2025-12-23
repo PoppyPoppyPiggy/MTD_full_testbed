@@ -1,0 +1,23 @@
+{
+  "timestamp": "20251222_170017",
+  "total_episodes": 7500,
+  "strategies": [
+    "No MTD",
+    "Static MTD",
+    "Heuristic+CTI",
+    "RL MTD",
+    "RL+CTI MTD"
+  ],
+  "cost_effectiveness": {
+    "Heuristic+CTI": {
+      "delta_S_MTD": 0.04,
+      "delta_Cost": 13.714,
+      "CER": 0.003
+    },
+    "RL+CTI MTD": {
+      "delta_S_MTD": 0.069,
+      "delta_Cost": 44.612,
+      "CER": 0.002
+    }
+  }
+}
