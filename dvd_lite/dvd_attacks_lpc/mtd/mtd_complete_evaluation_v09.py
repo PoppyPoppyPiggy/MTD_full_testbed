@@ -1,1188 +1,804 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-MTD Paper Evaluation System v1.0
-================================
-논문 Figure 5 State Transition Model 기반 정확한 평가 시스템
+MTD Real Model Evaluation + IEEE Paper Figures
+===============================================
+학습된 PPO 모델(best.pt)을 로드해서 실제 평가 수행 후 IEEE 스타일 그래프 생성
 
-핵심 구현:
-1. State Transition Model (S0→S1→S2→S3→S4, Si→S5)
-2. 5개 전략 (No MTD, Static MTD, Heuristic+CTI, RL MTD, RL+CTI MTD)
-3. 논문 수식 정확 구현 (p_def, 혼란도, DES, CER)
+Usage:
+    python mtd_real_evaluation_complete.py --model checkpoints_v08/best.pt
 
-참조: IEEE Access 논문 Section III, IV
+Requirements:
+    pip install torch numpy matplotlib scienceplots
+
+Author: MTD-RL Research Team
 """
 
+import argparse
+import json
 import os
 import sys
-import json
-import random
-import numpy as np
-import matplotlib.pyplot as plt
-from dataclasses import dataclass, field
-from typing import Dict, List, Tuple, Optional, Any
-from enum import Enum
-from datetime import datetime
+from pathlib import Path
+from typing import Dict, List, Tuple, Optional
 from collections import defaultdict
-import warnings
-warnings.filterwarnings('ignore')
+from datetime import datetime
 
-# =============================================================================
-# 논문 Table 6: Attacker Profiles
-# =============================================================================
-ATTACKER_PROFILES = {
-    0: {"name": "Script Kiddie", "p_disc": 0.15, "p_exploit": 0.08, "scan_rate": 0.03, "decoy_detect": 0.1},
-    1: {"name": "Novice",        "p_disc": 0.25, "p_exploit": 0.12, "scan_rate": 0.05, "decoy_detect": 0.2},
-    2: {"name": "Intermediate",  "p_disc": 0.35, "p_exploit": 0.20, "scan_rate": 0.08, "decoy_detect": 0.35},
-    3: {"name": "Advanced",      "p_disc": 0.50, "p_exploit": 0.30, "scan_rate": 0.12, "decoy_detect": 0.5},
-    4: {"name": "APT",           "p_disc": 0.65, "p_exploit": 0.40, "scan_rate": 0.15, "decoy_detect": 0.65},
-}
+import numpy as np
+import torch
+import torch.nn as nn
+import matplotlib.pyplot as plt
 
-# =============================================================================
-# 논문 Table 5: MTD Action Parameters
-# =============================================================================
-MTD_ACTIONS = {
-    "shuffle":  {"threshold": 0.25, "cost": 0.035, "weight": 0.35, "confusion": 0.15},
-    "port_hop": {"threshold": 0.35, "cost": 0.021, "weight": 0.20, "confusion": 0.08},
-    "decoy":    {"threshold": 0.40, "cost": 0.014, "weight": 0.15, "confusion": 0.00},
-    "blacklist":{"threshold": 0.60, "cost": 0.010, "weight": 0.10, "confusion": 0.00},
-    "swap":     {"threshold": 0.30, "cost": 0.035, "weight": 0.45, "confusion": 0.25},
-}
-
-# =============================================================================
-# State Transition Model (Figure 5)
-# =============================================================================
-class AttackPhase(Enum):
-    """논문 Figure 5의 공격 단계"""
-    S0_INITIAL = 0      # 초기 상태
-    S1_RECON = 1        # 정찰 단계
-    S2_DISCOVERY = 2    # 서비스 발견 단계
-    S3_EXPLOIT = 3      # 익스플로잇 단계
-    S4_BREACH = 4       # 침해 완료 (Terminal - 실패)
-    S5_DEFENDED = 5     # 방어 성공 (Terminal - 성공)
-
-
-@dataclass
-class ServiceState:
-    """서비스 상태"""
-    name: str
-    ip: str
-    port: int
-    is_critical: bool = False
-    is_discovered: bool = False
-    is_exploited: bool = False
-    vulnerability_score: float = 0.5
-
-
-@dataclass
-class AttackerState:
-    """공격자 상태"""
-    level: int
-    phase: AttackPhase = AttackPhase.S0_INITIAL
-    scanned_ips: set = field(default_factory=set)
-    discovered_services: set = field(default_factory=set)
-    exploited_services: set = field(default_factory=set)
-    confusion: float = 0.0  # ξ_t
-    energy: float = 1.0
-
-
-@dataclass 
-class EpisodeResult:
-    """에피소드 결과"""
-    strategy: str
-    attacker_level: int
-    breach: bool
-    defended: bool
-    steps: int
-    mttc: int
-    total_cost: float
-    s_mtd: float
-    cer: float
-    cdi_avg: float
-    redundancy_avg: float
-    confusion_avg: float
-    asr: float
-    asp: float
-
-
-# =============================================================================
-# 논문 수식 구현
-# =============================================================================
-
-def compute_defense_probability(
-    action_intensities: Dict[str, float],
-    cdi: float,
-    redundancy: float,
-    attacker_level: int
-) -> float:
-    """
-    논문 Equation 2: 방어 확률 계산
-    
-    p_def = (P_0 + E_curr + β_D·CDI + β_R·R) · κ_ℓ
-    
-    수정: MTD 액션 없으면 방어 확률 매우 낮음
-    
-    Args:
-        action_intensities: 각 MTD 액션의 강도 (0-1)
-        cdi: Configuration Diversity Index
-        redundancy: 중복성 점수
-        attacker_level: 공격자 레벨 (0-4)
-    
-    Returns:
-        방어 확률 (0.05 ~ 0.85)
-    """
-    # MTD 효과 계산
-    E_curr = 0.0
-    has_active_mtd = False
-    
-    for action_name, intensity in action_intensities.items():
-        if action_name in MTD_ACTIONS:
-            threshold = MTD_ACTIONS[action_name]["threshold"]
-            if intensity > threshold:
-                has_active_mtd = True
-                weight = MTD_ACTIONS[action_name]["weight"]
-                E_curr += weight * intensity
-    
-    # 기본 방어 확률 - MTD 없으면 매우 낮음
-    if has_active_mtd:
-        P_0 = 0.15  # MTD 있을 때 기본값
-    else:
-        P_0 = 0.05  # MTD 없을 때 기본값 (거의 무방비)
-    
-    # Diversity/Redundancy 보너스
-    beta_D = 0.10
-    beta_R = 0.08
-    
-    # MTD 효과 있을 때만 다양성 보너스 적용
-    if has_active_mtd:
-        diversity_bonus = beta_D * cdi + beta_R * redundancy
-    else:
-        diversity_bonus = 0.0
-    
-    # 공격자 레벨 modifier (κ_ℓ = 1 - 0.10ℓ) - 더 강한 감쇠
-    kappa = 1.0 - 0.10 * attacker_level  # L0: 1.0, L4: 0.6
-    
-    # 최종 방어 확률
-    p_def = (P_0 + E_curr + diversity_bonus) * kappa
-    
-    # Clamp to [0.05, 0.85]
-    return max(0.05, min(0.85, p_def))
-
-
-def compute_confusion(
-    prev_confusion: float,
-    action_intensities: Dict[str, float],
-    discovered_services: set,
-    affected_services: set
-) -> float:
-    """
-    논문 Equation 3: 혼란도 계산
-    
-    ξ_t = γ_ξ · ξ_{t-1} + Σβ_i · ã_i · 𝟙[svc_i ∈ D_t]
-    
-    Args:
-        prev_confusion: 이전 혼란도
-        action_intensities: MTD 액션 강도
-        discovered_services: 발견된 서비스 집합
-        affected_services: MTD 영향 받은 서비스
-    
-    Returns:
-        새 혼란도
-    """
-    gamma_xi = 0.92  # 감쇠 계수
-    
-    # 감쇠된 이전 혼란도
-    new_confusion = gamma_xi * prev_confusion
-    
-    # 새로운 혼란도 추가
-    for action_name, intensity in action_intensities.items():
-        if action_name in MTD_ACTIONS:
-            beta = MTD_ACTIONS[action_name]["confusion"]
-            threshold = MTD_ACTIONS[action_name]["threshold"]
-            if intensity > threshold and beta > 0:
-                # 발견된 서비스에 영향을 미치면 혼란도 증가
-                overlap = len(discovered_services & affected_services)
-                if overlap > 0 or action_name == "swap":
-                    new_confusion += beta * intensity
-    
-    return min(1.5, new_confusion)  # 상한
-
-
-def compute_effective_discovery_prob(base_prob: float, confusion: float) -> float:
-    """
-    논문 Equation 4: 유효 발견 확률
-    
-    p_disc_eff = p_disc · max(0.1, 1 - min(0.5, 0.4·ξ_t))
-    """
-    modifier = max(0.1, 1.0 - min(0.5, 0.4 * confusion))
-    return base_prob * modifier
-
-
-def compute_cdi(services: Dict[str, ServiceState]) -> float:
-    """
-    논문 Equation 5: Configuration Diversity Index (Shannon Entropy)
-    
-    CDI = H(configs) / H_max
-    """
-    if len(services) <= 1:
-        return 0.0
-    
-    configs = [f"{s.ip}:{s.port}" for s in services.values()]
-    unique = len(set(configs))
-    
-    if unique <= 1:
-        return 0.0
-    
-    # Shannon Entropy
-    from collections import Counter
-    counts = Counter(configs)
-    total = len(configs)
-    
-    entropy = 0.0
-    for count in counts.values():
-        p = count / total
-        if p > 0:
-            entropy -= p * np.log2(p)
-    
-    max_entropy = np.log2(total)
-    return entropy / max_entropy if max_entropy > 0 else 0.0
-
-
-def compute_redundancy(active_decoys: int, total_decoys: int, active_swaps: int) -> float:
-    """
-    논문 Equation 6: Redundancy Score
-    
-    R_t = 0.6 · (n_dec_active / N_dec) + 0.3 · min(1, 0.08·n_swap) + 0.1
-    """
-    decoy_ratio = active_decoys / max(1, total_decoys)
-    swap_bonus = min(1.0, 0.08 * active_swaps)
-    return 0.6 * decoy_ratio + 0.3 * swap_bonus + 0.1
-
-
-def compute_des(
-    mttc: int,
-    max_steps: int,
-    asr: float,
-    cdi: float,
-    ned: float,
-    asp: float,
-    redundancy: float
-) -> float:
-    """
-    논문 Equation 7: Defense Effectiveness Score
-    
-    S_MTD = 0.25·MTTC_norm + 0.20·ASR + 0.20·CDI + 0.15·NED + 0.10·(1-ASP) + 0.10·R
-    """
-    mttc_norm = min(1.0, mttc / max_steps)
-    return (
-        0.25 * mttc_norm +
-        0.20 * asr +
-        0.20 * cdi +
-        0.15 * ned +
-        0.10 * (1.0 - asp) +
-        0.10 * redundancy
+# rl_config_v08, rl_environment_v08가 같은 디렉토리에 있어야 함
+try:
+    from rl_config_v08 import (
+        ACTION_DIM,
+        ACTION_PARAM_KEYS,
+        SEEKER_PROFILES,
+        STATE_DIM,
+        MTDConfig,
     )
-
-
-def compute_cer(s_mtd: float, total_cost: float) -> float:
-    """
-    논문 Equation 8: Cost Efficiency Ratio
-    
-    CER = S_MTD / (C_total + ε)
-    """
-    epsilon = 0.1
-    return s_mtd / (total_cost + epsilon)
+    from rl_environment_v08 import MTDEnvironment
+    print("✅ rl_config_v08, rl_environment_v08 imported")
+except ImportError as e:
+    print(f"❌ Import error: {e}")
+    print("rl_config_v08.py와 rl_environment_v08.py가 같은 디렉토리에 필요합니다")
+    sys.exit(1)
 
 
 # =============================================================================
-# State Transition Simulator (Figure 5 구현)
+# Actor-Critic Network (rl_train_v08.py와 동일)
 # =============================================================================
+class ActorCritic(nn.Module):
+    """Actor-Critic 네트워크"""
 
-class StateTransitionSimulator:
-    """
-    논문 Figure 5의 State Transition Model 시뮬레이터
-    """
-    
     def __init__(
         self,
-        attacker_level: int = 1,
-        max_steps: int = 200,
-        seed: int = 42
+        state_dim: int,
+        action_dim: int,
+        hidden_size: int = 256,
+        num_layers: int = 2,
     ):
-        self.attacker_level = attacker_level
-        self.max_steps = max_steps
-        self.rng = np.random.default_rng(seed)
-        
-        self.profile = ATTACKER_PROFILES[attacker_level]
-        
-        # 서비스 초기화
-        self.services: Dict[str, ServiceState] = {}
-        self.decoys: Dict[str, bool] = {}  # decoy_name -> is_active
-        self._init_services()
-        
-        # 공격자 상태
-        self.attacker = AttackerState(level=attacker_level)
-        
-        # 에피소드 통계
-        self.step_count = 0
-        self.total_cost = 0.0
-        self.cdi_history: List[float] = []
-        self.redundancy_history: List[float] = []
-        self.confusion_history: List[float] = []
-        self.action_history: List[Dict] = []
-        self.active_swaps = 0
-        
-    def _init_services(self):
-        """테스트베드 서비스 초기화 (Table 3)"""
-        service_defs = [
-            ("FC", "10.13.0.10", 14550, True),    # Flight Controller (Critical)
-            ("CC", "10.13.0.11", 5760, False),    # Companion Computer
-            ("GCS", "10.13.0.20", 3000, True),    # Ground Control Station (Critical)
-            ("Video", "10.13.0.12", 554, False),  # Video Stream
-            ("ROS", "10.13.0.13", 11311, False),  # ROS Master
-            ("TelemetryDB", "10.13.0.14", 5432, False),  # Telemetry DB
-        ]
-        
-        for name, ip, port, critical in service_defs:
-            self.services[name] = ServiceState(
-                name=name, ip=ip, port=port,
-                is_critical=critical,
-                vulnerability_score=0.5 + self.rng.random() * 0.3
-            )
-        
-        # 디코이 초기화
-        for i in range(4):
-            self.decoys[f"Decoy_{i}"] = False
-    
-    def reset(self, seed: Optional[int] = None):
-        """환경 리셋"""
-        if seed is not None:
-            self.rng = np.random.default_rng(seed)
-        
-        self._init_services()
-        self.attacker = AttackerState(level=self.attacker_level)
-        self.attacker.phase = AttackPhase.S0_INITIAL
-        
-        self.step_count = 0
-        self.total_cost = 0.0
-        self.cdi_history = []
-        self.redundancy_history = []
-        self.confusion_history = []
-        self.action_history = []
-        self.active_swaps = 0
-    
-    def step(self, action: np.ndarray) -> Tuple[bool, bool, Dict]:
-        """
-        한 스텝 실행
-        
-        Args:
-            action: 7차원 MTD 액션 벡터 [-1, 1]^7
-        
-        Returns:
-            (breach, defended, info)
-        """
-        self.step_count += 1
-        
-        # 액션 스케일링 [-1,1] → [0,1]
-        scaled = (np.array(action) + 1.0) / 2.0
-        
-        # MTD 액션 강도
-        action_intensities = {
-            "shuffle": scaled[0],
-            "port_hop": scaled[1],
-            "decoy": scaled[2],
-            "blacklist": scaled[3],
-            "swap": scaled[5],
-        }
-        
-        # MTD 비용 및 효과 적용
-        step_cost, affected_services = self._apply_mtd_actions(action_intensities)
-        self.total_cost += step_cost
-        
-        # 지표 계산
-        cdi = compute_cdi(self.services)
-        active_decoys = sum(1 for v in self.decoys.values() if v)
-        redundancy = compute_redundancy(active_decoys, len(self.decoys), self.active_swaps)
-        
-        # 혼란도 업데이트
-        self.attacker.confusion = compute_confusion(
-            self.attacker.confusion,
-            action_intensities,
-            self.attacker.discovered_services,
-            affected_services
+        super().__init__()
+
+        self.state_dim = state_dim
+        self.action_dim = action_dim
+        self.hidden_size = hidden_size
+
+        # Shared Feature Extractor
+        layers = []
+        input_dim = state_dim
+        for i in range(num_layers):
+            layers.extend([
+                nn.Linear(input_dim, hidden_size),
+                nn.LayerNorm(hidden_size),
+                nn.ReLU(),
+            ])
+            input_dim = hidden_size
+        self.shared = nn.Sequential(*layers)
+
+        # Actor Head
+        self.actor = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size // 2),
+            nn.ReLU(),
+            nn.Linear(hidden_size // 2, action_dim),
+            nn.Tanh(),
         )
-        
-        # 방어 확률 계산
-        p_def = compute_defense_probability(
-            action_intensities, cdi, redundancy, self.attacker_level
+
+        # 액션 분산
+        self.log_std = nn.Parameter(torch.ones(action_dim) * -0.5)
+
+        # Critic Head
+        self.critic = nn.Sequential(
+            nn.Linear(hidden_size, hidden_size // 2),
+            nn.ReLU(),
+            nn.Linear(hidden_size // 2, 1),
         )
-        
-        # 히스토리 저장
-        self.cdi_history.append(cdi)
-        self.redundancy_history.append(redundancy)
-        self.confusion_history.append(self.attacker.confusion)
-        self.action_history.append(action_intensities.copy())
-        
-        # State Transition 시뮬레이션
-        breach, defended = self._simulate_state_transition(p_def)
-        
-        info = {
-            "phase": self.attacker.phase.name,
-            "p_def": p_def,
-            "cdi": cdi,
-            "redundancy": redundancy,
-            "confusion": self.attacker.confusion,
-            "cost": step_cost,
-        }
-        
-        return breach, defended, info
+
+    def forward(self, state: torch.Tensor) -> Tuple[torch.Tensor, torch.Tensor]:
+        features = self.shared(state)
+        action_mean = self.actor(features)
+        value = self.critic(features)
+        return action_mean, value
+
+    def act(self, state: torch.Tensor, deterministic: bool = False):
+        action_mean, value = self.forward(state)
+        if deterministic:
+            return action_mean, torch.zeros(1), value
+        std = torch.exp(self.log_std)
+        from torch.distributions import Normal
+        dist = Normal(action_mean, std)
+        action = dist.sample()
+        action = torch.clamp(action, -1, 1)
+        log_prob = dist.log_prob(action).sum(dim=-1, keepdim=True)
+        return action, log_prob, value
+
+
+# =============================================================================
+# Strategies
+# =============================================================================
+class RealRLCTIStrategy:
+    """실제 학습된 PPO 모델 (RL+CTI)"""
     
-    def _apply_mtd_actions(self, intensities: Dict[str, float]) -> Tuple[float, set]:
-        """MTD 액션 적용"""
-        cost = 0.0
-        affected = set()
+    def __init__(self, model_path: str, device: str = "cpu", hidden_size: int = 256):
+        self.device = device
+        self.name = "RL+CTI MTD"
         
-        # Shuffle
-        if intensities["shuffle"] > MTD_ACTIONS["shuffle"]["threshold"]:
-            cost += MTD_ACTIONS["shuffle"]["cost"] * intensities["shuffle"]
-            n_shuffle = max(1, int(len(self.services) * intensities["shuffle"]))
-            shuffled = self.rng.choice(list(self.services.keys()), n_shuffle, replace=False)
-            for name in shuffled:
-                svc = self.services[name]
-                svc.ip = f"10.13.0.{self.rng.integers(100, 200)}"
-                svc.port = int(self.rng.integers(10000, 60000))
-                affected.add(name)
-                # 발견 무효화
-                if svc.is_discovered and self.rng.random() < intensities["shuffle"] * 0.8:
-                    svc.is_discovered = False
-                    self.attacker.discovered_services.discard(name)
+        self.policy = ActorCritic(
+            state_dim=STATE_DIM,
+            action_dim=ACTION_DIM,
+            hidden_size=hidden_size,
+        ).to(device)
         
-        # Port Hop
-        if intensities["port_hop"] > MTD_ACTIONS["port_hop"]["threshold"]:
-            cost += MTD_ACTIONS["port_hop"]["cost"] * intensities["port_hop"]
-            for name, svc in self.services.items():
-                if svc.is_critical and self.rng.random() < intensities["port_hop"]:
-                    svc.port = int(self.rng.integers(10000, 60000))
-                    affected.add(name)
+        checkpoint = torch.load(model_path, map_location=device, weights_only=False)
         
-        # Decoy
-        if intensities["decoy"] > MTD_ACTIONS["decoy"]["threshold"]:
-            cost += MTD_ACTIONS["decoy"]["cost"] * intensities["decoy"]
-            n_activate = max(1, int(len(self.decoys) * intensities["decoy"]))
-            inactive = [k for k, v in self.decoys.items() if not v]
-            for name in self.rng.choice(inactive, min(n_activate, len(inactive)), replace=False):
-                self.decoys[name] = True
-        
-        # Swap
-        if intensities["swap"] > MTD_ACTIONS["swap"]["threshold"]:
-            cost += MTD_ACTIONS["swap"]["cost"] * intensities["swap"]
-            svc_names = list(self.services.keys())
-            if len(svc_names) >= 2:
-                a, b = self.rng.choice(svc_names, 2, replace=False)
-                svc_a, svc_b = self.services[a], self.services[b]
-                svc_a.ip, svc_b.ip = svc_b.ip, svc_a.ip
-                svc_a.port, svc_b.port = svc_b.port, svc_a.port
-                affected.add(a)
-                affected.add(b)
-                self.active_swaps += 1
-                # 발견 무효화
-                for name in [a, b]:
-                    svc = self.services[name]
-                    if svc.is_discovered and self.rng.random() < intensities["swap"] * 0.6:
-                        svc.is_discovered = False
-                        self.attacker.discovered_services.discard(name)
-        
-        return cost, affected
-    
-    def _simulate_state_transition(self, p_def: float) -> Tuple[bool, bool]:
-        """
-        논문 Figure 5의 State Transition 시뮬레이션
-        
-        핵심 전이 확률 (논문 Table 6 기반):
-        - S0 → S1: 확률 1.0
-        - S1 → S2: p_disc (공격자 레벨별)
-        - S2 → S3: p_exploit (공격자 레벨별)
-        - S3 → S4: p_breach (높음 - 크리티컬 도달 시)
-        - Si → S5: p_def (방어 성공 시)
-        
-        Returns:
-            (breach, defended)
-        """
-        profile = self.profile
-        
-        # 혼란도 → 유효 발견 확률
-        p_disc_eff = compute_effective_discovery_prob(
-            profile["p_disc"], self.attacker.confusion
-        )
-        
-        # S0 → S1 (Initial → Recon): 확률 1.0
-        if self.attacker.phase == AttackPhase.S0_INITIAL:
-            self.attacker.phase = AttackPhase.S1_RECON
-        
-        # S1 (Recon) - 정찰 단계
-        if self.attacker.phase == AttackPhase.S1_RECON:
-            # 스캔 (더 많이)
-            n_scan = max(5, int(200 * profile["scan_rate"] * 2))
-            for _ in range(n_scan):
-                ip = f"10.13.0.{self.rng.integers(1, 255)}"
-                self.attacker.scanned_ips.add(ip)
-            
-            # 서비스 발견 시도 - 더 적극적
-            for name, svc in self.services.items():
-                if svc.is_discovered:
-                    continue
-                
-                # IP 매칭 확률 (공격 표면이 작아서 매칭 쉬움)
-                ip_match = self.rng.random() < 0.15 + profile["scan_rate"]
-                if svc.ip in self.attacker.scanned_ips or ip_match:
-                    # 방어 확률 적용 (self-loop)
-                    defense_check = self.rng.random() < p_def * 0.5
-                    if defense_check:
-                        continue  # 방어 성공
-                    
-                    # 발견 확률 (더 높게)
-                    if self.rng.random() < p_disc_eff * 1.5:
-                        svc.is_discovered = True
-                        self.attacker.discovered_services.add(name)
-            
-            # 전이 조건: 1개 이상 발견 시 바로 S2로
-            if len(self.attacker.discovered_services) >= 1:
-                self.attacker.phase = AttackPhase.S2_DISCOVERY
-            
-            # S1 → S5 방어 성공 전이 (매우 낮은 확률)
-            if p_def > 0.6 and self.rng.random() < p_def * 0.1:
-                self.attacker.phase = AttackPhase.S5_DEFENDED
-                return False, True
-        
-        # S2 (Discovery → Exploit)
-        elif self.attacker.phase == AttackPhase.S2_DISCOVERY:
-            for name in list(self.attacker.discovered_services):
-                svc = self.services.get(name)
-                if not svc or svc.is_exploited:
-                    continue
-                
-                # 방어 확률 적용
-                if self.rng.random() < p_def * 0.4:
-                    continue
-                
-                # 익스플로잇 시도 (더 높은 확률)
-                exploit_prob = profile["p_exploit"] * (0.8 + svc.vulnerability_score * 0.4)
-                if self.rng.random() < exploit_prob:
-                    svc.is_exploited = True
-                    self.attacker.exploited_services.add(name)
-            
-            # 전이 조건
-            if len(self.attacker.exploited_services) >= 1:
-                self.attacker.phase = AttackPhase.S3_EXPLOIT
-            
-            # S2 → S5 방어 성공 전이
-            if p_def > 0.5 and self.rng.random() < p_def * 0.15:
-                self.attacker.phase = AttackPhase.S5_DEFENDED
-                return False, True
-        
-        # S3 (Exploit → Breach)
-        elif self.attacker.phase == AttackPhase.S3_EXPLOIT:
-            # 방어 확률 (S3에서는 낮지만 존재)
-            if self.rng.random() < p_def * 0.35:
-                self.attacker.phase = AttackPhase.S5_DEFENDED
-                return False, True
-            
-            # Breach 시도
-            exploited_critical = any(
-                self.services[s].is_critical
-                for s in self.attacker.exploited_services
-                if s in self.services
-            )
-            
-            # Breach 확률 (논문 Table 6 기반)
-            # 크리티컬 서비스 익스플로잇 여부 + 공격자 레벨
-            if exploited_critical:
-                # 크리티컬 서비스 = 높은 breach 확률
-                base_breach = 0.35 + 0.08 * self.attacker_level  # L0: 35%, L4: 67%
-            else:
-                # 비크리티컬 = 낮은 breach 확률
-                base_breach = 0.20 + 0.05 * self.attacker_level  # L0: 20%, L4: 40%
-            
-            if self.rng.random() < base_breach:
-                self.attacker.phase = AttackPhase.S4_BREACH
-                return True, False  # Breach!
-        
-        return False, False
-    
-    def get_episode_metrics(self) -> Dict[str, float]:
-        """에피소드 종료 후 메트릭 계산"""
-        mttc = self.step_count if self.attacker.phase == AttackPhase.S4_BREACH else self.max_steps
-        
-        # ASR
-        discovered = len(self.attacker.discovered_services)
-        exploited = len(self.attacker.exploited_services)
-        total_services = len(self.services)
-        exposed = discovered + exploited * 2
-        max_exposure = total_services * 3
-        asr = 1.0 - min(1.0, exposed / max_exposure)
-        
-        # ASP
-        asp = exploited / max(1, discovered)
-        
-        # CDI, Redundancy 평균
-        cdi_avg = np.mean(self.cdi_history) if self.cdi_history else 0.0
-        redundancy_avg = np.mean(self.redundancy_history) if self.redundancy_history else 0.0
-        confusion_avg = np.mean(self.confusion_history) if self.confusion_history else 0.0
-        
-        # NED
-        if len(self.cdi_history) >= 2:
-            ned = min(1.0, np.std(np.diff(self.cdi_history)) * 5)
+        if "policy" in checkpoint:
+            self.policy.load_state_dict(checkpoint["policy"])
+            hs = checkpoint.get("hidden_size", hidden_size)
+            print(f"✅ Model loaded: {model_path} (hidden_size={hs})")
         else:
-            ned = 0.0
+            self.policy.load_state_dict(checkpoint)
+            print(f"✅ Policy loaded: {model_path}")
         
-        # DES
-        s_mtd = compute_des(mttc, self.max_steps, asr, cdi_avg, ned, asp, redundancy_avg)
-        
-        # CER
-        cer = compute_cer(s_mtd, self.total_cost)
-        
-        return {
-            "mttc": mttc,
-            "asr": asr,
-            "asp": asp,
-            "cdi_avg": cdi_avg,
-            "redundancy_avg": redundancy_avg,
-            "confusion_avg": confusion_avg,
-            "ned": ned,
-            "s_mtd": s_mtd,
-            "cer": cer,
-            "total_cost": self.total_cost,
-            "breach": self.attacker.phase == AttackPhase.S4_BREACH,
-            "defended": self.attacker.phase == AttackPhase.S5_DEFENDED,
-        }
-
-
-# =============================================================================
-# 5개 전략 정의 (Section IV.E Baseline Configurations)
-# =============================================================================
-
-class BaseStrategy:
-    """전략 기본 클래스"""
-    name: str = "Base"
+        self.policy.eval()
     
-    def get_action(self, step: int, state: Dict) -> np.ndarray:
-        """액션 반환 [-1, 1]^7"""
-        raise NotImplementedError
+    def get_action(self, state: np.ndarray) -> np.ndarray:
+        state_tensor = torch.FloatTensor(state).unsqueeze(0).to(self.device)
+        with torch.no_grad():
+            action, _, _ = self.policy.act(state_tensor, deterministic=True)
+        return action.cpu().numpy().squeeze()
+    
+    def reset(self):
+        pass
 
 
-class NoMTDStrategy(BaseStrategy):
-    """No MTD: 고정 IP/포트, MTD 없음"""
+class NoMTDStrategy:
+    """MTD 없음 (Baseline)"""
     name = "No MTD"
     
-    def get_action(self, step: int, state: Dict) -> np.ndarray:
-        # 모든 액션 비활성화
-        return np.array([-1.0, -1.0, -1.0, -1.0, -1.0, -1.0, -1.0])
+    def get_action(self, state: np.ndarray) -> np.ndarray:
+        return np.array([-1.0] * ACTION_DIM)
+    
+    def reset(self):
+        pass
 
 
-class StaticMTDStrategy(BaseStrategy):
-    """Static MTD: 30스텝마다 무작위 셔플 + 기본 디코이"""
+class StaticMTDStrategy:
+    """고정 주기 MTD"""
     name = "Static MTD"
     
-    def get_action(self, step: int, state: Dict) -> np.ndarray:
-        action = np.array([-1.0, -1.0, 0.3, -1.0, -1.0, -1.0, -1.0])  # 기본 디코이
+    def __init__(self):
+        self.step = 0
+    
+    def get_action(self, state: np.ndarray) -> np.ndarray:
+        self.step += 1
+        action = np.array([-1.0] * ACTION_DIM)
         
-        # 30스텝마다 셔플
-        if step % 30 == 0:
-            action[0] = 0.5  # shuffle intensity
-            action[1] = 0.3  # port hop
+        if self.step % 30 == 0:
+            action[0] = 0.5  # shuffle
+            action[1] = 0.3  # port_hop
         
-        # 60스텝마다 스왑
-        if step % 60 == 0:
+        if self.step % 60 == 0:
             action[5] = 0.4  # swap
         
+        action[2] = 0.3  # decoy always
+        
         return action
+    
+    def reset(self):
+        self.step = 0
 
 
-class HeuristicCTIStrategy(BaseStrategy):
-    """Heuristic+CTI: CTI 신뢰도 > 0.6일 때 규칙 기반 트리거"""
+class HeuristicCTIStrategy:
+    """휴리스틱 + CTI 규칙 기반"""
     name = "Heuristic+CTI"
     
-    def get_action(self, step: int, state: Dict) -> np.ndarray:
-        action = np.array([-0.5, -0.5, 0.4, -0.5, -0.5, -0.5, 0.0])  # 기본 디코이
+    def __init__(self):
+        self.step = 0
+    
+    def get_action(self, state: np.ndarray) -> np.ndarray:
+        self.step += 1
+        action = np.array([-0.5] * ACTION_DIM)
         
-        # CTI 신뢰도 시뮬레이션 (위협 수준 기반)
-        threat_level = state.get("threat_level", 0.0)
-        cti_confidence = min(1.0, threat_level * 1.5 + np.random.random() * 0.2)
+        # threat_level (state[12] = normalized_risk)
+        threat_level = state[12] if len(state) > 12 else 0.3
         
-        if cti_confidence > 0.6:
-            # 규칙 기반 트리거
-            action[0] = 0.6  # shuffle
+        if threat_level > 0.6:
+            action[0] = 0.7  # shuffle
             action[2] = 0.6  # decoy
-            
-            if cti_confidence > 0.75:
-                action[1] = 0.5  # port hop
-                action[5] = 0.5  # swap
+            action[5] = 0.5  # swap
+        elif threat_level > 0.3:
+            action[0] = 0.4
+            action[2] = 0.4
         
-        # 주기적 셔플 (20스텝마다)
-        if step % 20 == 0:
+        if self.step % 20 == 0:
             action[0] = max(action[0], 0.5)
-            action[1] = max(action[1], 0.3)
-        
-        # 40스텝마다 스왑
-        if step % 40 == 0:
-            action[5] = max(action[5], 0.4)
+            action[1] = 0.3
         
         return action
+    
+    def reset(self):
+        self.step = 0
 
 
-class RLMTDStrategy(BaseStrategy):
-    """RL MTD: PPO 에이전트 (CTI 없음) - 시뮬레이션"""
+class RLOnlyStrategy:
+    """RL만 (CTI 없이) - 모델에서 CTI 부분 무시"""
     name = "RL MTD"
     
-    def __init__(self):
-        # 학습된 정책 시뮬레이션을 위한 파라미터
-        self.base_response = {
-            "low_threat": np.array([0.2, 0.1, 0.3, -0.5, -0.5, 0.1, 0.0]),
-            "medium_threat": np.array([0.5, 0.4, 0.5, 0.2, -0.2, 0.4, 0.5]),
-            "high_threat": np.array([0.7, 0.6, 0.7, 0.5, 0.3, 0.6, 0.7]),
-        }
-    
-    def get_action(self, step: int, state: Dict) -> np.ndarray:
-        threat_level = state.get("threat_level", 0.0)
+    def __init__(self, model_path: str = None, device: str = "cpu", hidden_size: int = 256):
+        self.device = device
         
-        # 위협 수준에 따른 동적 대응
-        if threat_level < 0.3:
-            base = self.base_response["low_threat"]
-        elif threat_level < 0.6:
-            base = self.base_response["medium_threat"]
+        if model_path and os.path.exists(model_path):
+            self.policy = ActorCritic(STATE_DIM, ACTION_DIM, hidden_size).to(device)
+            checkpoint = torch.load(model_path, map_location=device, weights_only=False)
+            if "policy" in checkpoint:
+                self.policy.load_state_dict(checkpoint["policy"])
+            else:
+                self.policy.load_state_dict(checkpoint)
+            self.policy.eval()
+            self.use_model = True
         else:
-            base = self.base_response["high_threat"]
-        
-        # 노이즈 추가 (exploration)
-        noise = np.random.randn(7) * 0.1
-        action = np.clip(base + noise, -1.0, 1.0)
-        
-        return action
-
-
-class RLCTIMTDStrategy(BaseStrategy):
-    """RL+CTI MTD (Proposed): PPO 에이전트 + CTI boost"""
-    name = "RL+CTI MTD"
+            self.use_model = False
     
-    def __init__(self):
-        self.base_response = {
-            "low_threat": np.array([0.3, 0.2, 0.4, -0.3, -0.3, 0.2, 0.0]),
-            "medium_threat": np.array([0.6, 0.5, 0.6, 0.3, 0.0, 0.5, 0.5]),
-            "high_threat": np.array([0.8, 0.7, 0.8, 0.6, 0.4, 0.7, 0.8]),
-        }
-    
-    def get_action(self, step: int, state: Dict) -> np.ndarray:
-        threat_level = state.get("threat_level", 0.0)
-        cti_boost = state.get("cti_boost", 0.0)
-        
-        # 기본 RL 정책
-        if threat_level < 0.3:
-            base = self.base_response["low_threat"]
-        elif threat_level < 0.6:
-            base = self.base_response["medium_threat"]
+    def get_action(self, state: np.ndarray) -> np.ndarray:
+        if self.use_model:
+            # CTI 관련 상태를 0으로 마스킹
+            state_masked = state.copy()
+            # CTI confidence 관련 인덱스들을 0으로 (예: 인덱스 13-16)
+            if len(state_masked) > 13:
+                state_masked[13:] = 0.0
+            
+            state_tensor = torch.FloatTensor(state_masked).unsqueeze(0).to(self.device)
+            with torch.no_grad():
+                action, _, _ = self.policy.act(state_tensor, deterministic=True)
+            return action.cpu().numpy().squeeze()
         else:
-            base = self.base_response["high_threat"]
-        
-        # CTI boost 적용 (Section 3.3.3)
-        # CTI 신뢰도가 높을수록 방어 강도 증가
-        if cti_boost > 0.5:
-            boost_factor = 1.0 + (cti_boost - 0.5) * 0.6
-            base = np.clip(base * boost_factor, -1.0, 1.0)
-        
-        # 노이즈
-        noise = np.random.randn(7) * 0.08
-        action = np.clip(base + noise, -1.0, 1.0)
-        
-        return action
+            # 폴백: 규칙 기반
+            threat_level = state[12] if len(state) > 12 else 0.3
+            if threat_level < 0.3:
+                base = np.array([0.2, 0.1, 0.3, -0.5, -0.5, 0.1, 0.0])
+            elif threat_level < 0.6:
+                base = np.array([0.5, 0.4, 0.5, 0.2, -0.2, 0.4, 0.5])
+            else:
+                base = np.array([0.7, 0.6, 0.7, 0.5, 0.3, 0.6, 0.7])
+            return base
+    
+    def reset(self):
+        pass
 
 
 # =============================================================================
-# 평가 실행기
+# Evaluator
 # =============================================================================
-
-class MTDEvaluator:
-    """MTD 평가 실행기"""
+class RealModelEvaluator:
+    """실제 모델 평가기"""
     
     def __init__(
         self,
-        strategies: List[BaseStrategy],
-        attacker_levels: List[int] = [0, 1, 2, 3, 4],
+        model_path: str,
         episodes_per_config: int = 50,
         max_steps: int = 200,
-        seed: int = 42
+        seed: int = 42,
+        device: str = "cpu",
+        hidden_size: int = 256,
     ):
-        self.strategies = strategies
-        self.attacker_levels = attacker_levels
         self.episodes_per_config = episodes_per_config
         self.max_steps = max_steps
         self.seed = seed
+        self.device = device
+        self.hidden_size = hidden_size
+        self.model_path = model_path
         
-        self.results: List[EpisodeResult] = []
+        # 전략 생성
+        self.strategies = {}
+        self.strategies["No MTD"] = NoMTDStrategy()
+        self.strategies["Static MTD"] = StaticMTDStrategy()
+        self.strategies["Heuristic+CTI"] = HeuristicCTIStrategy()
+        self.strategies["RL MTD"] = RLOnlyStrategy(model_path, device, hidden_size)
+        self.strategies["RL+CTI MTD"] = RealRLCTIStrategy(model_path, device, hidden_size)
+        
+        self.results = {}
+        self.config = MTDConfig()
     
-    def run_episode(
-        self,
-        strategy: BaseStrategy,
-        attacker_level: int,
-        episode_seed: int
-    ) -> EpisodeResult:
+    def run_episode(self, strategy, level: int, ep_seed: int) -> Dict:
         """단일 에피소드 실행"""
-        sim = StateTransitionSimulator(
-            attacker_level=attacker_level,
-            max_steps=self.max_steps,
-            seed=episode_seed
+        env = MTDEnvironment(
+            seed=ep_seed,
+            seeker_level=level,
+            config=self.config,
         )
-        sim.reset()
         
-        breach = False
-        defended = False
+        state, info = env.reset()
+        strategy.reset()
+        
+        total_reward = 0.0
         
         for step in range(self.max_steps):
-            # 상태 구성
-            state = {
-                "threat_level": len(sim.attacker.discovered_services) / len(sim.services),
-                "cti_boost": min(1.0, sim.attacker.confusion + 
-                               len(sim.attacker.exploited_services) * 0.3),
-            }
+            action = strategy.get_action(state)
+            state, reward, terminated, truncated, info = env.step(action)
+            total_reward += reward
             
-            # 액션 선택
-            action = strategy.get_action(step, state)
-            
-            # 스텝 실행
-            breach, defended, info = sim.step(action)
-            
-            if breach or defended:
+            if terminated or truncated:
                 break
         
-        # 메트릭 수집
-        metrics = sim.get_episode_metrics()
-        
-        return EpisodeResult(
-            strategy=strategy.name,
-            attacker_level=attacker_level,
-            breach=metrics["breach"],
-            defended=metrics["defended"],
-            steps=sim.step_count,
-            mttc=metrics["mttc"],
-            total_cost=metrics["total_cost"],
-            s_mtd=metrics["s_mtd"],
-            cer=metrics["cer"],
-            cdi_avg=metrics["cdi_avg"],
-            redundancy_avg=metrics["redundancy_avg"],
-            confusion_avg=metrics["confusion_avg"],
-            asr=metrics["asr"],
-            asp=metrics["asp"],
-        )
+        return {
+            "reward": total_reward,
+            "steps": step + 1,
+            "breach": 1 - info.get("Defense/BreachPrevented", 0),
+            "s_mtd": info.get("MTD/DES", 0),
+            "mttc": info.get("MTD/MTTC", self.max_steps),
+            "asr": info.get("MTD/ASR", 0),
+            "cdi": info.get("MTD/CDI", 0),
+            "ned": info.get("MTD/NED", 0),
+            "cost": info.get("Cost/Total", 0),
+            "cer": info.get("MTD/CER", 0),
+            "redundancy": info.get("Defense/Redundancy_Avg", 0),
+            "confusion": info.get("Attack/ConfusionLevel", 0),
+        }
     
-    def run_evaluation(self, verbose: bool = True) -> List[EpisodeResult]:
+    def evaluate(self, levels: List[int] = None, verbose: bool = True) -> Dict:
         """전체 평가 실행"""
-        self.results = []
-        total_configs = len(self.strategies) * len(self.attacker_levels)
-        config_idx = 0
+        if levels is None:
+            levels = [0, 1, 2, 3, 4]
         
-        for strategy in self.strategies:
-            for level in self.attacker_levels:
-                config_idx += 1
-                if verbose:
-                    print(f"[{config_idx}/{total_configs}] {strategy.name} vs L{level}...", end=" ")
+        np.random.seed(self.seed)
+        torch.manual_seed(self.seed)
+        
+        total_configs = len(self.strategies) * len(levels)
+        current = 0
+        
+        for strategy_name, strategy in self.strategies.items():
+            for level in levels:
+                current += 1
                 
                 episode_results = []
                 for ep in range(self.episodes_per_config):
-                    ep_seed = self.seed + config_idx * 1000 + ep
+                    ep_seed = self.seed + current * 1000 + ep
                     result = self.run_episode(strategy, level, ep_seed)
                     episode_results.append(result)
-                    self.results.append(result)
                 
-                # 요약
-                breaches = sum(1 for r in episode_results if r.breach)
-                defended = sum(1 for r in episode_results if r.defended)
-                avg_smtd = np.mean([r.s_mtd for r in episode_results])
+                # 집계
+                agg = {
+                    "strategy": strategy_name,
+                    "level": level,
+                    "breach_rate": np.mean([r["breach"] for r in episode_results]) * 100,
+                    "s_mtd": np.mean([r["s_mtd"] for r in episode_results]),
+                    "mttc": np.mean([r["mttc"] for r in episode_results]),
+                    "asr": np.mean([r["asr"] for r in episode_results]),
+                    "cdi": np.mean([r["cdi"] for r in episode_results]),
+                    "cost": np.mean([r["cost"] for r in episode_results]),
+                    "cer": np.mean([r["cer"] for r in episode_results]),
+                    "redundancy": np.mean([r["redundancy"] for r in episode_results]),
+                    "confusion": np.mean([r["confusion"] for r in episode_results]),
+                    "reward": np.mean([r["reward"] for r in episode_results]),
+                }
+                
+                self.results[(strategy_name, level)] = agg
                 
                 if verbose:
-                    print(f"Breach={breaches}/{self.episodes_per_config}, "
-                          f"Defended={defended}, S_MTD={avg_smtd:.3f}")
+                    breach_count = sum(1 for r in episode_results if r["breach"] > 0.5)
+                    print(f"[{current:2d}/{total_configs}] {strategy_name:<15} vs L{level}: "
+                          f"Breach={breach_count:2d}/{self.episodes_per_config}, "
+                          f"S_MTD={agg['s_mtd']:.3f}, MTTC={agg['mttc']:.0f}")
         
         return self.results
     
-    def get_summary_by_strategy(self) -> Dict[str, Dict[str, float]]:
-        """전략별 요약 통계"""
-        summary = defaultdict(lambda: defaultdict(list))
-        
-        for r in self.results:
-            summary[r.strategy]["breach_rate"].append(1 if r.breach else 0)
-            summary[r.strategy]["s_mtd"].append(r.s_mtd)
-            summary[r.strategy]["cer"].append(r.cer)
-            summary[r.strategy]["cdi"].append(r.cdi_avg)
-            summary[r.strategy]["redundancy"].append(r.redundancy_avg)
-            summary[r.strategy]["confusion"].append(r.confusion_avg)
-            summary[r.strategy]["cost"].append(r.total_cost)
-            summary[r.strategy]["mttc"].append(r.mttc)
-        
-        result = {}
-        for strategy, metrics in summary.items():
-            result[strategy] = {
-                metric: np.mean(values) for metric, values in metrics.items()
-            }
-            result[strategy]["breach_rate"] *= 100  # percentage
-        
-        return result
+    def get_summary_by_strategy(self) -> Dict:
+        """전략별 평균"""
+        summary = {}
+        for strategy_name in self.strategies.keys():
+            strategy_results = [v for (s, l), v in self.results.items() if s == strategy_name]
+            if strategy_results:
+                summary[strategy_name] = {
+                    "s_mtd": np.mean([r["s_mtd"] for r in strategy_results]),
+                    "breach_rate": np.mean([r["breach_rate"] for r in strategy_results]),
+                    "mttc": np.mean([r["mttc"] for r in strategy_results]),
+                    "asr": np.mean([r["asr"] for r in strategy_results]),
+                    "cdi": np.mean([r["cdi"] for r in strategy_results]),
+                    "cost": np.mean([r["cost"] for r in strategy_results]),
+                    "cer": np.mean([r["cer"] for r in strategy_results]),
+                    "redundancy": np.mean([r["redundancy"] for r in strategy_results]),
+                    "confusion": np.mean([r["confusion"] for r in strategy_results]),
+                }
+        return summary
     
-    def get_summary_by_level(self, strategy_name: str) -> Dict[int, Dict[str, float]]:
-        """특정 전략의 레벨별 요약"""
-        summary = defaultdict(lambda: defaultdict(list))
-        
-        for r in self.results:
-            if r.strategy == strategy_name:
-                summary[r.attacker_level]["breach_rate"].append(1 if r.breach else 0)
-                summary[r.attacker_level]["s_mtd"].append(r.s_mtd)
-                summary[r.attacker_level]["cer"].append(r.cer)
-        
-        result = {}
-        for level, metrics in summary.items():
-            result[level] = {
-                metric: np.mean(values) for metric, values in metrics.items()
-            }
-            result[level]["breach_rate"] *= 100
-        
-        return result
+    def get_summary_by_level(self, strategy_name: str) -> Dict:
+        """특정 전략의 레벨별 결과"""
+        return {l: v for (s, l), v in self.results.items() if s == strategy_name}
 
 
 # =============================================================================
-# 시각화
+# IEEE Style Plotting
 # =============================================================================
+def setup_ieee_style():
+    """IEEE 논문 스타일 설정"""
+    try:
+        import scienceplots
+        plt.style.use(['science', 'ieee', 'no-latex'])
+    except:
+        pass
+    
+    plt.rcParams.update({
+        'font.family': 'serif',
+        'font.size': 8,
+        'axes.labelsize': 9,
+        'axes.titlesize': 9,
+        'legend.fontsize': 7,
+        'xtick.labelsize': 8,
+        'ytick.labelsize': 8,
+        'figure.dpi': 300,
+        'savefig.dpi': 300,
+        'lines.linewidth': 1.0,
+        'lines.markersize': 4,
+        'axes.linewidth': 0.6,
+        'grid.linewidth': 0.4,
+        'grid.alpha': 0.4,
+        'axes.grid': True,
+        'legend.frameon': False,
+        'savefig.bbox': 'tight',
+        'savefig.pad_inches': 0.05,
+        'axes.spines.top': False,
+        'axes.spines.right': False,
+    })
 
-def plot_results(evaluator: MTDEvaluator, output_dir: str = "paper_figures"):
-    """결과 시각화"""
+
+# 색상 팔레트 (색맹 친화)
+COLORS = {
+    'No MTD': '#0072B2',
+    'Static MTD': '#E69F00',
+    'Heuristic+CTI': '#009E73',
+    'RL MTD': '#CC79A7',
+    'RL+CTI MTD': '#D55E00',
+}
+
+MARKERS = {
+    'No MTD': 'o',
+    'Static MTD': 's',
+    'Heuristic+CTI': '^',
+    'RL MTD': 'D',
+    'RL+CTI MTD': 'p',
+}
+
+
+def plot_all_figures(evaluator: RealModelEvaluator, output_dir: str):
+    """모든 IEEE 스타일 그래프 생성"""
     os.makedirs(output_dir, exist_ok=True)
+    setup_ieee_style()
     
-    strategy_summary = evaluator.get_summary_by_strategy()
-    strategies = list(strategy_summary.keys())
+    summary = evaluator.get_summary_by_strategy()
+    strategies = list(summary.keys())
     
-    # 색상 설정
-    colors = {
-        "No MTD": "#E74C3C",
-        "Static MTD": "#F39C12",
-        "Heuristic+CTI": "#3498DB",
-        "RL MTD": "#9B59B6",
-        "RL+CTI MTD": "#2ECC71",
-    }
+    # ==========================================================================
+    # Figure 9: Strategy Comparison (6-panel bar chart)
+    # ==========================================================================
+    fig, axes = plt.subplots(2, 3, figsize=(7.0, 4.0))
+    x = np.arange(len(strategies))
+    width = 0.65
+    short_names = ['No', 'Static', 'Heur.', 'RL', 'RL+CTI']
+    colors = [COLORS[s] for s in strategies]
     
-    fig, axes = plt.subplots(2, 3, figsize=(15, 10))
-    fig.suptitle("MTD Strategy Comparison (Paper Figure 9)", fontsize=14, fontweight='bold')
-    
-    # 1. S_MTD by Strategy
+    # (a) S_MTD
     ax = axes[0, 0]
-    vals = [strategy_summary[s]["s_mtd"] for s in strategies]
-    bars = ax.bar(strategies, vals, color=[colors.get(s, '#333') for s in strategies])
-    ax.set_ylabel("S_MTD (Defense Effectiveness)")
-    ax.set_title("(a) Defense Effectiveness Score")
-    ax.set_ylim(0, 1)
-    for bar, v in zip(bars, vals):
-        ax.text(bar.get_x() + bar.get_width()/2, v + 0.02, f'{v:.3f}', 
-                ha='center', va='bottom', fontsize=9)
-    ax.tick_params(axis='x', rotation=15)
+    vals = [summary[s]['s_mtd'] for s in strategies]
+    ax.bar(x, vals, width, color=colors, edgecolor='black', linewidth=0.4)
+    ax.set_ylabel(r'$S_{\mathrm{MTD}}$')
+    ax.set_title('(a) Defense Effectiveness')
+    ax.set_xticks(x)
+    ax.set_xticklabels(short_names, fontsize=7)
+    ax.set_ylim(0, 1.0)
+    for i, v in enumerate(vals):
+        ax.text(i, v + 0.02, f'{v:.2f}', ha='center', fontsize=6)
     
-    # 2. Breach Rate by Strategy
+    # (b) Breach Rate
     ax = axes[0, 1]
-    vals = [strategy_summary[s]["breach_rate"] for s in strategies]
-    bars = ax.bar(strategies, vals, color=[colors.get(s, '#333') for s in strategies])
-    ax.set_ylabel("Breach Rate (%)")
-    ax.set_title("(b) Breach Rate")
+    vals = [summary[s]['breach_rate'] for s in strategies]
+    ax.bar(x, vals, width, color=colors, edgecolor='black', linewidth=0.4)
+    ax.set_ylabel('Breach Rate (%)')
+    ax.set_title('(b) Breach Rate')
+    ax.set_xticks(x)
+    ax.set_xticklabels(short_names, fontsize=7)
     ax.set_ylim(0, 100)
-    for bar, v in zip(bars, vals):
-        ax.text(bar.get_x() + bar.get_width()/2, v + 2, f'{v:.1f}%', 
-                ha='center', va='bottom', fontsize=9)
-    ax.tick_params(axis='x', rotation=15)
+    for i, v in enumerate(vals):
+        ax.text(i, v + 2, f'{v:.0f}', ha='center', fontsize=6)
     
-    # 3. CER by Strategy
+    # (c) CER
     ax = axes[0, 2]
-    vals = [strategy_summary[s]["cer"] for s in strategies]
-    bars = ax.bar(strategies, vals, color=[colors.get(s, '#333') for s in strategies])
-    ax.set_ylabel("CER (Cost Efficiency Ratio)")
-    ax.set_title("(c) Cost Efficiency Ratio")
-    for bar, v in zip(bars, vals):
-        ax.text(bar.get_x() + bar.get_width()/2, v + 0.05, f'{v:.2f}', 
-                ha='center', va='bottom', fontsize=9)
-    ax.tick_params(axis='x', rotation=15)
+    vals = [summary[s]['cer'] for s in strategies]
+    ax.bar(x, vals, width, color=colors, edgecolor='black', linewidth=0.4)
+    ax.set_ylabel('CER')
+    ax.set_title('(c) Cost Efficiency')
+    ax.set_xticks(x)
+    ax.set_xticklabels(short_names, fontsize=7)
+    for i, v in enumerate(vals):
+        ax.text(i, v + 0.05, f'{v:.2f}', ha='center', fontsize=6)
     
-    # 4. CDI by Strategy
+    # (d) CDI
     ax = axes[1, 0]
-    vals = [strategy_summary[s]["cdi"] for s in strategies]
-    bars = ax.bar(strategies, vals, color=[colors.get(s, '#333') for s in strategies])
-    ax.set_ylabel("CDI (Configuration Diversity)")
-    ax.set_title("(d) Configuration Diversity Index")
-    ax.set_ylim(0, 1)
-    for bar, v in zip(bars, vals):
-        ax.text(bar.get_x() + bar.get_width()/2, v + 0.02, f'{v:.3f}', 
-                ha='center', va='bottom', fontsize=9)
-    ax.tick_params(axis='x', rotation=15)
+    vals = [summary[s]['cdi'] for s in strategies]
+    ax.bar(x, vals, width, color=colors, edgecolor='black', linewidth=0.4)
+    ax.set_ylabel('CDI')
+    ax.set_title('(d) Config. Diversity')
+    ax.set_xticks(x)
+    ax.set_xticklabels(short_names, fontsize=7)
+    ax.set_ylim(0, 1.0)
+    for i, v in enumerate(vals):
+        ax.text(i, v + 0.02, f'{v:.2f}', ha='center', fontsize=6)
     
-    # 5. Redundancy by Strategy
+    # (e) Redundancy
     ax = axes[1, 1]
-    vals = [strategy_summary[s]["redundancy"] for s in strategies]
-    bars = ax.bar(strategies, vals, color=[colors.get(s, '#333') for s in strategies])
-    ax.set_ylabel("Redundancy Score")
-    ax.set_title("(e) Redundancy Score")
-    ax.set_ylim(0, 1)
-    for bar, v in zip(bars, vals):
-        ax.text(bar.get_x() + bar.get_width()/2, v + 0.02, f'{v:.3f}', 
-                ha='center', va='bottom', fontsize=9)
-    ax.tick_params(axis='x', rotation=15)
+    vals = [summary[s]['redundancy'] for s in strategies]
+    ax.bar(x, vals, width, color=colors, edgecolor='black', linewidth=0.4)
+    ax.set_ylabel('Redundancy')
+    ax.set_title('(e) Redundancy Score')
+    ax.set_xticks(x)
+    ax.set_xticklabels(short_names, fontsize=7)
+    ax.set_ylim(0, 1.0)
+    for i, v in enumerate(vals):
+        ax.text(i, v + 0.02, f'{v:.2f}', ha='center', fontsize=6)
     
-    # 6. Cost by Strategy
+    # (f) Total Cost
     ax = axes[1, 2]
-    vals = [strategy_summary[s]["cost"] for s in strategies]
-    bars = ax.bar(strategies, vals, color=[colors.get(s, '#333') for s in strategies])
-    ax.set_ylabel("Total Cost")
-    ax.set_title("(f) MTD Cost")
-    for bar, v in zip(bars, vals):
-        ax.text(bar.get_x() + bar.get_width()/2, v + 0.01, f'{v:.3f}', 
-                ha='center', va='bottom', fontsize=9)
-    ax.tick_params(axis='x', rotation=15)
+    vals = [summary[s]['cost'] for s in strategies]
+    ax.bar(x, vals, width, color=colors, edgecolor='black', linewidth=0.4)
+    ax.set_ylabel('Total Cost')
+    ax.set_title('(f) MTD Cost')
+    ax.set_xticks(x)
+    ax.set_xticklabels(short_names, fontsize=7)
+    for i, v in enumerate(vals):
+        ax.text(i, v + 0.02, f'{v:.2f}', ha='center', fontsize=6)
     
     plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, "fig9_strategy_comparison.png"), dpi=300, bbox_inches='tight')
+    plt.savefig(os.path.join(output_dir, 'fig9_strategy_comparison.pdf'))
+    plt.savefig(os.path.join(output_dir, 'fig9_strategy_comparison.png'), dpi=300)
     plt.close()
+    print("  ✓ Fig 9: Strategy Comparison")
     
-    # Figure 10: Level별 비교
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
-    fig.suptitle("Performance vs Attacker Level (Paper Figure 10)", fontsize=14, fontweight='bold')
-    
+    # ==========================================================================
+    # Figure 10: Performance vs Attacker Level
+    # ==========================================================================
+    fig, axes = plt.subplots(1, 2, figsize=(7.0, 2.4))
     levels = [0, 1, 2, 3, 4]
-    level_labels = ['L0\n(Script)', 'L1\n(Novice)', 'L2\n(Inter)', 'L3\n(Adv)', 'L4\n(APT)']
     
-    # S_MTD by Level
+    # (a) S_MTD vs Level
     ax = axes[0]
-    for strategy in strategies:
-        level_data = evaluator.get_summary_by_level(strategy)
-        vals = [level_data.get(l, {}).get("s_mtd", 0) for l in levels]
-        ax.plot(levels, vals, marker='o', label=strategy, color=colors.get(strategy, '#333'), linewidth=2)
-    ax.set_xlabel("Attacker Level")
-    ax.set_ylabel("S_MTD")
-    ax.set_title("(a) Defense Effectiveness by Attacker Level")
+    for s in strategies:
+        level_data = evaluator.get_summary_by_level(s)
+        vals = [level_data.get(l, {}).get('s_mtd', 0) for l in levels]
+        ax.plot(levels, vals, marker=MARKERS[s], color=COLORS[s],
+                label=s.replace(' MTD', ''), linewidth=1.0, markersize=4)
+    ax.set_xlabel('Attacker Level')
+    ax.set_ylabel(r'$S_{\mathrm{MTD}}$')
+    ax.set_title('(a) Defense Effectiveness')
     ax.set_xticks(levels)
-    ax.set_xticklabels(level_labels)
-    ax.legend(loc='best', fontsize=8)
-    ax.grid(True, alpha=0.3)
-    ax.set_ylim(0, 1)
+    ax.set_xticklabels(['L0', 'L1', 'L2', 'L3', 'L4'])
+    ax.legend(loc='lower left', fontsize=6, ncol=2)
     
-    # Breach Rate by Level
+    # (b) Breach Rate vs Level
     ax = axes[1]
-    for strategy in strategies:
-        level_data = evaluator.get_summary_by_level(strategy)
-        vals = [level_data.get(l, {}).get("breach_rate", 0) for l in levels]
-        ax.plot(levels, vals, marker='o', label=strategy, color=colors.get(strategy, '#333'), linewidth=2)
-    ax.set_xlabel("Attacker Level")
-    ax.set_ylabel("Breach Rate (%)")
-    ax.set_title("(b) Breach Rate by Attacker Level")
+    for s in strategies:
+        level_data = evaluator.get_summary_by_level(s)
+        vals = [level_data.get(l, {}).get('breach_rate', 0) for l in levels]
+        ax.plot(levels, vals, marker=MARKERS[s], color=COLORS[s],
+                label=s.replace(' MTD', ''), linewidth=1.0, markersize=4)
+    ax.set_xlabel('Attacker Level')
+    ax.set_ylabel('Breach Rate (%)')
+    ax.set_title('(b) Breach Rate')
     ax.set_xticks(levels)
-    ax.set_xticklabels(level_labels)
-    ax.legend(loc='best', fontsize=8)
-    ax.grid(True, alpha=0.3)
+    ax.set_xticklabels(['L0', 'L1', 'L2', 'L3', 'L4'])
+    ax.legend(loc='upper left', fontsize=6, ncol=2)
     ax.set_ylim(0, 100)
     
     plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, "fig10_level_comparison.png"), dpi=300, bbox_inches='tight')
+    plt.savefig(os.path.join(output_dir, 'fig10_level_comparison.pdf'))
+    plt.savefig(os.path.join(output_dir, 'fig10_level_comparison.png'), dpi=300)
     plt.close()
+    print("  ✓ Fig 10: Level Comparison")
     
-    print(f"\n✅ Figures saved to {output_dir}/")
+    # ==========================================================================
+    # Figure 11: MTTC Comparison
+    # ==========================================================================
+    fig, axes = plt.subplots(1, 2, figsize=(7.0, 2.4))
+    
+    # (a) MTTC by Strategy
+    ax = axes[0]
+    vals = [summary[s]['mttc'] for s in strategies]
+    ax.bar(x, vals, width, color=colors, edgecolor='black', linewidth=0.4)
+    ax.set_ylabel('MTTC (steps)')
+    ax.set_title('(a) Mean Time to Compromise')
+    ax.set_xticks(x)
+    ax.set_xticklabels(short_names, fontsize=7)
+    for i, v in enumerate(vals):
+        ax.text(i, v + 2, f'{v:.0f}', ha='center', fontsize=6)
+    
+    # (b) MTTC vs Level
+    ax = axes[1]
+    for s in strategies:
+        level_data = evaluator.get_summary_by_level(s)
+        vals = [level_data.get(l, {}).get('mttc', 0) for l in levels]
+        ax.plot(levels, vals, marker=MARKERS[s], color=COLORS[s],
+                label=s.replace(' MTD', ''), linewidth=1.0, markersize=4)
+    ax.set_xlabel('Attacker Level')
+    ax.set_ylabel('MTTC (steps)')
+    ax.set_title('(b) MTTC by Attacker Level')
+    ax.set_xticks(levels)
+    ax.set_xticklabels(['L0', 'L1', 'L2', 'L3', 'L4'])
+    ax.legend(loc='upper right', fontsize=6)
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'fig11_mttc.pdf'))
+    plt.savefig(os.path.join(output_dir, 'fig11_mttc.png'), dpi=300)
+    plt.close()
+    print("  ✓ Fig 11: MTTC Comparison")
+    
+    # ==========================================================================
+    # Figure 12: CER vs Level, Cost vs S_MTD
+    # ==========================================================================
+    fig, axes = plt.subplots(1, 3, figsize=(7.0, 2.0))
+    
+    # (a) CER vs Level
+    ax = axes[0]
+    for s in strategies:
+        level_data = evaluator.get_summary_by_level(s)
+        vals = [level_data.get(l, {}).get('cer', 0) for l in levels]
+        ax.plot(levels, vals, marker=MARKERS[s], color=COLORS[s],
+                label=s.replace(' MTD', ''), linewidth=1.0, markersize=4)
+    ax.set_xlabel('Attacker Level')
+    ax.set_ylabel('CER')
+    ax.set_title('(a) CER vs Level')
+    ax.set_xticks(levels)
+    ax.set_xticklabels(['L0', 'L1', 'L2', 'L3', 'L4'])
+    ax.legend(loc='upper right', fontsize=5.5)
+    
+    # (b) Cost vs S_MTD (scatter)
+    ax = axes[1]
+    for s in strategies:
+        ax.scatter(summary[s]['cost'], summary[s]['s_mtd'], s=60,
+                   color=COLORS[s], marker=MARKERS[s],
+                   label=s.replace(' MTD', ''), edgecolors='black', linewidth=0.3)
+    ax.set_xlabel('Total Cost')
+    ax.set_ylabel(r'$S_{\mathrm{MTD}}$')
+    ax.set_title('(b) Cost vs Defense')
+    ax.legend(loc='lower right', fontsize=5.5)
+    
+    # (c) MTTC vs CER
+    ax = axes[2]
+    for s in strategies:
+        ax.scatter(summary[s]['mttc'], summary[s]['cer'], s=60,
+                   color=COLORS[s], marker=MARKERS[s],
+                   label=s.replace(' MTD', ''), edgecolors='black', linewidth=0.3)
+    ax.set_xlabel('MTTC (steps)')
+    ax.set_ylabel('CER')
+    ax.set_title('(c) MTTC vs CER')
+    ax.legend(loc='upper right', fontsize=5.5)
+    
+    plt.tight_layout()
+    plt.savefig(os.path.join(output_dir, 'fig12_tradeoffs.pdf'))
+    plt.savefig(os.path.join(output_dir, 'fig12_tradeoffs.png'), dpi=300)
+    plt.close()
+    print("  ✓ Fig 12: Trade-off Analysis")
+    
+    print(f"\n✅ All figures saved to: {output_dir}/")
 
 
-def print_latex_table(evaluator: MTDEvaluator):
-    """LaTeX 테이블 출력"""
+def generate_latex_table(evaluator: RealModelEvaluator, output_dir: str):
+    """LaTeX 테이블 생성"""
     summary = evaluator.get_summary_by_strategy()
     
-    print("\n" + "="*80)
-    print("Table 15: Strategy Comparison (LaTeX)")
-    print("="*80)
+    table = r"""\begin{table}[!t]
+\centering
+\caption{Defense Performance Comparison Across MTD Strategies}
+\label{tab:comparison}
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{@{}lcccccc@{}}
+\toprule
+\textbf{Strategy} & $S_{\mathrm{MTD}}$ & \textbf{Breach(\%)} & \textbf{MTTC} & \textbf{CER} & \textbf{CDI} & \textbf{Cost} \\
+\midrule
+"""
     
-    print(r"\begin{table}[!t]")
-    print(r"\centering")
-    print(r"\caption{Performance comparison of MTD strategies}")
-    print(r"\label{tab:comparison}")
-    print(r"\begin{tabular}{@{}lccccc@{}}")
-    print(r"\toprule")
-    print(r"\textbf{Strategy} & \textbf{S\_MTD} & \textbf{Breach(\%)} & \textbf{CER} & \textbf{CDI} & \textbf{Cost} \\")
-    print(r"\midrule")
+    for s, m in summary.items():
+        table += f"{s} & {m['s_mtd']:.3f} & {m['breach_rate']:.1f} & {m['mttc']:.0f} & {m['cer']:.2f} & {m['cdi']:.3f} & {m['cost']:.3f} \\\\\n"
     
-    for strategy in summary.keys():
-        s = summary[strategy]
-        print(f"{strategy} & {s['s_mtd']:.3f} & {s['breach_rate']:.1f} & "
-              f"{s['cer']:.2f} & {s['cdi']:.3f} & {s['cost']:.3f} \\\\")
+    table += r"""\bottomrule
+\end{tabular}
+\end{table}
+"""
     
-    print(r"\bottomrule")
-    print(r"\end{tabular}")
-    print(r"\end{table}")
+    with open(os.path.join(output_dir, 'table_comparison.tex'), 'w') as f:
+        f.write(table)
+    
+    print(table)
+    print(f"✅ LaTeX table saved to: {output_dir}/table_comparison.tex")
 
 
-# =============================================================================
-# 메인
-# =============================================================================
-
-def main():
-    print("="*70)
-    print("MTD Paper Evaluation System v1.0")
-    print("Based on IEEE Access Paper: CTI-Driven RL-MTD")
-    print("="*70)
-    
-    # 전략 정의
-    strategies = [
-        NoMTDStrategy(),
-        StaticMTDStrategy(),
-        HeuristicCTIStrategy(),
-        RLMTDStrategy(),
-        RLCTIMTDStrategy(),
-    ]
-    
-    # 평가기 생성
-    evaluator = MTDEvaluator(
-        strategies=strategies,
-        attacker_levels=[0, 1, 2, 3, 4],
-        episodes_per_config=50,
-        max_steps=200,
-        seed=42
-    )
-    
-    # 평가 실행
-    print("\n📊 Running evaluation...")
-    results = evaluator.run_evaluation(verbose=True)
-    
-    # 요약 출력
-    print("\n" + "="*70)
-    print("📈 Summary Results")
-    print("="*70)
-    
-    summary = evaluator.get_summary_by_strategy()
-    print(f"\n{'Strategy':<20} {'S_MTD':>8} {'Breach%':>10} {'CER':>8} {'CDI':>8} {'Cost':>8}")
-    print("-"*70)
-    for strategy, metrics in summary.items():
-        print(f"{strategy:<20} {metrics['s_mtd']:>8.3f} {metrics['breach_rate']:>9.1f}% "
-              f"{metrics['cer']:>8.2f} {metrics['cdi']:>8.3f} {metrics['cost']:>8.3f}")
-    
-    # LaTeX 테이블
-    print_latex_table(evaluator)
-    
-    # 시각화
-    output_dir = "/mnt/user-data/outputs/paper_figures_v10"
-    plot_results(evaluator, output_dir)
-    
-    # 결과 저장
-    results_data = {
-        "summary": summary,
+def export_results_json(evaluator: RealModelEvaluator, output_dir: str):
+    """결과 JSON 저장"""
+    data = {
         "timestamp": datetime.now().isoformat(),
         "config": {
             "episodes_per_config": evaluator.episodes_per_config,
             "max_steps": evaluator.max_steps,
-            "attacker_levels": evaluator.attacker_levels,
-        }
+            "seed": evaluator.seed,
+            "model_path": evaluator.model_path,
+        },
+        "summary": evaluator.get_summary_by_strategy(),
+        "by_level": {
+            s: evaluator.get_summary_by_level(s) 
+            for s in evaluator.strategies.keys()
+        },
     }
     
-    with open(os.path.join(output_dir, "evaluation_results.json"), 'w') as f:
-        json.dump(results_data, f, indent=2, default=str)
+    with open(os.path.join(output_dir, 'evaluation_results.json'), 'w') as f:
+        json.dump(data, f, indent=2, default=float)
     
-    print(f"\n✅ Results saved to {output_dir}/")
+    print(f"✅ Results JSON saved to: {output_dir}/evaluation_results.json")
+
+
+# =============================================================================
+# Main
+# =============================================================================
+def main():
+    parser = argparse.ArgumentParser(description="MTD Real Model Evaluation + IEEE Figures")
+    parser.add_argument("--model", type=str, required=True, help="Path to best.pt")
+    parser.add_argument("--episodes", type=int, default=50, help="Episodes per config")
+    parser.add_argument("--max-steps", type=int, default=200)
+    parser.add_argument("--seed", type=int, default=42)
+    parser.add_argument("--hidden-size", type=int, default=256)
+    parser.add_argument("--output-dir", type=str, default="paper_figures_real")
+    parser.add_argument("--levels", type=int, nargs="+", default=[0, 1, 2, 3, 4])
+    parser.add_argument("--device", type=str, default="cpu")
+    args = parser.parse_args()
+    
+    print("="*70)
+    print("MTD Real Model Evaluation + IEEE Paper Figures")
+    print("="*70)
+    print(f"Model: {args.model}")
+    print(f"Episodes per config: {args.episodes}")
+    print(f"Max steps: {args.max_steps}")
+    print(f"Levels: {args.levels}")
+    print(f"Output: {args.output_dir}")
+    print("="*70)
+    
+    # 평가 실행
+    evaluator = RealModelEvaluator(
+        model_path=args.model,
+        episodes_per_config=args.episodes,
+        max_steps=args.max_steps,
+        seed=args.seed,
+        hidden_size=args.hidden_size,
+        device=args.device,
+    )
+    
+    print("\n📊 Running evaluation...")
+    evaluator.evaluate(levels=args.levels, verbose=True)
+    
+    # 요약 출력
+    print("\n" + "="*70)
+    print("📈 Summary Results (Real Model)")
+    print("="*70)
+    
+    summary = evaluator.get_summary_by_strategy()
+    print(f"\n{'Strategy':<18} {'S_MTD':>8} {'Breach%':>10} {'MTTC':>8} {'CER':>8} {'Cost':>8}")
+    print("-"*70)
+    for strategy, metrics in summary.items():
+        print(f"{strategy:<18} {metrics['s_mtd']:>8.3f} {metrics['breach_rate']:>9.1f}% "
+              f"{metrics['mttc']:>8.0f} {metrics['cer']:>8.2f} {metrics['cost']:>8.3f}")
+    
+    # 그래프 생성
+    print("\n📊 Generating IEEE-style figures...")
+    plot_all_figures(evaluator, args.output_dir)
+    
+    # LaTeX 테이블
+    print("\n📋 Generating LaTeX table...")
+    generate_latex_table(evaluator, args.output_dir)
+    
+    # JSON 저장
+    export_results_json(evaluator, args.output_dir)
+    
+    print("\n" + "="*70)
+    print("✅ Evaluation Complete!")
+    print("="*70)
     
     return evaluator
 
 
 if __name__ == "__main__":
-    evaluator = main()
+    main()

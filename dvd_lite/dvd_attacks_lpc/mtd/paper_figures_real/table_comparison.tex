@@ -1,0 +1,17 @@
+\begin{table}[!t]
+\centering
+\caption{Defense Performance Comparison Across MTD Strategies}
+\label{tab:comparison}
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{@{}lcccccc@{}}
+\toprule
+\textbf{Strategy} & $S_{\mathrm{MTD}}$ & \textbf{Breach(\%)} & \textbf{MTTC} & \textbf{CER} & \textbf{CDI} & \textbf{Cost} \\
+\midrule
+No MTD & 0.527 & 85.1 & 115 & 0.53 & 1.000 & 0.000 \\
+Static MTD & 0.650 & 60.8 & 127 & 3.25 & 1.000 & 0.103 \\
+Heuristic+CTI & 0.756 & 21.5 & 178 & 1.65 & 1.000 & 0.654 \\
+RL MTD & 0.785 & 2.0 & 198 & 0.15 & 1.000 & 5.217 \\
+RL+CTI MTD & 0.784 & 2.9 & 197 & 0.15 & 1.000 & 5.217 \\
+\bottomrule
+\end{tabular}
+\end{table}
