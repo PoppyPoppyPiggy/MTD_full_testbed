@@ -1,0 +1,19 @@
+\begin{table}[!t]
+\centering
+\caption{Multi-Level Threat Actor Model Parameters}
+\label{tab:attacker_profiles}
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{@{}clcccc@{}}
+\toprule
+$\ell$ & \textbf{Type} & $\nu_{\text{scan}}$ & $p_{\text{disc}}$ & $p_{\text{exploit}}$ & $\kappa_\ell$ \\
+\midrule
+0 & Script Kiddie & 0.03 & 0.15 & 0.08 & 1.00 \\
+1 & Hobbyist & 0.05 & 0.25 & 0.12 & 0.92 \\
+2 & Professional & 0.08 & 0.35 & 0.20 & 0.84 \\
+3 & Expert & 0.12 & 0.50 & 0.30 & 0.76 \\
+4 & APT & 0.15 & 0.65 & 0.40 & 0.68 \\
+\bottomrule
+\end{tabular}
+\vspace{1mm}
+\footnotesize{$\nu_{\text{scan}}$: scan rate, $p_{\text{disc}}$: discovery probability, $p_{\text{exploit}}$: exploitation probability, $\kappa_\ell = 1 - 0.08\ell$: MTD effectiveness modifier. Based on Maleki et al.~\cite{maleki2016markov} and Verizon DBIR~\cite{verizon_dbir}.}
+\end{table}

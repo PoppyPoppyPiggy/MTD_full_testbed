@@ -1,0 +1,19 @@
+\begin{table}[!t]
+\centering
+\caption{Overall Defense Performance Comparison}
+\label{tab:overall_comparison}
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{@{}lcccccc@{}}
+\toprule
+\textbf{Strategy} & $S_{\mathrm{MTD}}$ & \textbf{BR(\%)} & \textbf{MTTC} & \textbf{CER} & \textbf{CDI} & \textbf{Cost} \\
+\midrule
+No MTD & 0.527 & 84.0 & 116 & 0.53 & \textbf{1.000} & \textbf{0.000} \\
+Static MTD & 0.652 & 59.8 & 128 & \textbf{3.23} & \textbf{1.000} & 0.104 \\
+Heuristic+CTI & 0.825 & \textbf{0.4} & \textbf{199} & 1.75 & \textbf{1.000} & 0.594 \\
+RL MTD & 0.847 & 0.6 & 199 & 0.78 & \textbf{1.000} & 1.267 \\
+RL+CTI MTD & \textbf{0.848} & \textbf{0.4} & 199 & 0.81 & \textbf{1.000} & 1.229 \\
+\bottomrule
+\end{tabular}
+\vspace{1mm}
+\footnotesize{BR: Breach Rate, MTTC: Mean Time to Compromise, CER: Cost Efficiency Ratio, CDI: Configuration Diversity Index. Bold indicates best performance.}
+\end{table}

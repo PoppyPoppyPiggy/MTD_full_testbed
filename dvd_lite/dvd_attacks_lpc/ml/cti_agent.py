@@ -1,371 +1,224 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
+"""
+CTI Agent v2.0 (Paper-Ready)
+=============================
+CTI 분류기 추론 모듈 - 로그 → 공격 분류
+"""
 
 import os
-import sys
 import json
-import time
-import joblib # 모델 로딩
-import pandas as pd
+import joblib
+import logging
 import numpy as np
-from collections import deque
-import threading
-from typing import Dict, Any, Optional, List # List 추가
+import pandas as pd
+from typing import Dict, Any, List, Optional, Tuple
 
-# --- 경로 설정 ---
-ML_DIR = os.path.dirname(os.path.realpath(__file__))
-PROJECT_ROOT = os.path.dirname(ML_DIR)
-if PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, PROJECT_ROOT)
+logging.basicConfig(level=logging.INFO, format="%(asctime)s [%(levelname)s] %(message)s")
+logger = logging.getLogger("CTIAgent")
 
-BUS_LOG_PATH = os.path.join(PROJECT_ROOT, 'bus', 'bus.log') # Alert 로깅 경로
-import datetime
-
-def log_bus_event(type: str, data: Dict[str, Any], source_override: str = "ai_cti_agent"):
-    """간단한 버스 이벤트 로깅 함수 (ML alert용)"""
-    record = {
-        "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
-        "ts": time.time(),
-        "source": source_override,
-        "type": type,
-        "data": data,
-    }
-    try:
-        # bus.log 파일에 append 모드로 기록
-        with open(BUS_LOG_PATH, "a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
-    except IOError as e:
-        print(f"Warning: Failed to write alert to bus.log: {e}")
-        # 실패 시 stdout으로라도 출력
-        # print(json.dumps(record, ensure_ascii=False, default=str))
-#dvd_lite/dvd_attacks_lpc/ml/output/cti_classifier_model.joblib
-
-# --- 상수 정의 ---
-MODEL_PATH = os.path.join(PROJECT_ROOT, 'ml', 'output', 'cti_classifier_model.joblib')
-FEATURES_PATH = os.path.join(PROJECT_ROOT, 'ml', 'output', 'training_features.json')
-# ⭐️ 실시간으로 감시할 로그 파일 경로 (data_builder와 일치)
-LOG_SOURCES = {
-    "system_events": os.path.join(PROJECT_ROOT, 'bus', 'bus_system_events.log'),
-    "telemetry": os.path.join(PROJECT_ROOT, 'bus', 'bus_telemetry.log'),
-    "network": os.path.join(PROJECT_ROOT, 'bus', 'bus_network.log'),
-    "qos": os.path.join(PROJECT_ROOT, 'bus', 'bus_qos.log'),
-    "container_telemetry": os.path.join(PROJECT_ROOT, 'bus', 'bus_container_telemetry.log'),
-    # 오케스트레이터 로그는 타임라인 생성용, 실시간 분석에는 불필요
-}
-TIME_WINDOW_SEC = 5.0  # 특징 추출 시간 창 (data_builder와 동일)
-PREDICTION_INTERVAL_SEC = 1.0 # 예측 수행 주기 (초)
-CONFIDENCE_THRESHOLD = 0.70 # 위협 탐지 신뢰도 임계값
-
-# ==============================================================================
-# 실시간 특징 공학 (data_builder.py와 로직 동일화)
-# ==============================================================================
-def create_features_from_window(df_window: pd.DataFrame) -> Optional[pd.Series]:
-    """시간 창 데이터프레임으로부터 통계적 특징 벡터(Series)를 생성합니다."""
-    # data_builder.py의 함수와 동일한 로직 사용
-
-    if df_window.empty:
-        # 빈 윈도우 -> 특징 없음 (None 반환 또는 기본 'normal' 특징 반환 선택 가능)
-        # 여기서는 None 반환하여 예측 스킵
-        return None
-
-    features = {'is_empty': 0.0}
-
-    # 1. 이벤트 타입별 발생 빈도
-    if 'type' in df_window.columns:
-        event_counts = df_window['type'].value_counts()
-        for event_type, count in event_counts.items():
-            safe_event_type = str(event_type).replace('/', '_').replace('.', '_')
-            features[f'event_count_{safe_event_type}'] = count
-
-    # 2. 주요 수치 데이터 통계량
-    # data_builder와 동일한 컬럼 및 prefix 사용
-    numeric_cols = {
-        'data_alt_m': 'alt', 'data_relative_alt_m': 'rel_alt',
-        'data_groundspeed_ms': 'gs', 'data_vx': 'vx', 'data_vy': 'vy', 'data_vz': 'vz',
-        'data_xacc': 'xacc', 'data_yacc': 'yacc', 'data_zacc': 'zacc',
-        'data_pitch_deg': 'pitch', 'data_roll_deg': 'roll', 'data_yaw_deg': 'yaw',
-        'data_avg_rtt_ms': 'rtt', 'data_jitter_ms': 'jitter', 'data_packet_loss_pct': 'loss',
-        'data_length': 'pkt_len', 'data_inter_arrival_time_ms': 'pkt_iat',
-        'data_cpu_load_pct': 'cpu', # telemetry 또는 container 모니터
-        'data_battery_v': 'bat_v', # telemetry 또는 container 모니터
-        'data_battery_pct': 'bat_pct', # telemetry 또는 container 모니터
-    }
-
-    for col, prefix in numeric_cols.items():
-        if col in df_window.columns:
-            series = pd.to_numeric(df_window[col], errors='coerce').dropna()
-            if not series.empty:
-                features[f'{prefix}_mean'] = series.mean()
-                features[f'{prefix}_std'] = series.std(ddof=0) # ddof=0 for population std if needed, default is 1
-                features[f'{prefix}_max'] = series.max()
-                features[f'{prefix}_min'] = series.min()
-                features[f'{prefix}_count'] = series.count()
-
-    # 3. 카테고리 데이터 (드론 모드 비율)
-    if 'data_mode' in df_window.columns:
-        mode_counts = df_window['data_mode'].dropna().value_counts(normalize=True)
-        for mode, ratio in mode_counts.items():
-            safe_mode = str(mode).replace('.', '_').replace(' ', '_').upper()
-            features[f'mode_ratio_{safe_mode}'] = ratio
-
-    # 4. ARP 특징
-    if 'data_arp_op' in df_window.columns:
-        arp_ops = pd.to_numeric(df_window['data_arp_op'], errors='coerce').dropna()
-        if not arp_ops.empty:
-            features['arp_request_count'] = (arp_ops == 1).sum()
-            features['arp_reply_count'] = (arp_ops == 2).sum()
-
-    # 5. TCP 플래그 카운트
-    if 'data_tcp_flags' in df_window.columns:
-         flags_series = df_window['data_tcp_flags'].dropna().astype(str)
-         features['tcp_syn_count'] = flags_series.str.contains('S').sum()
-         features['tcp_rst_count'] = flags_series.str.contains('R').sum()
-         features['tcp_fin_count'] = flags_series.str.contains('F').sum()
-
-    if not features: return None # 특징이 하나도 없으면 None 반환
-
-    # Series로 변환
-    feature_series = pd.Series(features)
-
-    # NaN 값 0으로 채우기 (std 계산 시 0 나올 수 있음)
-    return feature_series.fillna(0)
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+MODEL_PATH = os.path.join(BASE_DIR, "output", "cti_classifier_model.joblib")
+FEATURES_PATH = os.path.join(BASE_DIR, "output", "training_features.json")
+EVENT_MAPPING_PATH = os.path.join(BASE_DIR, "event_mapping.json")
+TACTIC_MAPPING_PATH = os.path.join(BASE_DIR, "tactic_mapping.json")
 
 
-# ==============================================================================
-# 실시간 로그 팔로워
-# ==============================================================================
-# ⭐️ 로그 파일 팔로워 (system_event_monitor와 유사하게 subprocess 사용 고려)
-# 여기서는 간단하게 python 내장 함수로 구현 (파일 I/O 부하 주의)
-def follow(filepath: str, queue: deque, stop_event: threading.Event):
-    """파일의 새로운 라인을 지속적으로 읽어 deque에 추가합니다."""
-    print(f"[*] '{os.path.basename(filepath)}' 로그 팔로잉 시작...")
-    try:
-        with open(filepath, 'r', encoding='utf-8', errors='ignore') as file:
-            # 파일 끝으로 이동
-            file.seek(0, os.SEEK_END)
-            while not stop_event.is_set():
-                line = file.readline()
-                if not line:
-                    # 파일 변경 감지를 위해 잠시 대기 (inode 변경 등 고급 처리 필요 시 watchdog 라이브러리 고려)
-                    time.sleep(0.05)
-                    # 파일이 재생성되었는지 간단히 확인 (더 견고한 방법 필요)
-                    try:
-                         if file.tell() > os.fstat(file.fileno()).st_size:
-                              print(f"[!] 로그 파일 '{os.path.basename(filepath)}' 변경 감지됨. 다시 엽니다.")
-                              file.seek(0, os.SEEK_END) # 파일 끝으로 다시 이동
-                    except OSError: # 파일이 삭제된 경우 등
-                         print(f"[!] 로그 파일 '{os.path.basename(filepath)}' 접근 오류. 팔로잉 중단.")
-                         break # 해당 파일 팔로잉 중단
-                    continue
+class CTIClassifier:
+    """CTI 공격 분류기"""
+    
+    def __init__(
+        self,
+        model_path: str = MODEL_PATH,
+        use_tactic_labels: bool = False,
+        confidence_threshold: float = 0.7
+    ):
+        self.model = None
+        self.label_encoder = None
+        self.feature_names: List[str] = []
+        self.id_to_name: Dict[int, str] = {}
+        self.tactic_names: Dict[int, str] = {}
+        self.use_tactic_labels = use_tactic_labels
+        self.confidence_threshold = confidence_threshold
+        
+        self._load_model(model_path)
+        self._load_mappings()
+        
+        logger.info(f"✅ CTI Classifier 초기화 완료 ({len(self.feature_names)} features)")
 
-                try:
-                    # 빈 줄이나 공백만 있는 줄은 무시
-                    if line.strip():
-                        log_entry = json.loads(line)
-                        # 'ts' 필드가 없으면 현재 시간 추가 (데이터 일관성)
-                        if 'ts' not in log_entry:
-                            log_entry['ts'] = time.time()
-                        queue.append(log_entry)
-                except json.JSONDecodeError:
-                     # print(f"[!] JSON 파싱 오류 무시: {line[:100]}...") # 너무 많은 로그 방지
-                     pass
-                except Exception as read_err:
-                     print(f"[!] 로그 라인 처리 중 오류 ({os.path.basename(filepath)}): {read_err}", file=sys.stderr)
-
-    except FileNotFoundError:
-        print(f"[!] 경고: 로그 파일을 찾을 수 없습니다: {filepath}. 해당 소스는 모니터링되지 않습니다.")
-    except Exception as e:
-        print(f"❌ '{os.path.basename(filepath)}' 팔로잉 중 예외 발생: {e}", file=sys.stderr)
-    finally:
-        print(f"[*] '{os.path.basename(filepath)}' 로그 팔로잉 종료.")
-
-
-# ==============================================================================
-# CTI 에이전트 메인 로직
-# ==============================================================================
-def main():
-    print("🚀 [AI-CTI Agent v4.1] 지능형 위협 분류 에이전트 시작 (Feature Consistency)")
-    stop_event = threading.Event() # 스레드 종료 플래그
-
-    # 1. 모델 및 피처 목록 로드
-    print(f"[*] AI 모델 및 피처 목록 로드 시도...")
-    model = None
-    training_features: List[str] = []
-    # 파일이 생성될 때까지 주기적으로 확인 (최대 1분 대기)
-    wait_start = time.time()
-    while time.time() - wait_start < 60:
-        if os.path.exists(MODEL_PATH) and os.path.exists(FEATURES_PATH):
-            try:
-                model = joblib.load(MODEL_PATH)
-                with open(FEATURES_PATH, 'r') as f:
-                    training_features = json.load(f)['features']
-                print(f"✅ AI 모델 로드 완료: '{os.path.basename(MODEL_PATH)}'")
-                print(f"✅ {len(training_features)}개 학습 피처 목록 로드 완료: '{os.path.basename(FEATURES_PATH)}'")
-                break # 로드 성공 시 루프 탈출
-            except Exception as e:
-                print(f"❌ 오류: AI 모델/피처 파일 로드 실패 (파일은 존재하나 읽기 오류): {e}", file=sys.stderr)
-                sys.exit(1) # 치명적 오류로 간주하고 종료
+    def _load_model(self, model_path: str):
+        if not os.path.exists(model_path):
+            raise FileNotFoundError(f"모델 파일 없음: {model_path}")
+        
+        artifact = joblib.load(model_path)
+        
+        if isinstance(artifact, dict):
+            self.model = artifact['model']
+            self.label_encoder = artifact.get('encoder')
+            if artifact.get('features'):
+                self.feature_names = artifact['features']
+            if artifact.get('mapping'):
+                self.id_to_name.update(artifact['mapping'])
         else:
-             print(f"   - 대기 중... (모델: {'OK' if os.path.exists(MODEL_PATH) else '없음'}, 피처: {'OK' if os.path.exists(FEATURES_PATH) else '없음'})")
-             time.sleep(3)
-    else: # while 루프가 break 없이 완료된 경우 (타임아웃)
-         print(f"❌ 오류: AI 모델 또는 피처 파일을 지정된 시간 내에 찾을 수 없습니다.")
-         print(f"   - 모델 경로: {MODEL_PATH}")
-         print(f"   - 피처 경로: {FEATURES_PATH}")
-         print("       먼저 train_classifier.py를 성공적으로 실행해야 합니다.")
-         sys.exit(1)
+            self.model = artifact
+        
+        if not self.feature_names and os.path.exists(FEATURES_PATH):
+            with open(FEATURES_PATH, 'r') as f:
+                self.feature_names = json.load(f).get('features', [])
+        
+        if not self.feature_names and hasattr(self.model, 'feature_names_in_'):
+            self.feature_names = list(self.model.feature_names_in_)
 
-    # 2. 실시간 로그 수집 스레드 시작
-    log_queues: Dict[str, deque] = {name: deque(maxlen=5000) for name in LOG_SOURCES.keys()} # 각 소스별 큐
-    log_threads: List[threading.Thread] = []
+    def _load_mappings(self):
+        try:
+            if os.path.exists(EVENT_MAPPING_PATH):
+                with open(EVENT_MAPPING_PATH, 'r', encoding='utf-8') as f:
+                    name_to_id = json.load(f)
+                    self.id_to_name = {v: k for k, v in name_to_id.items()}
+        except Exception as e:
+            logger.warning(f"Event mapping 로드 실패: {e}")
 
-    for name, path in LOG_SOURCES.items():
-        # 로그 파일 디렉토리 생성 (없으면)
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        # 빈 파일 생성 (처음 실행 시 필요)
-        if not os.path.exists(path):
-             try: open(path, 'a').close()
-             except Exception: pass # 생성 실패해도 일단 진행
+        try:
+            if os.path.exists(TACTIC_MAPPING_PATH):
+                with open(TACTIC_MAPPING_PATH, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                    self.tactic_names = {int(k): v for k, v in data.get('tactic_names', {}).items()}
+        except Exception as e:
+            logger.warning(f"Tactic mapping 로드 실패: {e}")
 
-        # 각 로그 파일에 대한 팔로워 스레드 생성 및 시작
-        thread = threading.Thread(target=follow, args=(path, log_queues[name], stop_event), daemon=True)
-        log_threads.append(thread)
-        thread.start()
+    def preprocess(self, log_entry: Dict[str, Any]) -> pd.DataFrame:
+        """로그 엔트리 → 피처 벡터"""
+        features = {feat: 0.0 for feat in self.feature_names}
+        
+        source = log_entry.get("_log_source") or log_entry.get("source", "unknown")
+        data = log_entry.get("data", {}) or {}
 
-    print(f"[*] {len(log_threads)}개의 로그 소스 감시 시작...")
+        if source in ("network", "network_traffic_monitor"):
+            features["pkt_length"] = float(data.get("length", 0) or 0)
+            features["pkt_src_port"] = float(data.get("src_port", 0) or 0)
+            features["pkt_dst_port"] = float(data.get("dst_port", 0) or 0)
+            
+            protocol = str(data.get("protocol", "")).upper()
+            features["is_wifi_mgmt"] = 1.0 if protocol in ("802.11", "WIFI", "WLAN") else 0.0
+            features["is_deauth"] = 1.0 if data.get("subtype") == "deauth" else 0.0
+            
+            dst_port = features["pkt_dst_port"]
+            features["is_mavlink_port"] = 1.0 if dst_port in (5760, 14550, 14551) else 0.0
+            features["is_web_port"] = 1.0 if dst_port in (80, 443, 3000, 8080) else 0.0
+            features["is_ftp_port"] = 1.0 if dst_port in (20, 21) else 0.0
+            features["is_ssh_port"] = 1.0 if dst_port == 22 else 0.0
 
-    time_window_data = deque() # 현재 시간 창에 포함된 모든 로그
-    last_prediction_time = 0
+        elif source in ("telemetry", "dvd_telemetry_monitor"):
+            for key in ["lat", "lon", "alt_m", "relative_alt_m", "vx", "vy", "vz",
+                       "pitch_deg", "roll_deg", "yaw_deg", "groundspeed_ms",
+                       "battery_v", "battery_pct"]:
+                if key in self.feature_names:
+                    features[key] = float(data.get(key, 0) or 0)
+            
+            mode = str(data.get("mode", "")).upper()
+            features["mode_is_guided"] = 1.0 if "GUIDED" in mode else 0.0
+            features["mode_is_auto"] = 1.0 if "AUTO" in mode else 0.0
+            features["mode_is_rtl"] = 1.0 if "RTL" in mode else 0.0
 
+        elif source in ("container", "dvd_container_monitor"):
+            features["cpu_load_pct"] = float(data.get("cpu_load_pct", 0) or 0)
+            features["memory_pct"] = float(data.get("memory_pct", 0) or 0)
+            features["net_rx_bytes"] = float(data.get("network_rx_bytes", 0) or 0)
+            features["net_tx_bytes"] = float(data.get("network_tx_bytes", 0) or 0)
+            features["container_running"] = 1.0 if data.get("running") else 0.0
+
+        elif source in ("qos", "qos_monitor"):
+            features["avg_rtt_ms"] = float(data.get("avg_rtt_ms", 0) or 0)
+            features["packet_loss_pct"] = float(data.get("packet_loss_pct", 0) or 0)
+
+        elif source in ("system", "docker_event_monitor"):
+            status = str(data.get("status", "")).lower()
+            features["is_exec_start"] = 1.0 if status == "exec_start" else 0.0
+            features["is_copy"] = 1.0 if "copy" in status else 0.0
+            features["is_die"] = 1.0 if status == "die" else 0.0
+
+        df = pd.DataFrame([features])
+        for col in self.feature_names:
+            if col not in df.columns:
+                df[col] = 0.0
+        
+        return df[self.feature_names]
+
+    def predict(self, log_entry: Dict[str, Any]) -> Tuple[int, float, str]:
+        """
+        로그 엔트리 분류
+        
+        Returns:
+            (label_id, confidence, attack_name)
+        """
+        X = self.preprocess(log_entry)
+        
+        pred_prob = self.model.predict_proba(X)[0]
+        pred_idx = int(np.argmax(pred_prob))
+        confidence = float(pred_prob[pred_idx])
+        
+        if self.label_encoder:
+            label_id = int(self.label_encoder.inverse_transform([pred_idx])[0])
+        else:
+            label_id = pred_idx
+        
+        if self.use_tactic_labels:
+            attack_name = self.tactic_names.get(label_id, f"Tactic-{label_id}")
+        else:
+            attack_name = self.id_to_name.get(label_id, f"Unknown-{label_id}")
+        
+        return label_id, confidence, attack_name
+
+    def is_attack(self, log_entry: Dict[str, Any]) -> Tuple[bool, Dict[str, Any]]:
+        """
+        공격 여부 판단
+        
+        Returns:
+            (is_attack, details)
+        """
+        label_id, confidence, attack_name = self.predict(log_entry)
+        
+        is_attack = (label_id != 0) and (confidence >= self.confidence_threshold)
+        
+        details = {
+            "label_id": label_id,
+            "confidence": confidence,
+            "attack_name": attack_name,
+            "is_attack": is_attack,
+            "threshold": self.confidence_threshold
+        }
+        
+        return is_attack, details
+
+
+def demo():
+    """데모 실행"""
+    print("=" * 60)
+    print("CTI Classifier Demo")
+    print("=" * 60)
+    
     try:
-        while not stop_event.is_set():
-            now = time.time()
-            new_data_count = 0
+        classifier = CTIClassifier()
+    except FileNotFoundError as e:
+        print(f"❌ {e}")
+        print("   먼저 train_classifier.py를 실행하세요.")
+        return
+    
+    # 테스트 로그들
+    test_logs = [
+        {"_log_source": "network", "data": {"length": 100, "dst_port": 14550, "protocol": "UDP"}},
+        {"_log_source": "network", "data": {"length": 50, "subtype": "deauth", "protocol": "802.11"}},
+        {"_log_source": "telemetry", "data": {"lat": 37.5, "lon": 127.0, "alt_m": 50, "mode": "AUTO"}},
+        {"_log_source": "container", "data": {"cpu_load_pct": 90, "memory_pct": 85, "running": True}},
+    ]
+    
+    print("\n[테스트 결과]")
+    for i, log in enumerate(test_logs):
+        is_attack, details = classifier.is_attack(log)
+        status = "🚨 ATTACK" if is_attack else "✅ Normal"
+        print(f"\n  Log {i+1}: {log.get('_log_source')}")
+        print(f"    {status} - {details['attack_name']} ({details['confidence']:.2%})")
 
-            # 3. 모든 큐에서 최신 로그를 시간 창(deque)으로 이동
-            for queue in log_queues.values():
-                while queue:
-                    log = queue.popleft()
-                    time_window_data.append(log)
-                    new_data_count += 1
-
-            # 4. 시간 창에서 오래된 데이터 제거 (TIME_WINDOW_SEC 기준)
-            removed_count = 0
-            while time_window_data and (now - time_window_data[0].get('ts', 0)) > TIME_WINDOW_SEC:
-                time_window_data.popleft()
-                removed_count += 1
-
-            # if new_data_count > 0 or removed_count > 0:
-            #     print(f"[DEBUG] Window Update: Added={new_data_count}, Removed={removed_count}, Current Size={len(time_window_data)}")
-
-            if not time_window_data:
-                # 처리할 데이터 없으면 잠시 대기
-                time.sleep(0.1)
-                continue
-
-            # 5. 예측 주기마다 위협 분석 수행
-            if (now - last_prediction_time) >= PREDICTION_INTERVAL_SEC:
-                last_prediction_time = now
-
-                # 현재 시간 창 데이터로 DataFrame 생성 (메모리 사용량 주의)
-                # list()로 복사하여 반복 중 deque 변경 방지
-                current_window_list = list(time_window_data)
-                if not current_window_list: continue
-
-                try:
-                    df_raw_live = pd.json_normalize(current_window_list, sep='_')
-                except Exception as norm_err:
-                     print(f"❌ 오류: 실시간 데이터 정규화 실패: {norm_err}", file=sys.stderr)
-                     continue # 이번 예측 건너뜀
-
-                # 실시간 특징 벡터 생성
-                live_features_series = create_features_from_window(df_raw_live)
-
-                if live_features_series is None:
-                    # print("[DEBUG] No features extracted from current window.")
-                    continue
-
-                # ⭐️ 학습 시 사용된 특징 순서에 맞춰 입력 벡터 준비
-                X_live = pd.DataFrame(0.0, index=[0], columns=training_features)
-                # live_features_series에 있는 값만 업데이트
-                updatable_cols = X_live.columns.intersection(live_features_series.index)
-                X_live.loc[0, updatable_cols] = live_features_series[updatable_cols].values
-
-                # NaN/inf 값 최종 확인 및 0으로 대체 (안정성)
-                X_live = X_live.replace([np.inf, -np.inf], np.nan).fillna(0)
-
-                # 6. 예측 및 결과 분석/로깅
-                try:
-                    prediction = model.predict(X_live)[0]
-                    probabilities = model.predict_proba(X_live)[0]
-                    confidence = probabilities.max()
-                    pred_class_index = probabilities.argmax()
-                    pred_class_name = model.classes_[pred_class_index]
-
-                    # 예측된 클래스가 저장된 이름과 다를 수 있으므로 확인
-                    if pred_class_name != prediction:
-                         print(f"[!] 경고: 예측 클래스 불일치 - predict()={prediction}, argmax()={pred_class_name}. argmax() 사용.")
-                         prediction = pred_class_name
-
-
-                    # 'normal'이 아니면서 신뢰도 임계값 이상일 때만 Alert
-                    if prediction != 'normal' and confidence >= CONFIDENCE_THRESHOLD:
-
-                        # 특징 중요도 기반 증거 추출 (모델이 지원하는 경우)
-                        top_evidence = {}
-                        if hasattr(model, 'feature_importances_'):
-                             try:
-                                 importances = model.feature_importances_
-                                 # 현재 윈도우 특징 값 * 중요도
-                                 weighted_features = importances * X_live.iloc[0].values
-                                 feature_importance = sorted(zip(training_features, weighted_features),
-                                                              key=lambda x: abs(x[1]), reverse=True) # 절대값 기준 정렬
-                                 # 0이 아닌 상위 3개 특징만 증거로 포함
-                                 top_evidence = {f: round(v, 4) for f, v in feature_importance[:3] if v != 0}
-                             except Exception as fi_err:
-                                  top_evidence = {"error": f"Failed to calculate feature importance: {fi_err}"}
-
-
-                        alert_context = {
-                            "detected_attack_category": prediction,
-                            "confidence": f"{confidence:.2%}",
-                            "probability_distribution": {label: f"{prob:.2%}" for label, prob in zip(model.classes_, probabilities)},
-                            "evidence_features": top_evidence,
-                            "model_used": os.path.basename(MODEL_PATH),
-                            "window_duration_sec": TIME_WINDOW_SEC,
-                            "log_count_in_window": len(current_window_list)
-                        }
-
-                        log_bus_event("ai_cti_alert", alert_context)
-                        print(f"  🚨 \033[91m[AI-CTI] 위협 탐지! -> '{str(prediction).upper()}' (신뢰도: {alert_context['confidence']})\033[0m")
-                        if top_evidence and "error" not in top_evidence :
-                            print(f"      - 주요 근거 특징: {json.dumps(top_evidence)}")
-                        elif top_evidence:
-                             print(f"      - 근거 추출 오류: {top_evidence['error']}")
-
-                    # else: # 정상 예측 또는 신뢰도 미달 시 디버깅 로그 (필요 시)
-                    #     print(f"  - [AI-CTI] 예측: '{prediction}' (신뢰도: {confidence:.2%}) - 정상 또는 임계값 미만")
-
-                except Exception as pred_err:
-                    print(f"❌ 오류: 모델 예측 실패: {pred_err}", file=sys.stderr)
-                    # 입력 데이터 확인 등 디버깅 정보 추가 가능
-                    # print("    - Input Features:", X_live.iloc[0].to_dict())
-
-            # 메인 루프 CPU 사용량 조절
-            time.sleep(0.1)
-
-    except KeyboardInterrupt:
-        print("\n[AI-CTI Agent] 사용자 요청으로 종료합니다...")
-    except Exception as main_err:
-         print(f"❌ [AI-CTI Agent] 치명적 오류 발생: {main_err}", file=sys.stderr)
-    finally:
-        print("[AI-CTI Agent] 종료 절차 시작...")
-        stop_event.set() # 모든 팔로워 스레드에 종료 신호 전송
-        print("   - 로그 팔로워 스레드 종료 대기 중...")
-        for thread in log_threads:
-             if thread.is_alive():
-                  thread.join(timeout=1.0) # 최대 1초 대기
-        print("✅ [AI-CTI Agent] 모든 스레드 종료 완료. 에이전트를 종료합니다.")
 
 if __name__ == "__main__":
-    main()
+    demo()

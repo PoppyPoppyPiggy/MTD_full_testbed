@@ -1,0 +1,18 @@
+\begin{table}[!t]
+\centering
+\caption{Performance Improvement of RL+CTI MTD vs Baselines}
+\label{tab:improvement}
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{@{}lcccc@{}}
+\toprule
+\textbf{Comparison} & $\Delta S_{\mathrm{MTD}}$ & $\Delta$\textbf{BR (pp)} & \textbf{CER Ratio} & \textbf{Effect Size} \\
+\midrule
+vs No MTD & +0.320 & -83.2 & 1.53$\times$ & Very Large \\
+vs Static MTD & +0.186 & -55.2 & 0.24$\times$ & Very Large \\
+vs Heuristic+CTI & +0.022 & -0.4 & 0.48$\times$ & Small \\
+vs RL MTD & +-0.000 & -0.0 & 1.03$\times$ & Small \\
+\bottomrule
+\end{tabular}
+\vspace{1mm}
+\footnotesize{pp: percentage points. Effect size based on Cohen's $d$: Small ($<0.5$), Medium ($0.5$-$0.8$), Large ($0.8$-$1.2$), Very Large ($>1.2$).}
+\end{table}
