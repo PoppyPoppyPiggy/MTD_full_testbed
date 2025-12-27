@@ -38,14 +38,14 @@ import torch
 # Path 설정
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
-from rl_config_v07 import (
+from dvd_lite.dvd_attacks_lpc.mtd.old_ver.rl_config_v07 import (
     MTDConfig,
     STATE_DIM,
     ACTION_DIM,
     SEEKER_PROFILES,
 )
-from rl_environment_v07 import MTDEnvironment, StepOutcome
-from rl_train_v07 import ActorCritic, PPOAgent
+from dvd_lite.dvd_attacks_lpc.mtd.old_ver.rl_environment_v07 import MTDEnvironment, StepOutcome
+from dvd_lite.dvd_attacks_lpc.mtd.old_ver.rl_train_v07 import ActorCritic, PPOAgent
 
 
 # =============================================================================

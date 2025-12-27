@@ -1,0 +1,16 @@
+\begin{table}[!t]
+\centering
+\caption{Overall Defense Performance Comparison (Average across all levels)}
+\label{tab:overall_performance}
+\renewcommand{\arraystretch}{1.1}
+\begin{tabular}{@{}lcccccc@{}}
+\toprule
+\textbf{Strategy} & $S_{\mathrm{MTD}}$ & \textbf{BR(\%)} & \textbf{MTTC} & \textbf{CER} & \textbf{CDI} & \textbf{Cost} \\
+\midrule
+Baseline (No MTD) & 0.692 & 32.8 & 147 & \textbf{6.92} & \textbf{1.000} & 0.00 \\
+Static MTD & 0.671 & 36.4 & 149 & 2.13 & \textbf{1.000} & \textbf{0.28} \\
+Heuristic+CTI & 0.785 & 17.2 & 179 & 3.50 & \textbf{1.000} & 2.85 \\
+RL-CTI MTD (Proposed) & \textbf{0.879} & \textbf{2.8} & \textbf{199} & 0.12 & \textbf{1.000} & 12.75 \\
+\bottomrule
+\end{tabular}
+\end{table}

@@ -5,7 +5,7 @@ IEEE Figure Utilities v09
 =========================
 
 IEEE Access 논문용 그래프 생성 유틸리티.
-실제 학습/평가 데이터를 사용하여 출판 품질의 그래프 생성.
+학습/평가 스크립트에서 import하여 사용.
 
 Features:
 - IEEE Access 스타일 준수 (Times font, 300 DPI)
@@ -14,20 +14,18 @@ Features:
 - PDF + PNG 동시 출력
 
 Author: MTD-RL Research Team
-Version: 0.9.0
-
-References:
-- Attacker model: Maleki et al. (2016), Verizon DBIR, MITRE ATT&CK
+Version: 0.9.5
 """
 from __future__ import annotations
 
 import json
 import os
-from dataclasses import dataclass
 from pathlib import Path
-from typing import Dict, List, Optional, Any, Tuple
+from typing import Dict, List, Optional, Any
 
 import numpy as np
+import matplotlib
+matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import matplotlib.patches as mpatches
 from matplotlib.colors import LinearSegmentedColormap
@@ -41,17 +39,17 @@ def setup_ieee_style():
     plt.rcParams.update({
         'font.family': 'serif',
         'font.serif': ['Times New Roman', 'DejaVu Serif', 'serif'],
-        'font.size': 8,
-        'axes.labelsize': 9,
-        'axes.titlesize': 9,
-        'legend.fontsize': 7,
-        'xtick.labelsize': 8,
-        'ytick.labelsize': 8,
+        'font.size': 9,
+        'axes.labelsize': 10,
+        'axes.titlesize': 11,
+        'legend.fontsize': 8,
+        'xtick.labelsize': 9,
+        'ytick.labelsize': 9,
         'figure.dpi': 300,
         'savefig.dpi': 300,
-        'lines.linewidth': 1.0,
-        'lines.markersize': 4,
-        'axes.linewidth': 0.6,
+        'lines.linewidth': 1.2,
+        'lines.markersize': 5,
+        'axes.linewidth': 0.8,
         'grid.linewidth': 0.4,
         'grid.alpha': 0.4,
         'axes.grid': True,
@@ -64,74 +62,46 @@ def setup_ieee_style():
 
 
 # =============================================================================
-# Color Palettes (Colorblind-Friendly)
+# Color Palettes (Colorblind-Friendly Okabe-Ito)
 # =============================================================================
-# Okabe-Ito + IBM Design Colors
 STRATEGY_COLORS = {
-    'No MTD': '#0072B2',        # Blue
-    'Static MTD': '#E69F00',    # Orange
-    'Heuristic+CTI': '#009E73', # Green
-    'RL MTD': '#CC79A7',        # Pink
-    'RL+CTI MTD': '#D55E00',    # Red-Orange (emphasized)
+    'No MTD': '#0072B2',
+    'Random': '#56B4E9',
+    'Static MTD': '#E69F00',
+    'Periodic': '#E69F00',
+    'Heuristic': '#009E73',
+    'Heuristic+CTI': '#009E73',
+    'Adaptive': '#D55E00',
+    'RL MTD': '#CC79A7',
+    'RL+CTI MTD': '#D55E00',
 }
 
 STRATEGY_MARKERS = {
     'No MTD': 'o',
+    'Random': 'v',
     'Static MTD': 's',
+    'Periodic': 's',
+    'Heuristic': '^',
     'Heuristic+CTI': '^',
+    'Adaptive': 'p',
     'RL MTD': 'D',
     'RL+CTI MTD': 'p',
 }
 
-STRATEGY_SHORT_NAMES = {
-    'No MTD': 'BL',
-    'Static MTD': 'ST',
-    'Heuristic+CTI': 'HE',
-    'RL MTD': 'RL',
-    'RL+CTI MTD': 'RC',
+STRATEGY_HATCHES = {
+    'No MTD': '',
+    'Random': '///',
+    'Static MTD': '...',
+    'Periodic': '...',
+    'Heuristic': 'xxx',
+    'Heuristic+CTI': 'xxx',
+    'Adaptive': '\\\\\\',
+    'RL MTD': '+++',
+    'RL+CTI MTD': '\\\\\\',
 }
 
-# Attacker Level Colors (gradient)
 LEVEL_COLORS = ['#4575B4', '#91BFDB', '#FEE090', '#FC8D59', '#D73027']
-
-# Phase Colors for Training
 PHASE_COLORS = ['#1f77b4', '#ff7f0e', '#2ca02c', '#d62728', '#9467bd']
-
-
-# =============================================================================
-# Attacker Profile Configuration (Academic-Grounded)
-# =============================================================================
-@dataclass
-class AttackerProfile:
-    """
-    Multi-Level Threat Actor Model (MLTAM)
-    
-    Based on:
-    - Maleki et al. (2016) "Markov Modeling of MTD Games", ACM MTD Workshop
-    - Verizon DBIR attack success rates
-    - MITRE ATT&CK Framework threat actor classifications
-    - CompTIA Security+ threat taxonomy
-    """
-    level: int
-    name: str
-    scan_rate: float      # ν_scan: Scanning frequency
-    p_discovery: float    # p_disc: Service discovery probability
-    p_exploit: float      # p_exploit: Successful exploitation probability
-    adaptation: str       # Behavioral adaptation capability
-    
-    @property
-    def kappa(self) -> float:
-        """κ_ℓ: MTD effectiveness modifier (decreases with level)"""
-        return 1.0 - 0.08 * self.level
-
-
-ATTACKER_PROFILES = {
-    0: AttackerProfile(0, 'Script Kiddie', 0.03, 0.15, 0.08, 'None'),
-    1: AttackerProfile(1, 'Hobbyist', 0.05, 0.25, 0.12, 'Basic retry'),
-    2: AttackerProfile(2, 'Professional', 0.08, 0.35, 0.20, 'MTD-aware'),
-    3: AttackerProfile(3, 'Expert', 0.12, 0.50, 0.30, 'Advanced evasion'),
-    4: AttackerProfile(4, 'APT', 0.15, 0.65, 0.40, 'Adaptive'),
-}
 
 
 # =============================================================================
@@ -155,20 +125,23 @@ def plot_training_curves(
     setup_ieee_style()
     
     n_episodes = len(metrics_history)
+    if n_episodes == 0:
+        print("⚠️ No metrics to plot")
+        return
+        
     episodes = np.arange(1, n_episodes + 1)
     
     # 데이터 추출
-    rewards = np.array([m.get('episode/reward', 0) for m in metrics_history])
-    des_values = np.array([m.get('MTD/DES', 0) for m in metrics_history])
-    breach_rates = np.array([1 - m.get('Defense/BreachPrevented', 1) for m in metrics_history]) * 100
-    mttc_values = np.array([m.get('MTD/MTTC', 200) for m in metrics_history])
+    rewards = np.array([m.get('episode/reward', m.get('reward', 0)) for m in metrics_history])
+    des_values = np.array([m.get('MTD/DES', m.get('des', 0)) for m in metrics_history])
+    breach_rates = np.array([1 - m.get('Defense/BreachPrevented', 1 - m.get('breach', 0)) for m in metrics_history]) * 100
+    mttc_values = np.array([m.get('MTD/MTTC', m.get('mttc', 200)) for m in metrics_history])
     policy_loss = np.array([m.get('loss/policy', 0) for m in metrics_history])
     value_loss = np.array([m.get('loss/value', 0) for m in metrics_history])
     
-    # Phase 정보 (있으면)
+    # Phase 정보
     if curriculum_phases is None:
-        curriculum_phases = [0, n_episodes // 5, 2 * n_episodes // 5, 
-                           3 * n_episodes // 5, 4 * n_episodes // 5, n_episodes]
+        curriculum_phases = [0, n_episodes]
     
     # 이동평균 계산
     def moving_average(data, window):
@@ -176,15 +149,16 @@ def plot_training_curves(
             return data
         return np.convolve(data, np.ones(window)/window, mode='valid')
     
+    ma_window = min(ma_window, n_episodes // 2) if n_episodes > 10 else 1
     rewards_ma = moving_average(rewards, ma_window)
     des_ma = moving_average(des_values, ma_window)
     breach_ma = moving_average(breach_rates, ma_window)
     mttc_ma = moving_average(mttc_values, ma_window)
     
     # Figure 생성
-    fig, axes = plt.subplots(2, 3, figsize=(7.16, 4.5))
+    fig, axes = plt.subplots(2, 3, figsize=(14, 9))
     
-    # Phase 색상 영역 그리기
+    # Phase 색상 영역
     def add_phase_regions(ax):
         for i in range(len(curriculum_phases) - 1):
             ax.axvspan(curriculum_phases[i], curriculum_phases[i+1], 
@@ -194,68 +168,76 @@ def plot_training_curves(
     ax = axes[0, 0]
     add_phase_regions(ax)
     ax.plot(episodes, rewards, alpha=0.3, color='#1f77b4', linewidth=0.5)
-    ma_x = np.arange(ma_window, n_episodes + 1)
-    ax.plot(ma_x, rewards_ma, color='#D55E00', linewidth=1.5, label=f'MA-{ma_window}')
+    if len(rewards_ma) > 0:
+        ma_x = np.arange(ma_window, n_episodes + 1)
+        ax.plot(ma_x, rewards_ma, color='#D55E00', linewidth=1.5, label=f'MA-{ma_window}')
     ax.set_xlabel('Episode')
     ax.set_ylabel('Episode Reward')
-    ax.set_title('(a) Training Reward')
-    ax.legend(loc='lower right', fontsize=6)
+    ax.set_title('(a) Training Reward', fontweight='bold')
+    ax.legend(loc='lower right', fontsize=7)
     
     # (b) Defense Effectiveness Score
     ax = axes[0, 1]
     add_phase_regions(ax)
     ax.plot(episodes, des_values, alpha=0.3, color='#1f77b4', linewidth=0.5)
-    ax.plot(ma_x, des_ma, color='#D55E00', linewidth=1.5)
+    if len(des_ma) > 0:
+        ma_x = np.arange(ma_window, n_episodes + 1)
+        ax.plot(ma_x, des_ma, color='#D55E00', linewidth=1.5)
     ax.set_xlabel('Episode')
     ax.set_ylabel(r'$S_{\mathrm{MTD}}$ (DES)')
-    ax.set_title('(b) Defense Effectiveness')
+    ax.set_title('(b) Defense Effectiveness', fontweight='bold')
     ax.set_ylim(0, 1)
     
     # (c) Breach Rate
     ax = axes[0, 2]
     add_phase_regions(ax)
     ax.plot(episodes, breach_rates, alpha=0.3, color='#D73027', linewidth=0.5)
-    ax.plot(ma_x, breach_ma, color='#D55E00', linewidth=1.5)
+    if len(breach_ma) > 0:
+        ma_x = np.arange(ma_window, n_episodes + 1)
+        ax.plot(ma_x, breach_ma, color='#D55E00', linewidth=1.5)
     ax.set_xlabel('Episode')
     ax.set_ylabel('Breach Rate (%)')
-    ax.set_title('(c) Breach Rate')
+    ax.set_title('(c) Breach Rate', fontweight='bold')
     ax.set_ylim(0, 100)
     
     # (d) MTTC
     ax = axes[1, 0]
     add_phase_regions(ax)
     ax.plot(episodes, mttc_values, alpha=0.3, color='#1f77b4', linewidth=0.5)
-    ax.plot(ma_x, mttc_ma, color='#D55E00', linewidth=1.5)
+    if len(mttc_ma) > 0:
+        ma_x = np.arange(ma_window, n_episodes + 1)
+        ax.plot(ma_x, mttc_ma, color='#D55E00', linewidth=1.5)
     ax.set_xlabel('Episode')
     ax.set_ylabel('MTTC (steps)')
-    ax.set_title('(d) Mean Time to Compromise')
+    ax.set_title('(d) Mean Time to Compromise', fontweight='bold')
     
     # (e) Loss
     ax = axes[1, 1]
     add_phase_regions(ax)
-    ax.plot(episodes, policy_loss, alpha=0.7, color='#0072B2', linewidth=0.8, label='Policy')
-    ax.plot(episodes, value_loss, alpha=0.7, color='#E69F00', linewidth=0.8, label='Value')
+    if np.any(policy_loss != 0):
+        ax.plot(episodes, np.abs(policy_loss) + 1e-8, alpha=0.7, color='#0072B2', linewidth=0.8, label='Policy')
+        ax.plot(episodes, np.abs(value_loss) + 1e-8, alpha=0.7, color='#E69F00', linewidth=0.8, label='Value')
+        ax.set_yscale('log')
+    else:
+        ax.text(0.5, 0.5, 'No loss data', ha='center', va='center', transform=ax.transAxes)
     ax.set_xlabel('Episode')
     ax.set_ylabel('Loss')
-    ax.set_title('(e) Training Loss')
-    ax.legend(loc='upper right', fontsize=6)
-    ax.set_yscale('log')
+    ax.set_title('(e) Training Loss', fontweight='bold')
+    ax.legend(loc='upper right', fontsize=7)
     
-    # (f) Curriculum Phase Distribution
+    # (f) Level Distribution
     ax = axes[1, 2]
-    phase_labels = ['P0: L0', 'P1: L0-1', 'P2: L1-2', 'P3: L2-3', 'P4: L1-4']
-    phase_episodes = []
-    for i in range(len(curriculum_phases) - 1):
-        phase_episodes.append(curriculum_phases[i+1] - curriculum_phases[i])
-    
-    bars = ax.bar(phase_labels, phase_episodes, color=PHASE_COLORS[:len(phase_labels)], 
-                  edgecolor='black', linewidth=0.4)
-    ax.set_xlabel('Curriculum Phase')
+    levels = [m.get('episode/seeker_level', m.get('level', 0)) for m in metrics_history]
+    level_counts = [levels.count(i) for i in range(5)]
+    bars = ax.bar([f'L{i}' for i in range(5)], level_counts, color=LEVEL_COLORS, 
+                  edgecolor='black', linewidth=0.5)
+    ax.set_xlabel('Attacker Level')
     ax.set_ylabel('Episodes')
-    ax.set_title('(f) Curriculum Structure')
-    for bar, val in zip(bars, phase_episodes):
-        ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 2, 
-               str(val), ha='center', fontsize=7)
+    ax.set_title('(f) Training Distribution', fontweight='bold')
+    for bar, val in zip(bars, level_counts):
+        if val > 0:
+            ax.text(bar.get_x() + bar.get_width()/2, bar.get_height() + 1, 
+                   str(val), ha='center', fontsize=8)
     
     plt.tight_layout()
     
@@ -264,7 +246,61 @@ def plot_training_curves(
     plt.savefig(f'{save_path}.png', format='png', dpi=300, bbox_inches='tight')
     plt.close()
     
-    print(f"✅ Training curves saved: {save_path}.pdf/png")
+    print(f"✅ Training curves: {save_path}.pdf/png")
+
+
+def plot_training_level_performance(
+    metrics_history: List[Dict],
+    save_path: str,
+):
+    """레벨별 학습 성능 추이 그래프"""
+    setup_ieee_style()
+    
+    level_data = {i: {'episodes': [], 'rewards': [], 'des': [], 'breach': []} for i in range(5)}
+    
+    for idx, m in enumerate(metrics_history):
+        level = m.get('episode/seeker_level', m.get('level', 0))
+        if level in level_data:
+            level_data[level]['episodes'].append(idx + 1)
+            level_data[level]['rewards'].append(m.get('episode/reward', m.get('reward', 0)))
+            level_data[level]['des'].append(m.get('MTD/DES', m.get('des', 0)))
+            level_data[level]['breach'].append(1 - m.get('Defense/BreachPrevented', 1 - m.get('breach', 0)))
+    
+    fig, axes = plt.subplots(1, 3, figsize=(14, 4))
+    
+    metrics_to_plot = [
+        ('rewards', 'Reward', '(a) Reward by Level'),
+        ('des', 'DES', '(b) DES by Level'),
+        ('breach', 'Breach Rate', '(c) Breach Rate by Level'),
+    ]
+    
+    for idx, (metric, ylabel, title) in enumerate(metrics_to_plot):
+        ax = axes[idx]
+        for level in range(5):
+            if len(level_data[level]['episodes']) > 0:
+                window = min(20, len(level_data[level][metric]) // 2)
+                if window > 1:
+                    data = np.convolve(level_data[level][metric], np.ones(window)/window, mode='valid')
+                    x = level_data[level]['episodes'][window-1:]
+                else:
+                    data = level_data[level][metric]
+                    x = level_data[level]['episodes']
+                ax.plot(x, data, color=LEVEL_COLORS[level], alpha=0.8, label=f'L{level}', linewidth=1.2)
+        
+        ax.set_xlabel('Episode')
+        ax.set_ylabel(ylabel)
+        ax.set_title(title, fontweight='bold')
+        if idx == 0:
+            ax.legend(loc='best', fontsize=7, ncol=2)
+        if metric in ['des', 'breach']:
+            ax.set_ylim(0, 1)
+    
+    plt.tight_layout()
+    plt.savefig(f'{save_path}.pdf', format='pdf', bbox_inches='tight')
+    plt.savefig(f'{save_path}.png', format='png', dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    print(f"✅ Level performance: {save_path}.pdf/png")
 
 
 # =============================================================================
@@ -273,141 +309,111 @@ def plot_training_curves(
 def plot_strategy_comparison(
     results: Dict[str, Dict],
     save_path: str,
-    metrics: List[str] = None,
 ):
-    """
-    전략 비교 그래프 (6-panel bar chart) - 메인 결과
-    
-    Args:
-        results: {strategy_name: {metric_name: value}} 형태의 결과
-        save_path: 저장 경로 (확장자 제외)
-        metrics: 표시할 메트릭 리스트
-    """
+    """전략 비교 그래프 (6-panel bar chart) - 메인 결과"""
     setup_ieee_style()
-    
-    if metrics is None:
-        metrics = ['DES', 'BR', 'CER', 'CDI', 'MTTC', 'Cost']
     
     strategies = list(results.keys())
     x = np.arange(len(strategies))
-    width = 0.65
     
-    # 색상 및 레이블
     colors = [STRATEGY_COLORS.get(s, '#808080') for s in strategies]
-    short_names = [STRATEGY_SHORT_NAMES.get(s, s[:2]) for s in strategies]
+    hatches = [STRATEGY_HATCHES.get(s, '') for s in strategies]
     
-    fig, axes = plt.subplots(2, 3, figsize=(7.16, 4.0))
-    axes = axes.flatten()
+    fig, axes = plt.subplots(2, 3, figsize=(14, 9))
     
-    metric_info = {
-        'DES': (r'$S_{\mathrm{MTD}}$', 'Defense Effectiveness', (0, 1)),
-        'BR': ('Breach Rate (%)', 'Breach Rate', (0, 100)),
-        'CER': ('CER', 'Cost Efficiency', None),
-        'CDI': ('CDI', 'Config. Diversity', (0, 1)),
-        'MTTC': ('MTTC (steps)', 'MTTC', None),
-        'Cost': ('Total Cost', 'MTD Cost', None),
-    }
+    panels = [
+        ('breach_rate', 'Breach Rate (%)', '(a) Average Breach Rate', True, 0, 100),
+        ('s_mtd', 'DES', '(b) Defense Effectiveness', False, 0, 1),
+        ('mttc', 'Steps', '(c) Mean Time To Compromise', False, None, None),
+        ('cost', 'Cost', '(d) Defense Cost', True, None, None),
+        ('cer', 'Ratio', '(e) Cost-Efficiency Ratio', False, None, None),
+        ('cdi', 'Index', '(f) Configuration Diversity', False, 0, 1),
+    ]
     
-    for i, metric in enumerate(metrics):
-        ax = axes[i]
+    for idx, (metric, ylabel, title, lower_better, ymin, ymax) in enumerate(panels):
+        ax = axes[idx // 3, idx % 3]
         
-        # 데이터 추출
         values = []
         stds = []
         for s in strategies:
-            if metric == 'BR':
-                values.append(results[s].get('breach_rate', 0))
-                stds.append(results[s].get('breach_rate_std', 0))
-            elif metric == 'DES':
-                values.append(results[s].get('s_mtd', results[s].get('DES', 0)))
-                stds.append(results[s].get('s_mtd_std', 0))
-            else:
-                values.append(results[s].get(metric.lower(), 0))
-                stds.append(results[s].get(f'{metric.lower()}_std', 0))
+            val = results[s].get(metric, results[s].get('DES' if metric == 's_mtd' else metric, 0))
+            std = results[s].get(f'{metric}_std', 0)
+            values.append(val)
+            stds.append(std)
         
-        # 바 그래프
-        bars = ax.bar(x, values, width, color=colors, edgecolor='black', 
-                     linewidth=0.4, yerr=stds if any(stds) else None, capsize=2)
+        bars = ax.bar(x, values, color=colors, edgecolor='black', linewidth=0.8,
+                     yerr=stds if any(s > 0 for s in stds) else None, capsize=3)
         
-        # Best 강조
-        best_idx = np.argmax(values) if metric not in ['BR', 'Cost'] else np.argmin(values)
-        bars[best_idx].set_edgecolor('#D55E00')
-        bars[best_idx].set_linewidth(2.0)
+        for bar, h in zip(bars, hatches):
+            bar.set_hatch(h)
         
-        # 라벨링
-        ylabel, title, ylim = metric_info.get(metric, (metric, metric, None))
+        if values:
+            best_idx = np.argmin(values) if lower_better else np.argmax(values)
+            bars[best_idx].set_edgecolor('#D55E00')
+            bars[best_idx].set_linewidth(2.5)
+        
         ax.set_ylabel(ylabel)
-        ax.set_title(f'({chr(97+i)}) {title}')
+        ax.set_title(title, fontweight='bold')
         ax.set_xticks(x)
-        ax.set_xticklabels(short_names, fontsize=7)
-        if ylim:
-            ax.set_ylim(ylim)
+        ax.set_xticklabels(strategies, rotation=20, ha='right', fontsize=8)
+        if ymin is not None:
+            ax.set_ylim(ymin, ymax)
         
-        # 값 표시
-        for j, v in enumerate(values):
-            fmt = f'{v:.2f}' if v < 10 else f'{v:.0f}'
-            y_offset = max(values) * 0.02 if stds[j] == 0 else stds[j] + max(values) * 0.02
-            ax.text(j, v + y_offset, fmt, ha='center', fontsize=6)
+        for i, (bar, val) in enumerate(zip(bars, values)):
+            fmt = f'{val:.1f}' if metric in ['breach_rate', 'mttc'] else f'{val:.3f}'
+            ax.text(bar.get_x() + bar.get_width()/2, bar.get_height(), fmt, ha='center', va='bottom', fontsize=7)
     
-    plt.tight_layout()
+    handles = [mpatches.Patch(facecolor=colors[i], edgecolor='black', hatch=hatches[i], label=s) for i, s in enumerate(strategies)]
+    fig.legend(handles=handles, loc='lower center', ncol=len(strategies), fontsize=8, bbox_to_anchor=(0.5, -0.02))
+    
+    plt.tight_layout(rect=[0, 0.05, 1, 1])
     
     plt.savefig(f'{save_path}.pdf', format='pdf', bbox_inches='tight')
     plt.savefig(f'{save_path}.png', format='png', dpi=300, bbox_inches='tight')
     plt.close()
     
-    print(f"✅ Strategy comparison saved: {save_path}.pdf/png")
+    print(f"✅ Strategy comparison: {save_path}.pdf/png")
 
 
 def plot_level_comparison(
     results: Dict[str, Dict[int, Dict]],
     save_path: str,
 ):
-    """
-    공격자 레벨별 성능 비교 (2-panel)
-    
-    Args:
-        results: {strategy_name: {level: {metric: value}}} 형태
-        save_path: 저장 경로 (확장자 제외)
-    """
+    """공격자 레벨별 성능 비교 (3-panel line graph)"""
     setup_ieee_style()
     
     strategies = list(results.keys())
     levels = sorted(set(l for s in results.values() for l in s.keys()))
     
-    fig, axes = plt.subplots(1, 2, figsize=(7.16, 2.8))
+    fig, axes = plt.subplots(1, 3, figsize=(14, 4.5))
     
-    # (a) DES vs Level
-    ax = axes[0]
-    for strategy in strategies:
-        values = [results[strategy].get(l, {}).get('s_mtd', 
-                  results[strategy].get(l, {}).get('DES', 0)) for l in levels]
-        ax.plot(levels, values, marker=STRATEGY_MARKERS.get(strategy, 'o'),
-               color=STRATEGY_COLORS.get(strategy, '#808080'),
-               label=strategy.replace(' MTD', ''), linewidth=1.0, markersize=5)
+    metrics = [
+        ('breach_rate', 'Breach Rate (%)', '(a) Breach Rate by Level', 0, 105),
+        ('s_mtd', 'DES', '(b) DES by Level', 0, 1),
+        ('mttc', 'MTTC (steps)', '(c) MTTC by Level', None, None),
+    ]
     
-    ax.set_xlabel('Attacker Level')
-    ax.set_ylabel(r'$S_{\mathrm{MTD}}$')
-    ax.set_title('(a) Defense Effectiveness by Level')
-    ax.set_xticks(levels)
-    ax.set_xticklabels([f'L{l}' for l in levels])
-    ax.legend(loc='lower left', fontsize=6, ncol=2)
-    ax.set_ylim(0, 1)
-    
-    # (b) Breach Rate vs Level
-    ax = axes[1]
-    for strategy in strategies:
-        values = [results[strategy].get(l, {}).get('breach_rate', 0) for l in levels]
-        ax.plot(levels, values, marker=STRATEGY_MARKERS.get(strategy, 'o'),
-               color=STRATEGY_COLORS.get(strategy, '#808080'),
-               label=strategy.replace(' MTD', ''), linewidth=1.0, markersize=5)
-    
-    ax.set_xlabel('Attacker Level')
-    ax.set_ylabel('Breach Rate (%)')
-    ax.set_title('(b) Breach Rate by Level')
-    ax.set_xticks(levels)
-    ax.set_xticklabels([f'L{l}' for l in levels])
-    ax.legend(loc='upper left', fontsize=6, ncol=2)
-    ax.set_ylim(0, 100)
+    for idx, (metric, ylabel, title, ymin, ymax) in enumerate(metrics):
+        ax = axes[idx]
+        
+        for strategy in strategies:
+            values = []
+            for l in levels:
+                val = results[strategy].get(l, {}).get(metric, results[strategy].get(l, {}).get('DES' if metric == 's_mtd' else metric, 0))
+                values.append(val)
+            
+            ax.plot(levels, values, marker=STRATEGY_MARKERS.get(strategy, 'o'),
+                   color=STRATEGY_COLORS.get(strategy, '#808080'), label=strategy, linewidth=2, markersize=8)
+        
+        ax.set_xlabel('Attacker Level')
+        ax.set_ylabel(ylabel)
+        ax.set_title(title, fontweight='bold')
+        ax.set_xticks(levels)
+        ax.set_xticklabels([f'L{l}' for l in levels])
+        if ymin is not None:
+            ax.set_ylim(ymin, ymax)
+        if idx == 0:
+            ax.legend(loc='best', fontsize=7)
     
     plt.tight_layout()
     
@@ -415,72 +421,49 @@ def plot_level_comparison(
     plt.savefig(f'{save_path}.png', format='png', dpi=300, bbox_inches='tight')
     plt.close()
     
-    print(f"✅ Level comparison saved: {save_path}.pdf/png")
+    print(f"✅ Level comparison: {save_path}.pdf/png")
 
 
 def plot_des_heatmap(
     results: Dict[str, Dict[int, Dict]],
     save_path: str,
 ):
-    """
-    DES 히트맵 (Strategy × Level)
-    
-    Args:
-        results: {strategy_name: {level: {metric: value}}} 형태
-        save_path: 저장 경로 (확장자 제외)
-    """
+    """DES 히트맵 (Strategy × Level)"""
     setup_ieee_style()
     
     strategies = list(results.keys())
     levels = sorted(set(l for s in results.values() for l in s.keys()))
     
-    # 데이터 매트릭스 생성
     data = []
     for strategy in strategies:
-        row = [results[strategy].get(l, {}).get('s_mtd', 
-               results[strategy].get(l, {}).get('DES', 0)) for l in levels]
-        row.append(np.mean(row))  # Mean column
+        row = []
+        for l in levels:
+            val = results[strategy].get(l, {}).get('s_mtd', results[strategy].get(l, {}).get('DES', results[strategy].get(l, {}).get('des', 0)))
+            row.append(val)
         data.append(row)
     
     data = np.array(data)
     
-    # Figure
-    fig, ax = plt.subplots(figsize=(4.5, 2.5))
+    fig, ax = plt.subplots(figsize=(8, 5))
     
-    # Custom colormap (white → blue → dark blue)
-    cmap = LinearSegmentedColormap.from_list('des_cmap', 
-           ['#FFFFFF', '#A6CEE3', '#1F78B4', '#08306B'])
+    cmap = LinearSegmentedColormap.from_list('custom', ['#fee8c8', '#fc8d59', '#b30000'])
+    im = ax.imshow(data, cmap=cmap, aspect='auto', vmin=0.2, vmax=0.95)
     
-    im = ax.imshow(data, cmap=cmap, aspect='auto', vmin=0, vmax=1)
-    
-    # Labels
-    ax.set_xticks(np.arange(len(levels) + 1))
-    ax.set_xticklabels([f'L{l}' for l in levels] + ['Mean'])
+    ax.set_xticks(np.arange(len(levels)))
+    ax.set_xticklabels([f'L{l}' for l in levels])
     ax.set_yticks(np.arange(len(strategies)))
-    ax.set_yticklabels([s.replace(' MTD', '') for s in strategies])
+    ax.set_yticklabels(strategies)
     
-    # Values
     for i in range(len(strategies)):
-        for j in range(len(levels) + 1):
+        for j in range(len(levels)):
             color = 'white' if data[i, j] > 0.5 else 'black'
-            ax.text(j, i, f'{data[i, j]:.2f}', ha='center', va='center', 
-                   fontsize=7, color=color)
-    
-    # Highlight best row (RL+CTI MTD)
-    best_idx = np.argmax(data[:, -1])  # Best mean
-    for spine in ['left', 'right', 'top', 'bottom']:
-        ax.spines[spine].set_visible(True)
-    
-    rect = mpatches.Rectangle((-0.5, best_idx - 0.5), len(levels) + 1, 1, 
-                             fill=False, edgecolor='#D55E00', linewidth=2)
-    ax.add_patch(rect)
+            ax.text(j, i, f'{data[i, j]:.2f}', ha='center', va='center', fontsize=10, fontweight='bold', color=color)
     
     ax.set_xlabel('Attacker Level')
-    ax.set_title(r'$S_{\mathrm{MTD}}$ by Strategy and Attacker Level')
+    ax.set_ylabel('Strategy')
+    ax.set_title(r'$S_{\mathrm{MTD}}$ (DES) Heatmap', fontweight='bold')
     
-    # Colorbar
-    cbar = plt.colorbar(im, ax=ax, shrink=0.8)
-    cbar.set_label(r'$S_{\mathrm{MTD}}$', fontsize=8)
+    plt.colorbar(im, ax=ax, label='DES', shrink=0.8)
     
     plt.tight_layout()
     
@@ -488,64 +471,42 @@ def plot_des_heatmap(
     plt.savefig(f'{save_path}.png', format='png', dpi=300, bbox_inches='tight')
     plt.close()
     
-    print(f"✅ DES heatmap saved: {save_path}.pdf/png")
+    print(f"✅ DES heatmap: {save_path}.pdf/png")
 
 
 def plot_tradeoff_analysis(
     results: Dict[str, Dict],
     save_path: str,
 ):
-    """
-    Trade-off 분석 그래프 (3-panel scatter)
-    
-    Args:
-        results: {strategy_name: {metric: value}} 형태
-        save_path: 저장 경로 (확장자 제외)
-    """
+    """Trade-off 분석 그래프 (2-panel scatter)"""
     setup_ieee_style()
     
     strategies = list(results.keys())
     
-    fig, axes = plt.subplots(1, 3, figsize=(7.16, 2.2))
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
     
-    # (a) Cost vs DES
     ax = axes[0]
     for s in strategies:
         cost = results[s].get('cost', 0)
-        des = results[s].get('s_mtd', results[s].get('DES', 0))
-        ax.scatter(cost, des, s=80, color=STRATEGY_COLORS.get(s, '#808080'),
-                  marker=STRATEGY_MARKERS.get(s, 'o'), label=s.replace(' MTD', ''),
-                  edgecolors='black', linewidth=0.4)
+        des = results[s].get('s_mtd', results[s].get('DES', results[s].get('des', 0)))
+        ax.scatter(cost, des, s=200, color=STRATEGY_COLORS.get(s, '#808080'),
+                  marker=STRATEGY_MARKERS.get(s, 'o'), label=s, edgecolors='black', linewidth=1.5, zorder=5)
     ax.set_xlabel('Total Cost')
     ax.set_ylabel(r'$S_{\mathrm{MTD}}$')
-    ax.set_title('(a) Cost vs Defense')
-    ax.legend(loc='lower right', fontsize=5.5)
+    ax.set_title('(a) Cost vs Defense Effectiveness', fontweight='bold')
+    ax.legend(loc='best', fontsize=7)
+    ax.set_ylim(0, 1)
     
-    # (b) MTTC vs CER
     ax = axes[1]
     for s in strategies:
-        mttc = results[s].get('mttc', 0)
-        cer = results[s].get('cer', 0)
-        ax.scatter(mttc, cer, s=80, color=STRATEGY_COLORS.get(s, '#808080'),
-                  marker=STRATEGY_MARKERS.get(s, 'o'), label=s.replace(' MTD', ''),
-                  edgecolors='black', linewidth=0.4)
-    ax.set_xlabel('MTTC (steps)')
-    ax.set_ylabel('CER')
-    ax.set_title('(b) MTTC vs Cost Efficiency')
-    ax.legend(loc='upper right', fontsize=5.5)
-    
-    # (c) Breach Rate vs Cost
-    ax = axes[2]
-    for s in strategies:
         br = results[s].get('breach_rate', 0)
-        cost = results[s].get('cost', 0)
-        ax.scatter(cost, br, s=80, color=STRATEGY_COLORS.get(s, '#808080'),
-                  marker=STRATEGY_MARKERS.get(s, 'o'), label=s.replace(' MTD', ''),
-                  edgecolors='black', linewidth=0.4)
-    ax.set_xlabel('Total Cost')
-    ax.set_ylabel('Breach Rate (%)')
-    ax.set_title('(c) Cost vs Breach Rate')
-    ax.legend(loc='upper right', fontsize=5.5)
+        mttc = results[s].get('mttc', 0)
+        ax.scatter(br, mttc, s=200, color=STRATEGY_COLORS.get(s, '#808080'),
+                  marker=STRATEGY_MARKERS.get(s, 'o'), label=s, edgecolors='black', linewidth=1.5, zorder=5)
+    ax.set_xlabel('Breach Rate (%)')
+    ax.set_ylabel('MTTC (steps)')
+    ax.set_title('(b) Breach Rate vs MTTC', fontweight='bold')
+    ax.legend(loc='best', fontsize=7)
     
     plt.tight_layout()
     
@@ -553,63 +514,7 @@ def plot_tradeoff_analysis(
     plt.savefig(f'{save_path}.png', format='png', dpi=300, bbox_inches='tight')
     plt.close()
     
-    print(f"✅ Trade-off analysis saved: {save_path}.pdf/png")
-
-
-def plot_attacker_profiles(save_path: str):
-    """
-    공격자 프로파일 파라미터 시각화
-    
-    Args:
-        save_path: 저장 경로 (확장자 제외)
-    """
-    setup_ieee_style()
-    
-    levels = list(ATTACKER_PROFILES.keys())
-    profiles = list(ATTACKER_PROFILES.values())
-    
-    fig, ax = plt.subplots(figsize=(4.5, 2.8))
-    
-    x = np.arange(len(levels))
-    width = 0.25
-    
-    # 바 데이터
-    p_disc = [p.p_discovery for p in profiles]
-    p_exploit = [p.p_exploit for p in profiles]
-    scan_rate = [p.scan_rate * 10 for p in profiles]  # Scale for visibility
-    kappa = [p.kappa for p in profiles]
-    
-    # 바 그래프
-    bars1 = ax.bar(x - width, p_disc, width, label=r'$p_{disc}$', color='#0072B2', edgecolor='black', linewidth=0.4)
-    bars2 = ax.bar(x, p_exploit, width, label=r'$p_{exploit}$', color='#E69F00', edgecolor='black', linewidth=0.4)
-    bars3 = ax.bar(x + width, scan_rate, width, label=r'$\nu_{scan} \times 10$', color='#009E73', edgecolor='black', linewidth=0.4)
-    
-    # κ_ℓ 라인 (secondary axis)
-    ax2 = ax.twinx()
-    ax2.plot(x, kappa, 'k--', marker='s', linewidth=1.5, markersize=5, label=r'$\kappa_\ell$')
-    ax2.set_ylabel(r'$\kappa_\ell$ (MTD Effectiveness)', fontsize=8)
-    ax2.set_ylim(0.5, 1.1)
-    
-    # X-axis labels
-    labels = [f'L{p.level}\n{p.name}' for p in profiles]
-    ax.set_xticks(x)
-    ax.set_xticklabels(labels, fontsize=7)
-    ax.set_ylabel('Probability', fontsize=8)
-    ax.set_title('Multi-Level Threat Actor Model (MLTAM) Parameters')
-    ax.set_ylim(0, 0.8)
-    
-    # Legends
-    lines1, labels1 = ax.get_legend_handles_labels()
-    lines2, labels2 = ax2.get_legend_handles_labels()
-    ax.legend(lines1 + lines2, labels1 + labels2, loc='upper left', fontsize=6)
-    
-    plt.tight_layout()
-    
-    plt.savefig(f'{save_path}.pdf', format='pdf', bbox_inches='tight')
-    plt.savefig(f'{save_path}.png', format='png', dpi=300, bbox_inches='tight')
-    plt.close()
-    
-    print(f"✅ Attacker profiles saved: {save_path}.pdf/png")
+    print(f"✅ Trade-off analysis: {save_path}.pdf/png")
 
 
 def plot_statistical_comparison(
@@ -617,24 +522,17 @@ def plot_statistical_comparison(
     save_path: str,
     n_samples: int = 50,
 ):
-    """
-    통계적 비교 (Box plots with significance)
-    
-    Args:
-        results: {strategy_name: {metric: value, metric_std: std}} 형태
-        save_path: 저장 경로 (확장자 제외)
-        n_samples: 샘플 생성 수 (시뮬레이션용)
-    """
+    """통계적 비교 (Box plots)"""
     setup_ieee_style()
     
     strategies = list(results.keys())
     
-    fig, axes = plt.subplots(1, 3, figsize=(7.16, 2.5))
+    fig, axes = plt.subplots(1, 3, figsize=(14, 4.5))
     
     metrics_to_plot = [
-        ('s_mtd', r'$S_{\mathrm{MTD}}$', 'DES'),
-        ('breach_rate', 'Breach Rate (%)', 'BR'),
-        ('cer', 'CER', 'CER'),
+        ('s_mtd', r'$S_{\mathrm{MTD}}$', '(a) DES Distribution'),
+        ('mttc', 'MTTC (steps)', '(b) MTTC Distribution'),
+        ('cost', 'Cost', '(c) Cost Distribution'),
     ]
     
     for idx, (metric, ylabel, title) in enumerate(metrics_to_plot):
@@ -642,26 +540,24 @@ def plot_statistical_comparison(
         
         box_data = []
         for s in strategies:
-            mean = results[s].get(metric, results[s].get('DES', 0))
+            mean = results[s].get(metric, results[s].get('DES' if metric == 's_mtd' else metric, 0))
             std = results[s].get(f'{metric}_std', 0.05)
-            # Generate samples for box plot
             samples = np.random.normal(mean, max(std, 0.01), n_samples)
-            if metric == 'breach_rate':
-                samples = np.clip(samples, 0, 100)
-            else:
+            if metric == 's_mtd':
                 samples = np.clip(samples, 0, 1)
+            elif metric == 'cost':
+                samples = np.clip(samples, 0, None)
             box_data.append(samples)
         
-        bp = ax.boxplot(box_data, patch_artist=True, widths=0.6)
+        bp = ax.boxplot(box_data, patch_artist=True, tick_labels=strategies)
         
-        # Color boxes
-        for patch, strategy in zip(bp['boxes'], strategies):
+        for i, (patch, strategy) in enumerate(zip(bp['boxes'], strategies)):
             patch.set_facecolor(STRATEGY_COLORS.get(strategy, '#808080'))
             patch.set_alpha(0.7)
         
-        ax.set_xticklabels([STRATEGY_SHORT_NAMES.get(s, s[:2]) for s in strategies], fontsize=7)
         ax.set_ylabel(ylabel)
-        ax.set_title(f'({chr(97+idx)}) {title} Distribution')
+        ax.set_title(title, fontweight='bold')
+        ax.tick_params(axis='x', rotation=20)
     
     plt.tight_layout()
     
@@ -669,39 +565,87 @@ def plot_statistical_comparison(
     plt.savefig(f'{save_path}.png', format='png', dpi=300, bbox_inches='tight')
     plt.close()
     
-    print(f"✅ Statistical comparison saved: {save_path}.pdf/png")
+    print(f"✅ Statistical comparison: {save_path}.pdf/png")
+
+
+def plot_grouped_bar_by_level(
+    results: Dict[str, Dict[int, Dict]],
+    save_path: str,
+):
+    """레벨별 그룹 바 차트 (4-panel)"""
+    setup_ieee_style()
+    
+    strategies = list(results.keys())
+    levels = sorted(set(l for s in results.values() for l in s.keys()))
+    
+    fig, axes = plt.subplots(2, 2, figsize=(12, 10))
+    x = np.arange(len(levels))
+    width = 0.8 / len(strategies)
+    
+    metrics = [
+        ('breach_rate', 'Breach Rate (%)', '(a) Breach Rate by Level', 0, 105),
+        ('s_mtd', 'DES', '(b) DES by Level', 0, 1),
+        ('mttc', 'MTTC (steps)', '(c) MTTC by Level', None, None),
+        ('cost', 'Cost', '(d) Cost by Level', None, None),
+    ]
+    
+    for idx, (metric, ylabel, title, ymin, ymax) in enumerate(metrics):
+        ax = axes[idx // 2, idx % 2]
+        
+        for i, strategy in enumerate(strategies):
+            values = []
+            for l in levels:
+                val = results[strategy].get(l, {}).get(metric, results[strategy].get(l, {}).get('DES' if metric == 's_mtd' else metric, 0))
+                values.append(val)
+            
+            offset = (i - len(strategies)/2 + 0.5) * width
+            ax.bar(x + offset, values, width, label=strategy if idx == 0 else '',
+                  color=STRATEGY_COLORS.get(strategy, '#808080'), edgecolor='black', linewidth=0.5,
+                  hatch=STRATEGY_HATCHES.get(strategy, ''))
+        
+        ax.set_xlabel('Attacker Level')
+        ax.set_ylabel(ylabel)
+        ax.set_title(title, fontweight='bold')
+        ax.set_xticks(x)
+        ax.set_xticklabels([f'L{l}' for l in levels])
+        if ymin is not None:
+            ax.set_ylim(ymin, ymax)
+    
+    handles = [mpatches.Patch(facecolor=STRATEGY_COLORS.get(s, '#808080'), edgecolor='black', hatch=STRATEGY_HATCHES.get(s, ''), label=s) for s in strategies]
+    fig.legend(handles=handles, loc='lower center', ncol=len(strategies), fontsize=8, bbox_to_anchor=(0.5, -0.02))
+    
+    plt.tight_layout(rect=[0, 0.05, 1, 1])
+    
+    plt.savefig(f'{save_path}.pdf', format='pdf', bbox_inches='tight')
+    plt.savefig(f'{save_path}.png', format='png', dpi=300, bbox_inches='tight')
+    plt.close()
+    
+    print(f"✅ Grouped bar: {save_path}.pdf/png")
 
 
 # =============================================================================
 # LaTeX Table Generation
 # =============================================================================
-def generate_latex_table_overall(
-    results: Dict[str, Dict],
-    save_path: str,
-):
-    """
-    전체 성능 비교 LaTeX 테이블 생성
-    """
+def generate_latex_table_overall(results: Dict[str, Dict], save_path: str):
+    """전체 성능 비교 LaTeX 테이블"""
     strategies = list(results.keys())
     
-    table = r"""\begin{table}[!t]
-\centering
-\caption{Overall Defense Performance Comparison}
-\label{tab:overall_comparison}
-\renewcommand{\arraystretch}{1.1}
-\begin{tabular}{@{}lcccccc@{}}
-\toprule
-\textbf{Strategy} & $S_{\mathrm{MTD}}$ & \textbf{BR(\%)} & \textbf{MTTC} & \textbf{CER} & \textbf{CDI} & \textbf{Cost} \\
-\midrule
-"""
-    
-    # Find best values for bold formatting
     best_des = max(results[s].get('s_mtd', results[s].get('DES', 0)) for s in strategies)
     best_br = min(results[s].get('breach_rate', 100) for s in strategies)
     best_mttc = max(results[s].get('mttc', 0) for s in strategies)
     best_cer = max(results[s].get('cer', 0) for s in strategies)
     best_cdi = max(results[s].get('cdi', 0) for s in strategies)
     best_cost = min(results[s].get('cost', float('inf')) for s in strategies)
+    
+    table = r"""\begin{table}[!t]
+\centering
+\caption{Overall Defense Performance Comparison}
+\label{tab:overall_comparison}
+\begin{tabular}{@{}lcccccc@{}}
+\toprule
+\textbf{Strategy} & $S_{\mathrm{MTD}}$ & \textbf{BR(\%)} & \textbf{MTTC} & \textbf{CER} & \textbf{CDI} & \textbf{Cost} \\
+\midrule
+"""
     
     for s in strategies:
         des = results[s].get('s_mtd', results[s].get('DES', 0))
@@ -711,190 +655,86 @@ def generate_latex_table_overall(
         cdi = results[s].get('cdi', 0)
         cost = results[s].get('cost', 0)
         
-        # Format with bold for best
-        des_str = f"\\textbf{{{des:.3f}}}" if des == best_des else f"{des:.3f}"
-        br_str = f"\\textbf{{{br:.1f}}}" if br == best_br else f"{br:.1f}"
-        mttc_str = f"\\textbf{{{mttc:.0f}}}" if mttc == best_mttc else f"{mttc:.0f}"
-        cer_str = f"\\textbf{{{cer:.2f}}}" if cer == best_cer else f"{cer:.2f}"
-        cdi_str = f"\\textbf{{{cdi:.3f}}}" if cdi == best_cdi else f"{cdi:.3f}"
-        cost_str = f"\\textbf{{{cost:.3f}}}" if cost == best_cost else f"{cost:.3f}"
+        des_str = f"\\textbf{{{des:.3f}}}" if abs(des - best_des) < 0.001 else f"{des:.3f}"
+        br_str = f"\\textbf{{{br:.1f}}}" if abs(br - best_br) < 0.1 else f"{br:.1f}"
+        mttc_str = f"\\textbf{{{mttc:.0f}}}" if abs(mttc - best_mttc) < 1 else f"{mttc:.0f}"
+        cer_str = f"\\textbf{{{cer:.2f}}}" if abs(cer - best_cer) < 0.01 else f"{cer:.2f}"
+        cdi_str = f"\\textbf{{{cdi:.3f}}}" if abs(cdi - best_cdi) < 0.001 else f"{cdi:.3f}"
+        cost_str = f"\\textbf{{{cost:.3f}}}" if abs(cost - best_cost) < 0.001 else f"{cost:.3f}"
         
         table += f"{s} & {des_str} & {br_str} & {mttc_str} & {cer_str} & {cdi_str} & {cost_str} \\\\\n"
     
     table += r"""\bottomrule
 \end{tabular}
-\vspace{1mm}
-\footnotesize{BR: Breach Rate, MTTC: Mean Time to Compromise, CER: Cost Efficiency Ratio, CDI: Configuration Diversity Index. Bold indicates best performance.}
 \end{table}
 """
     
     with open(save_path, 'w') as f:
         f.write(table)
     
-    print(f"✅ LaTeX table saved: {save_path}")
+    print(f"✅ LaTeX table: {save_path}")
 
 
-def generate_latex_table_improvement(
-    results: Dict[str, Dict],
-    save_path: str,
-):
-    """
-    성능 향상 비교 LaTeX 테이블 (vs baselines)
-    """
-    rlcti = results.get('RL+CTI MTD', {})
+def generate_latex_table_by_level(results: Dict[str, Dict[int, Dict]], save_path: str, metric: str = 'breach_rate'):
+    """레벨별 성능 LaTeX 테이블"""
+    strategies = list(results.keys())
+    levels = sorted(set(l for s in results.values() for l in s.keys()))
     
-    table = r"""\begin{table}[!t]
-\centering
-\caption{Performance Improvement of RL+CTI MTD vs Baselines}
-\label{tab:improvement}
-\renewcommand{\arraystretch}{1.1}
-\begin{tabular}{@{}lcccc@{}}
-\toprule
-\textbf{Comparison} & $\Delta S_{\mathrm{MTD}}$ & $\Delta$\textbf{BR (pp)} & \textbf{CER Ratio} & \textbf{Effect Size} \\
+    metric_name = {'breach_rate': 'Breach Rate (\\%)', 's_mtd': '$S_{\\mathrm{MTD}}$', 'mttc': 'MTTC'}.get(metric, metric)
+    
+    table = f"""\\begin{{table}}[!t]
+\\centering
+\\caption{{{metric_name} by Attacker Level}}
+\\begin{{tabular}}{{l{'c' * len(levels)}}}
+\\toprule
+\\textbf{{Strategy}} & """ + " & ".join([f"\\textbf{{L{l}}}" for l in levels]) + r""" \\
 \midrule
 """
     
-    baselines = ['No MTD', 'Static MTD', 'Heuristic+CTI', 'RL MTD']
-    
-    for baseline in baselines:
-        if baseline not in results:
-            continue
-        
-        bl = results[baseline]
-        
-        delta_des = rlcti.get('s_mtd', 0) - bl.get('s_mtd', 0)
-        delta_br = bl.get('breach_rate', 0) - rlcti.get('breach_rate', 0)  # Reduction
-        
-        cer_ratio = rlcti.get('cer', 1) / max(bl.get('cer', 0.01), 0.01)
-        
-        # Cohen's d approximation
-        pooled_std = 0.1  # Approximate
-        cohens_d = delta_des / pooled_std
-        
-        if cohens_d > 1.2:
-            effect = "Very Large"
-        elif cohens_d > 0.8:
-            effect = "Large"
-        elif cohens_d > 0.5:
-            effect = "Medium"
-        else:
-            effect = "Small"
-        
-        table += f"vs {baseline} & +{delta_des:.3f} & -{delta_br:.1f} & {cer_ratio:.2f}$\\times$ & {effect} \\\\\n"
+    for s in strategies:
+        values = []
+        for l in levels:
+            val = results[s].get(l, {}).get(metric, results[s].get(l, {}).get('DES' if metric == 's_mtd' else metric, 0))
+            if metric == 'breach_rate':
+                values.append(f"{val:.1f}")
+            elif metric == 's_mtd':
+                values.append(f"{val:.3f}")
+            else:
+                values.append(f"{val:.0f}")
+        table += f"{s} & " + " & ".join(values) + r" \\" + "\n"
     
     table += r"""\bottomrule
 \end{tabular}
-\vspace{1mm}
-\footnotesize{pp: percentage points. Effect size based on Cohen's $d$: Small ($<0.5$), Medium ($0.5$-$0.8$), Large ($0.8$-$1.2$), Very Large ($>1.2$).}
 \end{table}
 """
     
     with open(save_path, 'w') as f:
         f.write(table)
     
-    print(f"✅ Improvement table saved: {save_path}")
-
-
-def generate_latex_table_attacker(save_path: str):
-    """
-    공격자 프로파일 LaTeX 테이블
-    """
-    table = r"""\begin{table}[!t]
-\centering
-\caption{Multi-Level Threat Actor Model Parameters}
-\label{tab:attacker_profiles}
-\renewcommand{\arraystretch}{1.1}
-\begin{tabular}{@{}clcccc@{}}
-\toprule
-$\ell$ & \textbf{Type} & $\nu_{\text{scan}}$ & $p_{\text{disc}}$ & $p_{\text{exploit}}$ & $\kappa_\ell$ \\
-\midrule
-"""
-    
-    for level, profile in ATTACKER_PROFILES.items():
-        table += f"{level} & {profile.name} & {profile.scan_rate:.2f} & {profile.p_discovery:.2f} & {profile.p_exploit:.2f} & {profile.kappa:.2f} \\\\\n"
-    
-    table += r"""\bottomrule
-\end{tabular}
-\vspace{1mm}
-\footnotesize{$\nu_{\text{scan}}$: scan rate, $p_{\text{disc}}$: discovery probability, $p_{\text{exploit}}$: exploitation probability, $\kappa_\ell = 1 - 0.08\ell$: MTD effectiveness modifier. Based on Maleki et al.~\cite{maleki2016markov} and Verizon DBIR~\cite{verizon_dbir}.}
-\end{table}
-"""
-    
-    with open(save_path, 'w') as f:
-        f.write(table)
-    
-    print(f"✅ Attacker table saved: {save_path}")
-
-
-# =============================================================================
-# Full Report Generation
-# =============================================================================
-def generate_all_figures(
-    training_metrics: Optional[List[Dict]] = None,
-    evaluation_results: Optional[Dict] = None,
-    level_results: Optional[Dict] = None,
-    output_dir: str = 'paper_figures',
-    curriculum_phases: Optional[List[int]] = None,
-):
-    """
-    모든 IEEE 스타일 그래프 및 테이블 생성
-    
-    Args:
-        training_metrics: 학습 메트릭 히스토리
-        evaluation_results: 평가 결과 (strategy별 요약)
-        level_results: 레벨별 평가 결과
-        output_dir: 출력 디렉토리
-        curriculum_phases: 커리큘럼 phase 경계
-    """
-    os.makedirs(output_dir, exist_ok=True)
-    os.makedirs(f'{output_dir}/tables', exist_ok=True)
-    
-    print("="*60)
-    print("IEEE Access Figure & Table Generation")
-    print("="*60)
-    
-    # 1. Attacker Profiles (항상 생성)
-    print("\n[1] Generating attacker profiles...")
-    plot_attacker_profiles(f'{output_dir}/fig06_attacker_profiles')
-    generate_latex_table_attacker(f'{output_dir}/tables/table_attacker.tex')
-    
-    # 2. Training Curves
-    if training_metrics:
-        print("\n[2] Generating training curves...")
-        plot_training_curves(training_metrics, f'{output_dir}/fig07_training_curves',
-                           curriculum_phases=curriculum_phases)
-    
-    # 3. Evaluation Results
-    if evaluation_results:
-        print("\n[3] Generating evaluation figures...")
-        plot_strategy_comparison(evaluation_results, f'{output_dir}/fig09_strategy_comparison')
-        plot_tradeoff_analysis(evaluation_results, f'{output_dir}/fig12_tradeoff_analysis')
-        plot_statistical_comparison(evaluation_results, f'{output_dir}/fig13_statistical_comparison')
-        
-        # Tables
-        generate_latex_table_overall(evaluation_results, f'{output_dir}/tables/table_overall.tex')
-        generate_latex_table_improvement(evaluation_results, f'{output_dir}/tables/table_improvement.tex')
-    
-    # 4. Level-wise Results
-    if level_results:
-        print("\n[4] Generating level comparison figures...")
-        plot_level_comparison(level_results, f'{output_dir}/fig10_level_comparison')
-        plot_des_heatmap(level_results, f'{output_dir}/fig11_des_heatmap')
-    
-    print("\n" + "="*60)
-    print(f"✅ All figures saved to: {output_dir}/")
-    print("="*60)
+    print(f"✅ LaTeX table: {save_path}")
 
 
 # =============================================================================
 # Main (Test)
 # =============================================================================
 if __name__ == "__main__":
-    print("IEEE Figure Utilities Test")
+    print("IEEE Figure Utilities v09 - Test Mode")
     
-    # Generate attacker profile figure only
     os.makedirs('test_figures', exist_ok=True)
-    plot_attacker_profiles('test_figures/attacker_profiles')
-    generate_latex_table_attacker('test_figures/table_attacker.tex')
     
-    print("\nTest complete!")
+    test_metrics = []
+    for i in range(100):
+        test_metrics.append({
+            'episode/reward': 50 + i * 0.5 + np.random.randn() * 10,
+            'MTD/DES': min(0.9, 0.3 + i * 0.005 + np.random.randn() * 0.05),
+            'Defense/BreachPrevented': 1 if np.random.random() > 0.5 - i * 0.003 else 0,
+            'MTD/MTTC': min(200, 50 + i + np.random.randn() * 10),
+            'loss/policy': max(0.001, 0.5 - i * 0.004 + np.random.randn() * 0.05),
+            'loss/value': max(0.001, 1.0 - i * 0.008 + np.random.randn() * 0.1),
+            'episode/seeker_level': np.random.randint(0, 5),
+        })
+    
+    plot_training_curves(test_metrics, 'test_figures/training_curves', [0, 30, 60, 100])
+    plot_training_level_performance(test_metrics, 'test_figures/level_performance')
+    
+    print("\n✅ Test complete!")

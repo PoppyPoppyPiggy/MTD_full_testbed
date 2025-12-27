@@ -23,14 +23,14 @@
     "log_interval": 10,
     "eval_episodes": 50,
     "eval_all_levels": false,
-    "wandb": true,
-    "wandb_project": "mtd-rl-uav",
+    "wandb": false,
+    "wandb_project": "mtd-rl-v09",
     "wandb_name": null
   },
   "state_dim": 17,
   "action_dim": 7,
-  "best_reward": 2996.6410782365983,
-  "best_des": 0.85,
+  "best_reward": 3667.9791136636736,
+  "best_des": 0.8500000000000003,
   "total_episodes": 800,
   "curriculum_boundaries": [
     0,

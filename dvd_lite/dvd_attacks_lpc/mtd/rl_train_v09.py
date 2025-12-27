@@ -22,7 +22,7 @@ Usage:
     python rl_train_v09.py --episodes 300 --seeker-level 2
 
 저자: MTD-RL Research Team
-버전: 0.9.0
+버전: 0.9.5
 """
 from __future__ import annotations
 
@@ -58,8 +58,8 @@ from rl_environment_v08 import MTDEnvironment
 # IEEE Figure Utils
 try:
     from ieee_figure_utils import (
-        generate_all_figures,
         plot_training_curves,
+        plot_training_level_performance,
         setup_ieee_style,
     )
     IEEE_FIGURES_AVAILABLE = True
@@ -575,14 +575,22 @@ def train(args):
         print("="*60)
         
         try:
+            # 학습 곡선 (6-panel)
             plot_training_curves(
                 all_metrics,
-                str(fig_dir / "fig07_training_curves"),
+                str(fig_dir / "fig_training_curves"),
                 curriculum_phases=curriculum_boundaries,
             )
-            print(f"✅ Training curves saved to: {fig_dir}/")
+            
+            # 레벨별 성능 추이 (3-panel)
+            plot_training_level_performance(
+                all_metrics,
+                str(fig_dir / "fig_level_performance"),
+            )
+            
+            print(f"✅ All training figures saved to: {fig_dir}/")
         except Exception as e:
-            print(f"⚠️ Failed to generate training curves: {e}")
+            print(f"⚠️ Failed to generate figures: {e}")
     
     # W&B 종료
     if args.wandb and WANDB_AVAILABLE:
@@ -593,6 +601,7 @@ def train(args):
     print(f"Best avg reward: {best_reward:.1f}")
     print(f"Best avg DES: {best_des:.3f}")
     print(f"Checkpoints: {ckpt_dir}")
+    print(f"Figures: {fig_dir}")
     print(f"{'='*70}\n")
 
     return best_reward

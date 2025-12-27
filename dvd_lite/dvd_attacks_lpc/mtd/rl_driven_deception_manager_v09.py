@@ -1,108 +1,894 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-RL-Driven Deception Manager v09 - 수정 버전
-============================================
-numpy float32 JSON 직렬화 오류 수정
+RL-Driven Deception Manager v09.8 - Real iptables Integration
+==============================================================
 
-수정 사항:
-1. to_serializable 함수 추가하여 numpy 타입 변환
-2. save_mtd_state_json 호출 시 예외 처리 추가
-3. MetricsLogger에서 numpy 타입 자동 변환
+실제 iptables 명령어를 생성하고 실행하는 MTD 컨트롤러
+
+Usage:
+    # 시뮬레이션 실험 (iptables 없이)
+    python rl_driven_deception_manager_v09.py --experiment --episodes 50
+
+    # 실제 테스트베드 (명령어만 출력)
+    python rl_driven_deception_manager_v09.py --model best.pt --testbed --dry-run
+
+    # 실제 테스트베드 (iptables 실행, root 필요)
+    sudo python rl_driven_deception_manager_v09.py --model best.pt --testbed
+
+    # 특정 레벨만 테스트
+    python rl_driven_deception_manager_v09.py --testbed --dry-run --level 4 --episodes 10
+
+Author: MTD-RL Research Team
+Version: 0.9.8
 """
 from __future__ import annotations
 
 import argparse
 import json
-import logging
 import os
-import signal
-import sys
-import threading
+import subprocess
 import time
-from dataclasses import dataclass, field, asdict
-from datetime import datetime, timezone
+from collections import defaultdict, deque
+from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
-from collections import deque
 
 import numpy as np
 
-# PyTorch
+# PyTorch (optional)
+TORCH_AVAILABLE = False
 try:
     import torch
     import torch.nn as nn
     TORCH_AVAILABLE = True
 except ImportError:
-    TORCH_AVAILABLE = False
-    print("⚠️ PyTorch not available")
-
-# Local imports
-from rl_config_v08 import (
-    ACTION_DIM,
-    ACTION_PARAM_KEYS,
-    FEATURE_KEYS,
-    STATE_DIM,
-    MTDConfig,
-    scale_action,
-)
-from iptables_mtd_controller_v08 import IptablesMTDController
-
-# IEEE Figure Utils
-try:
-    from ieee_figure_utils import setup_ieee_style
-    import matplotlib.pyplot as plt
-    IEEE_FIGURES_AVAILABLE = True
-except ImportError:
-    IEEE_FIGURES_AVAILABLE = False
-
-# Logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)-7s] [MTD-Controller] %(message)s",
-    datefmt="%Y-%m-%d %H:%M:%S"
-)
-logger = logging.getLogger("RLDeceptionManager")
+    pass
 
 
 # =============================================================================
-# Numpy JSON Serialization Helper (핵심 수정)
+# Constants
 # =============================================================================
-def to_serializable(obj: Any) -> Any:
-    """
-    numpy 타입을 JSON 직렬화 가능한 Python native 타입으로 변환
-    
-    이 함수가 float32 오류의 핵심 해결책입니다.
-    """
+STATE_DIM = 17
+ACTION_DIM = 7
+
+ACTION_THRESHOLDS = {
+    'shuffle': 0.25,
+    'port_hop': 0.35,
+    'decoy': 0.40,
+    'blacklist': 0.60,
+    'swap': 0.30,
+}
+
+ACTION_COSTS = {
+    'shuffle': 0.05,
+    'port_hop': 0.03,
+    'decoy': 0.02,
+    'blacklist': 0.02,
+    'swap': 0.05,
+}
+
+MTD_DEFENSE_WEIGHTS = {
+    'shuffle': 0.35,
+    'port_hop': 0.20,
+    'decoy': 0.15,
+    'blacklist': 0.10,
+    'swap': 0.45,
+}
+
+ATTACKER_PROFILES = {
+    0: {"name": "Script Kiddie", "scan_rate": 0.03, "p_disc": 0.15, 
+        "p_exp": 0.08, "decoy_detection": 0.1, "energy_decay": 0.008, "kappa": 1.00},
+    1: {"name": "Hobbyist", "scan_rate": 0.05, "p_disc": 0.25,
+        "p_exp": 0.12, "decoy_detection": 0.2, "energy_decay": 0.006, "kappa": 0.92},
+    2: {"name": "Professional", "scan_rate": 0.08, "p_disc": 0.35,
+        "p_exp": 0.20, "decoy_detection": 0.35, "energy_decay": 0.004, "kappa": 0.84},
+    3: {"name": "Expert", "scan_rate": 0.12, "p_disc": 0.50,
+        "p_exp": 0.30, "decoy_detection": 0.5, "energy_decay": 0.003, "kappa": 0.76},
+    4: {"name": "APT", "scan_rate": 0.15, "p_disc": 0.65,
+        "p_exp": 0.40, "decoy_detection": 0.65, "energy_decay": 0.002, "kappa": 0.68},
+}
+
+# Table 8: Testbed Services
+SERVICES_CONFIG = {
+    "fc_mavlink": {"real_ip": "10.13.0.10", "real_port": 14550, "protocol": "udp", "is_critical": True},
+    "cc_sitl": {"real_ip": "10.13.0.11", "real_port": 5760, "protocol": "tcp", "is_critical": True},
+    "cc_mavlink": {"real_ip": "10.13.0.11", "real_port": 14550, "protocol": "udp", "is_critical": False},
+    "gcs_web": {"real_ip": "10.13.0.20", "real_port": 3000, "protocol": "tcp", "is_critical": True},
+    "video_stream": {"real_ip": "10.13.0.12", "real_port": 554, "protocol": "tcp", "is_critical": False},
+    "telemetry_db": {"real_ip": "10.13.0.14", "real_port": 5432, "protocol": "tcp", "is_critical": False},
+}
+
+DECOYS_CONFIG = {
+    "honeydrone_1": {"real_ip": "10.13.0.100", "real_port": 14550, "protocol": "udp"},
+    "honeydrone_2": {"real_ip": "10.13.0.101", "real_port": 14550, "protocol": "udp"},
+    "decoy_gcs": {"real_ip": "10.13.0.102", "real_port": 3000, "protocol": "tcp"},
+    "tarpit": {"real_ip": "10.13.0.103", "real_port": 9999, "protocol": "tcp"},
+}
+
+MTD_CHAINS = {
+    "prerouting": "MTD_PREROUTING",
+    "postrouting": "MTD_POSTROUTING",
+    "forward": "MTD_FORWARD",
+}
+
+
+def to_python(obj):
+    """numpy 타입을 Python 기본 타입으로 변환"""
+    if obj is None:
+        return None
+    if isinstance(obj, (np.integer, np.int64, np.int32, np.int16, np.int8)):
+        return int(obj)
+    if isinstance(obj, (np.floating, np.float64, np.float32, np.float16)):
+        return float(obj)
     if isinstance(obj, np.ndarray):
         return obj.tolist()
-    elif isinstance(obj, (np.float32, np.float64, np.floating)):
-        return float(obj)
-    elif isinstance(obj, (np.int32, np.int64, np.integer)):
-        return int(obj)
-    elif isinstance(obj, (np.bool_,)):
+    if isinstance(obj, np.bool_):
         return bool(obj)
-    elif isinstance(obj, dict):
-        return {k: to_serializable(v) for k, v in obj.items()}
-    elif isinstance(obj, (list, tuple)):
-        return [to_serializable(v) for v in obj]
-    elif hasattr(obj, '__dict__'):
-        return to_serializable(obj.__dict__)
+    if isinstance(obj, (list, tuple)):
+        return [to_python(x) for x in obj]
+    if isinstance(obj, dict):
+        return {k: to_python(v) for k, v in obj.items()}
     return obj
 
 
-class NumpyJSONEncoder(json.JSONEncoder):
-    """numpy 타입을 처리하는 커스텀 JSON 인코더"""
-    def default(self, obj):
-        if isinstance(obj, np.ndarray):
-            return obj.tolist()
-        elif isinstance(obj, (np.float32, np.float64, np.floating)):
-            return float(obj)
-        elif isinstance(obj, (np.int32, np.int64, np.integer)):
-            return int(obj)
-        elif isinstance(obj, (np.bool_,)):
-            return bool(obj)
-        return super().default(obj)
+def scale_action(action: np.ndarray) -> np.ndarray:
+    """[-1,1] -> [0,1] 스케일링"""
+    return (np.array(action) + 1.0) / 2.0
+
+
+# =============================================================================
+# Service Target
+# =============================================================================
+@dataclass
+class ServiceTarget:
+    name: str
+    real_ip: str
+    real_port: int
+    virtual_ip: str
+    virtual_port: int
+    protocol: str = "tcp"
+    is_critical: bool = False
+    is_decoy: bool = False
+    vulnerability_score: float = 0.5
+    scan_progress: float = 0.0
+    discovery_progress: float = 0.0
+    exploit_progress: float = 0.0
+
+
+# =============================================================================
+# iptables Command Executor
+# =============================================================================
+class IptablesExecutor:
+    """iptables 명령어 실행기"""
+    
+    def __init__(self, dry_run: bool = True, log_file: str = None):
+        self.dry_run = dry_run
+        self.command_history: List[Dict] = []
+        self.rule_counter = 0
+        self.log_file = log_file
+        
+        if log_file:
+            self.log_path = Path(log_file)
+            self.log_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    def _gen_comment(self, action: str) -> str:
+        """규칙 주석 생성"""
+        self.rule_counter += 1
+        ts = datetime.now().strftime("%H%M%S")
+        return f"MTD_{action}_{ts}_{self.rule_counter}"
+    
+    def execute(self, cmd: str, description: str = "") -> bool:
+        """명령어 실행"""
+        entry = {
+            "timestamp": datetime.now().isoformat(),
+            "command": cmd,
+            "description": description,
+            "dry_run": self.dry_run,
+            "success": True,
+            "error": None,
+        }
+        
+        if self.dry_run:
+            print(f"  [DRY-RUN] {cmd}")
+            self.command_history.append(entry)
+            return True
+        
+        try:
+            result = subprocess.run(
+                cmd,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            if result.returncode != 0:
+                entry["success"] = False
+                entry["error"] = result.stderr.strip()
+                print(f"  [ERROR] {cmd}")
+                print(f"          {result.stderr.strip()}")
+            else:
+                print(f"  [OK] {cmd}")
+        except subprocess.TimeoutExpired:
+            entry["success"] = False
+            entry["error"] = "Timeout"
+            print(f"  [TIMEOUT] {cmd}")
+        except Exception as e:
+            entry["success"] = False
+            entry["error"] = str(e)
+            print(f"  [EXCEPTION] {cmd}: {e}")
+        
+        self.command_history.append(entry)
+        
+        if self.log_file:
+            with open(self.log_path, 'a') as f:
+                f.write(json.dumps(entry) + "\n")
+        
+        return entry["success"]
+    
+    def execute_batch(self, commands: List[str], description: str = "") -> int:
+        """여러 명령어 배치 실행"""
+        success_count = 0
+        for cmd in commands:
+            if self.execute(cmd, description):
+                success_count += 1
+        return success_count
+
+
+# =============================================================================
+# MTD Controller with iptables
+# =============================================================================
+class MTDController:
+    """MTD 컨트롤러 - iptables 연동"""
+    
+    def __init__(self, testbed_mode: bool = False, dry_run: bool = True, log_file: str = None):
+        self.testbed_mode = testbed_mode
+        self.dry_run = dry_run
+        
+        self.services: Dict[str, ServiceTarget] = {}
+        self.decoys: Dict[str, ServiceTarget] = {}
+        self.blacklist: set = set()
+        
+        self.stats = {
+            'total_shuffles': 0,
+            'total_port_hops': 0,
+            'total_swaps': 0,
+            'total_decoy_activations': 0,
+            'total_blacklists': 0,
+            'total_cost': 0.0,
+        }
+        
+        self.config_history: deque = deque(maxlen=50)
+        self.last_config: Optional[str] = None
+        
+        if testbed_mode:
+            self.executor = IptablesExecutor(dry_run=dry_run, log_file=log_file)
+        else:
+            self.executor = None
+        
+        self._init_services()
+    
+    def _init_services(self):
+        """서비스 초기화"""
+        for name, cfg in SERVICES_CONFIG.items():
+            self.services[name] = ServiceTarget(
+                name=name,
+                real_ip=cfg["real_ip"],
+                real_port=cfg["real_port"],
+                virtual_ip=cfg["real_ip"],
+                virtual_port=cfg["real_port"],
+                protocol=cfg["protocol"],
+                is_critical=cfg.get("is_critical", False),
+                vulnerability_score=np.random.uniform(0.3, 0.7),
+            )
+        
+        for name, cfg in DECOYS_CONFIG.items():
+            self.decoys[name] = ServiceTarget(
+                name=name,
+                real_ip=cfg["real_ip"],
+                real_port=cfg["real_port"],
+                virtual_ip=cfg["real_ip"],
+                virtual_port=cfg["real_port"],
+                protocol=cfg["protocol"],
+                is_decoy=True,
+            )
+        
+        self._record_config()
+    
+    def _get_config_snapshot(self) -> str:
+        """현재 구성 스냅샷"""
+        configs = sorted([f"{s.virtual_ip}:{s.virtual_port}" for s in self.services.values()])
+        return "|".join(configs)
+    
+    def _record_config(self):
+        """구성 변경 기록"""
+        current = self._get_config_snapshot()
+        if current != self.last_config:
+            self.config_history.append(current)
+            self.last_config = current
+    
+    def reset(self):
+        """상태 초기화"""
+        self._init_services()
+        self.blacklist.clear()
+        self.stats = {k: 0 if isinstance(v, int) else 0.0 for k, v in self.stats.items()}
+        self.config_history.clear()
+        self.last_config = None
+        self._record_config()
+        
+        if self.testbed_mode:
+            self._flush_mtd_rules()
+    
+    # =========================================================================
+    # iptables Chain Management
+    # =========================================================================
+    def init_iptables_chains(self):
+        """MTD 체인 초기화"""
+        if not self.testbed_mode:
+            return
+        
+        print("\n[iptables] Initializing MTD chains...")
+        
+        commands = [
+            # nat 테이블 체인 생성
+            f"iptables -t nat -N {MTD_CHAINS['prerouting']} 2>/dev/null || true",
+            f"iptables -t nat -N {MTD_CHAINS['postrouting']} 2>/dev/null || true",
+            # filter 테이블 체인 생성
+            f"iptables -N {MTD_CHAINS['forward']} 2>/dev/null || true",
+            # 메인 체인에 점프 규칙 추가
+            f"iptables -t nat -C PREROUTING -j {MTD_CHAINS['prerouting']} 2>/dev/null || "
+            f"iptables -t nat -I PREROUTING -j {MTD_CHAINS['prerouting']}",
+            f"iptables -t nat -C POSTROUTING -j {MTD_CHAINS['postrouting']} 2>/dev/null || "
+            f"iptables -t nat -I POSTROUTING -j {MTD_CHAINS['postrouting']}",
+            f"iptables -C FORWARD -j {MTD_CHAINS['forward']} 2>/dev/null || "
+            f"iptables -I FORWARD -j {MTD_CHAINS['forward']}",
+        ]
+        
+        self.executor.execute_batch(commands, "Initialize MTD chains")
+    
+    def _flush_mtd_rules(self):
+        """MTD 규칙 초기화"""
+        if not self.testbed_mode:
+            return
+        
+        print("\n[iptables] Flushing MTD rules...")
+        
+        commands = [
+            f"iptables -t nat -F {MTD_CHAINS['prerouting']} 2>/dev/null || true",
+            f"iptables -t nat -F {MTD_CHAINS['postrouting']} 2>/dev/null || true",
+            f"iptables -F {MTD_CHAINS['forward']} 2>/dev/null || true",
+        ]
+        
+        self.executor.execute_batch(commands, "Flush MTD rules")
+    
+    def cleanup_iptables(self):
+        """iptables 정리"""
+        if not self.testbed_mode:
+            return
+        
+        print("\n[iptables] Cleaning up...")
+        
+        commands = [
+            # 규칙 삭제
+            f"iptables -t nat -F {MTD_CHAINS['prerouting']} 2>/dev/null || true",
+            f"iptables -t nat -F {MTD_CHAINS['postrouting']} 2>/dev/null || true",
+            f"iptables -F {MTD_CHAINS['forward']} 2>/dev/null || true",
+            # 점프 규칙 삭제
+            f"iptables -t nat -D PREROUTING -j {MTD_CHAINS['prerouting']} 2>/dev/null || true",
+            f"iptables -t nat -D POSTROUTING -j {MTD_CHAINS['postrouting']} 2>/dev/null || true",
+            f"iptables -D FORWARD -j {MTD_CHAINS['forward']} 2>/dev/null || true",
+            # 체인 삭제
+            f"iptables -t nat -X {MTD_CHAINS['prerouting']} 2>/dev/null || true",
+            f"iptables -t nat -X {MTD_CHAINS['postrouting']} 2>/dev/null || true",
+            f"iptables -X {MTD_CHAINS['forward']} 2>/dev/null || true",
+        ]
+        
+        self.executor.execute_batch(commands, "Cleanup MTD chains")
+    
+    # =========================================================================
+    # MTD Actions with iptables
+    # =========================================================================
+    def shuffle(self, intensity: float) -> Tuple[float, List[str]]:
+        """
+        네트워크 셔플 - IP/Port 변경
+        
+        iptables 명령어:
+        - DNAT: 가상 IP -> 실제 IP
+        - SNAT: 응답 패킷 소스 변경
+        """
+        commands = []
+        n = max(1, int(len(self.services) * intensity))
+        keys = list(self.services.keys())
+        shuffled = np.random.choice(keys, min(n, len(keys)), replace=False)
+        
+        for svc_name in shuffled:
+            svc = self.services[svc_name]
+            old_vip = svc.virtual_ip
+            old_vport = svc.virtual_port
+            
+            # 새 가상 주소 생성
+            new_vip = f"10.13.0.{np.random.randint(200, 250)}"
+            new_vport = np.random.randint(10000, 60000)
+            
+            if self.testbed_mode:
+                comment = self.executor._gen_comment("SHUFFLE")
+                
+                # 기존 DNAT 규칙 삭제
+                if old_vip != svc.real_ip or old_vport != svc.real_port:
+                    commands.append(
+                        f"iptables -t nat -D {MTD_CHAINS['prerouting']} "
+                        f"-d {old_vip} -p {svc.protocol} --dport {old_vport} "
+                        f"-j DNAT --to-destination {svc.real_ip}:{svc.real_port} 2>/dev/null || true"
+                    )
+                
+                # 새 DNAT 규칙 (가상 -> 실제)
+                commands.append(
+                    f"iptables -t nat -A {MTD_CHAINS['prerouting']} "
+                    f"-d {new_vip} -p {svc.protocol} --dport {new_vport} "
+                    f"-j DNAT --to-destination {svc.real_ip}:{svc.real_port} "
+                    f"-m comment --comment \"{comment}\""
+                )
+                
+                # SNAT 규칙 (응답 패킷)
+                commands.append(
+                    f"iptables -t nat -A {MTD_CHAINS['postrouting']} "
+                    f"-s {svc.real_ip} -p {svc.protocol} --sport {svc.real_port} "
+                    f"-j SNAT --to-source {new_vip}:{new_vport} "
+                    f"-m comment --comment \"{comment}\""
+                )
+                
+                # FORWARD 허용
+                commands.append(
+                    f"iptables -A {MTD_CHAINS['forward']} "
+                    f"-d {svc.real_ip} -p {svc.protocol} --dport {svc.real_port} "
+                    f"-j ACCEPT -m comment --comment \"{comment}\""
+                )
+            
+            # 상태 업데이트
+            svc.virtual_ip = new_vip
+            svc.virtual_port = new_vport
+        
+        if self.testbed_mode and commands:
+            print(f"\n[MTD] Shuffle: {len(shuffled)} services")
+            self.executor.execute_batch(commands, f"Shuffle {len(shuffled)} services")
+        
+        self.stats['total_shuffles'] += 1
+        cost = intensity * ACTION_COSTS['shuffle']
+        self.stats['total_cost'] += cost
+        self._record_config()
+        
+        return cost, commands
+    
+    def port_hop(self, intensity: float) -> Tuple[float, List[str]]:
+        """
+        포트 호핑 - Critical 서비스 포트 변경
+        """
+        commands = []
+        changed = False
+        
+        for svc in self.services.values():
+            if svc.is_critical and np.random.random() < intensity:
+                old_vport = svc.virtual_port
+                new_vport = np.random.randint(10000, 60000)
+                
+                if self.testbed_mode:
+                    comment = self.executor._gen_comment("PORTHOP")
+                    
+                    # 기존 규칙 삭제
+                    if old_vport != svc.real_port:
+                        commands.append(
+                            f"iptables -t nat -D {MTD_CHAINS['prerouting']} "
+                            f"-d {svc.virtual_ip} -p {svc.protocol} --dport {old_vport} "
+                            f"-j DNAT --to-destination {svc.real_ip}:{svc.real_port} 2>/dev/null || true"
+                        )
+                    
+                    # 새 포트 DNAT
+                    commands.append(
+                        f"iptables -t nat -A {MTD_CHAINS['prerouting']} "
+                        f"-d {svc.virtual_ip} -p {svc.protocol} --dport {new_vport} "
+                        f"-j DNAT --to-destination {svc.real_ip}:{svc.real_port} "
+                        f"-m comment --comment \"{comment}\""
+                    )
+                
+                svc.virtual_port = new_vport
+                changed = True
+        
+        if self.testbed_mode and commands:
+            print(f"\n[MTD] Port Hop")
+            self.executor.execute_batch(commands, "Port hopping")
+        
+        self.stats['total_port_hops'] += 1
+        cost = intensity * ACTION_COSTS['port_hop']
+        self.stats['total_cost'] += cost
+        
+        if changed:
+            self._record_config()
+        
+        return cost, commands
+    
+    def swap(self, intensity: float, target_critical: bool = True) -> Tuple[float, List[str]]:
+        """
+        서비스 스왑 - 두 서비스의 가상 주소 교환
+        """
+        commands = []
+        keys = list(self.services.keys())
+        
+        if len(keys) < 2:
+            return 0.0, []
+        
+        # 스왑 대상 선택
+        if target_critical:
+            critical = [k for k in keys if self.services[k].is_critical]
+            non_critical = [k for k in keys if not self.services[k].is_critical]
+            if critical and non_critical:
+                a, b = np.random.choice(critical), np.random.choice(non_critical)
+            else:
+                a, b = np.random.choice(keys, 2, replace=False)
+        else:
+            a, b = np.random.choice(keys, 2, replace=False)
+        
+        svc_a, svc_b = self.services[a], self.services[b]
+        
+        # 현재 가상 주소 저장
+        a_vip, a_vport = svc_a.virtual_ip, svc_a.virtual_port
+        b_vip, b_vport = svc_b.virtual_ip, svc_b.virtual_port
+        
+        if self.testbed_mode:
+            comment = self.executor._gen_comment("SWAP")
+            
+            # 기존 규칙 삭제
+            commands.append(
+                f"iptables -t nat -D {MTD_CHAINS['prerouting']} "
+                f"-d {a_vip} -p {svc_a.protocol} --dport {a_vport} "
+                f"-j DNAT --to-destination {svc_a.real_ip}:{svc_a.real_port} 2>/dev/null || true"
+            )
+            commands.append(
+                f"iptables -t nat -D {MTD_CHAINS['prerouting']} "
+                f"-d {b_vip} -p {svc_b.protocol} --dport {b_vport} "
+                f"-j DNAT --to-destination {svc_b.real_ip}:{svc_b.real_port} 2>/dev/null || true"
+            )
+            
+            # 스왑된 규칙 추가: A의 가상주소 -> B의 실제주소
+            commands.append(
+                f"iptables -t nat -A {MTD_CHAINS['prerouting']} "
+                f"-d {a_vip} -p {svc_b.protocol} --dport {a_vport} "
+                f"-j DNAT --to-destination {svc_b.real_ip}:{svc_b.real_port} "
+                f"-m comment --comment \"{comment}_A2B\""
+            )
+            
+            # B의 가상주소 -> A의 실제주소
+            commands.append(
+                f"iptables -t nat -A {MTD_CHAINS['prerouting']} "
+                f"-d {b_vip} -p {svc_a.protocol} --dport {b_vport} "
+                f"-j DNAT --to-destination {svc_a.real_ip}:{svc_a.real_port} "
+                f"-m comment --comment \"{comment}_B2A\""
+            )
+            
+            print(f"\n[MTD] Swap: {a} <-> {b}")
+            self.executor.execute_batch(commands, f"Swap {a} <-> {b}")
+        
+        # 가상 주소 교환
+        svc_a.virtual_ip, svc_b.virtual_ip = b_vip, a_vip
+        svc_a.virtual_port, svc_b.virtual_port = b_vport, a_vport
+        
+        self.stats['total_swaps'] += 1
+        cost = intensity * ACTION_COSTS['swap']
+        self.stats['total_cost'] += cost
+        self._record_config()
+        
+        return cost, commands
+    
+    def activate_decoys(self, ratio: float) -> Tuple[float, List[str]]:
+        """
+        디코이 활성화 - Honeypot DNAT 규칙
+        """
+        commands = []
+        n = max(1, int(len(self.decoys) * ratio))
+        decoy_keys = list(self.decoys.keys())[:n]
+        
+        if self.testbed_mode:
+            comment = self.executor._gen_comment("DECOY")
+            
+            for name in decoy_keys:
+                decoy = self.decoys[name]
+                
+                # 허니팟으로 리다이렉트
+                commands.append(
+                    f"iptables -t nat -A {MTD_CHAINS['prerouting']} "
+                    f"-d {decoy.virtual_ip} -p {decoy.protocol} --dport {decoy.virtual_port} "
+                    f"-j DNAT --to-destination {decoy.real_ip}:{decoy.real_port} "
+                    f"-m comment --comment \"{comment}\""
+                )
+                
+                # 로깅 (허니팟 접근 감지)
+                commands.append(
+                    f"iptables -A {MTD_CHAINS['forward']} "
+                    f"-d {decoy.real_ip} -p {decoy.protocol} --dport {decoy.real_port} "
+                    f"-j LOG --log-prefix \"[MTD-DECOY-HIT] \" --log-level 4 "
+                    f"-m comment --comment \"{comment}\""
+                )
+            
+            print(f"\n[MTD] Activate Decoys: {n}")
+            self.executor.execute_batch(commands, f"Activate {n} decoys")
+        
+        self.stats['total_decoy_activations'] += n
+        cost = ratio * ACTION_COSTS['decoy'] * n
+        self.stats['total_cost'] += cost
+        
+        return cost, commands
+    
+    def blacklist_ip(self, ip: str, duration: int = 300) -> Tuple[float, List[str]]:
+        """
+        IP 블랙리스트 - 특정 IP 차단
+        """
+        commands = []
+        
+        if ip in self.blacklist:
+            return 0.0, []
+        
+        if self.testbed_mode:
+            comment = self.executor._gen_comment("BLACKLIST")
+            
+            # INPUT/FORWARD 차단
+            commands.append(
+                f"iptables -I INPUT -s {ip} -j DROP "
+                f"-m comment --comment \"{comment}\""
+            )
+            commands.append(
+                f"iptables -I FORWARD -s {ip} -j DROP "
+                f"-m comment --comment \"{comment}\""
+            )
+            
+            # 로깅
+            commands.append(
+                f"iptables -I INPUT -s {ip} "
+                f"-j LOG --log-prefix \"[MTD-BLOCKED] \" --log-level 4 "
+                f"-m comment --comment \"{comment}\""
+            )
+            
+            print(f"\n[MTD] Blacklist IP: {ip}")
+            self.executor.execute_batch(commands, f"Blacklist {ip}")
+        
+        self.blacklist.add(ip)
+        self.stats['total_blacklists'] += 1
+        cost = ACTION_COSTS['blacklist']
+        self.stats['total_cost'] += cost
+        
+        return cost, commands
+    
+    # =========================================================================
+    # Metrics
+    # =========================================================================
+    def get_cdi(self) -> float:
+        """CDI 계산 - 시간에 따른 구성 변화 다양성"""
+        if len(self.config_history) <= 1:
+            return 0.1
+        
+        unique_configs = len(set(self.config_history))
+        total_configs = len(self.config_history)
+        base_diversity = unique_configs / total_configs
+        
+        recent_changes = 0
+        history_list = list(self.config_history)
+        for i in range(1, min(10, len(history_list))):
+            if i < len(history_list) and history_list[-i] != history_list[-i-1]:
+                recent_changes += 1
+        
+        recency_bonus = recent_changes / 10 * 0.3
+        total_actions = (self.stats['total_shuffles'] + 
+                        self.stats['total_port_hops'] + 
+                        self.stats['total_swaps'])
+        action_bonus = min(0.3, total_actions * 0.02)
+        
+        cdi = base_diversity * 0.4 + recency_bonus + action_bonus + 0.1
+        return float(np.clip(cdi, 0.1, 1.0))
+    
+    def get_redundancy(self) -> float:
+        """Redundancy 계산"""
+        active = self.stats['total_decoy_activations'] / max(1, len(self.decoys) * 10)
+        swap_bonus = min(0.3, self.stats['total_swaps'] * 0.05)
+        return min(1.0, active * 0.6 + swap_bonus + 0.1)
+    
+    def get_targets(self) -> List[ServiceTarget]:
+        return list(self.services.values()) + list(self.decoys.values())
+    
+    def get_iptables_summary(self) -> Dict:
+        """iptables 명령어 요약"""
+        if not self.testbed_mode or not self.executor:
+            return {}
+        
+        return {
+            "total_commands": len(self.executor.command_history),
+            "successful": sum(1 for c in self.executor.command_history if c["success"]),
+            "failed": sum(1 for c in self.executor.command_history if not c["success"]),
+            "dry_run": self.dry_run,
+        }
+
+
+# =============================================================================
+# CTI Detection Model
+# =============================================================================
+@dataclass
+class CTIDetectionModel:
+    precision: float = 0.66
+    recall: float = 0.85
+    f1_score: float = 0.71
+    
+    class_performance: Dict[str, Dict[str, float]] = field(default_factory=lambda: {
+        "Normal": {"precision": 0.87, "recall": 0.73, "f1": 0.79},
+        "Brute-force": {"precision": 0.67, "recall": 0.94, "f1": 0.78},
+        "Battery-spoofing": {"precision": 0.60, "recall": 0.90, "f1": 0.72},
+        "Flight-term": {"precision": 0.68, "recall": 0.85, "f1": 0.75},
+        "GPS-inject": {"precision": 0.39, "recall": 0.92, "f1": 0.54},
+    })
+    
+    def detect_attack(self, attack_type: str = "scan") -> Tuple[bool, float, str]:
+        attack_mapping = {
+            "scan": "Brute-force",
+            "exploit": "Flight-term",
+            "gps_spoof": "GPS-inject",
+            "battery": "Battery-spoofing",
+        }
+        mapped_class = attack_mapping.get(attack_type, "Normal")
+        perf = self.class_performance.get(mapped_class, self.class_performance["Normal"])
+        detected = np.random.random() < perf["recall"]
+        confidence = perf["precision"] * np.random.uniform(0.8, 1.0) if detected else np.random.uniform(0.1, 0.4)
+        return detected, float(confidence), mapped_class
+    
+    def get_threat_level(self, indicators: Dict[str, float]) -> float:
+        base_threat = 0.0
+        if indicators.get('scan_intensity', 0) > 0.1:
+            detected, conf, _ = self.detect_attack("scan")
+            if detected:
+                base_threat += indicators['scan_intensity'] * conf * 0.4
+        if indicators.get('exploit_attempts', 0) > 0:
+            detected, conf, _ = self.detect_attack("exploit")
+            if detected:
+                base_threat += indicators['exploit_attempts'] * conf * 0.5
+        return min(1.0, base_threat * self.f1_score)
+
+
+# =============================================================================
+# Attack Phase & Attacker Agent
+# =============================================================================
+class AttackPhase:
+    INITIAL = "initial"
+    RECONNAISSANCE = "reconnaissance"
+    DISCOVERY = "discovery"
+    EXPLOITATION = "exploitation"
+    PERSISTENCE = "persistence"
+    BREACH = "breach"
+    DEFENDED = "defended"
+
+
+class AttackerAgent:
+    def __init__(self, level: int = 2, seed: int = 42, targets: List[ServiceTarget] = None):
+        self.level = level
+        self.profile = ATTACKER_PROFILES.get(level, ATTACKER_PROFILES[2])
+        np.random.seed(seed)
+        
+        self.phase = AttackPhase.INITIAL
+        self.energy = 1.0
+        self.confusion_level = 0.0
+        self.step_count = 0
+        
+        self.scanned_ips: set = set()
+        self.discovered_services: set = set()
+        self.exploited_services: set = set()
+        self.decoy_hits = 0
+        
+        self.targets = targets or []
+        self.cti = CTIDetectionModel()
+    
+    def reset(self, seed: int = None):
+        if seed:
+            np.random.seed(seed)
+        self.phase = AttackPhase.INITIAL
+        self.energy = 1.0
+        self.confusion_level = 0.0
+        self.step_count = 0
+        self.scanned_ips.clear()
+        self.discovered_services.clear()
+        self.exploited_services.clear()
+        self.decoy_hits = 0
+    
+    def set_targets(self, targets: List[ServiceTarget]):
+        self.targets = targets
+    
+    def step(self, mtd_status: Dict[str, Any]) -> Dict[str, Any]:
+        self.step_count += 1
+        result = {
+            "phase": self.phase, "scanned": False, "discovered": False,
+            "exploited": False, "breach": False, "decoy_hit": False,
+            "defended": False, "cti_detected": False, "energy": self.energy,
+        }
+        
+        shuffle_intensity = mtd_status.get('shuffle_intensity', 0)
+        swap_intensity = mtd_status.get('swap_intensity', 0)
+        defense_prob = mtd_status.get('defense_probability', 0.25)
+        
+        if mtd_status.get('is_shuffle', False):
+            self.confusion_level += shuffle_intensity * 0.3
+        if mtd_status.get('is_swap', False):
+            self.confusion_level += swap_intensity * 0.4
+        self.confusion_level *= 0.92
+        
+        self.energy -= self.profile["energy_decay"]
+        if self.energy <= 0:
+            self.phase = AttackPhase.DEFENDED
+            result["defended"] = True
+            return result
+        
+        confusion_penalty = min(0.6, self.confusion_level * 0.5)
+        effective_rate = max(0.05, 1.0 - confusion_penalty)
+        
+        cti_indicators = {
+            'scan_intensity': len(self.scanned_ips) / 254,
+            'exploit_attempts': len(self.exploited_services) / max(1, len(self.targets)),
+        }
+        cti_threat = self.cti.get_threat_level(cti_indicators)
+        if cti_threat > 0.3:
+            result["cti_detected"] = True
+            defense_prob = min(0.9, defense_prob + cti_threat * 0.3)
+        
+        if self.phase == AttackPhase.INITIAL:
+            self.phase = AttackPhase.RECONNAISSANCE
+        elif self.phase == AttackPhase.RECONNAISSANCE:
+            n_scan = int(254 * self.profile["scan_rate"] * effective_rate)
+            for _ in range(n_scan):
+                ip = f"10.13.0.{np.random.randint(1, 255)}"
+                if np.random.random() >= defense_prob * 0.3:
+                    self.scanned_ips.add(ip)
+                    result["scanned"] = True
+            if len(self.scanned_ips) > 5 and np.random.random() < 0.3 * (1 - defense_prob * 0.3):
+                self.phase = AttackPhase.DISCOVERY
+        elif self.phase == AttackPhase.DISCOVERY:
+            for target in self.targets:
+                if target.name in self.discovered_services or target.virtual_ip not in self.scanned_ips:
+                    continue
+                if np.random.random() < defense_prob * 0.5:
+                    result["defended"] = True
+                    continue
+                if target.is_decoy and np.random.random() >= self.profile["decoy_detection"]:
+                    self.decoy_hits += 1
+                    result["decoy_hit"] = True
+                    self.energy -= 0.1
+                    continue
+                if np.random.random() < self.profile["p_disc"] * effective_rate:
+                    target.discovery_progress += 0.4
+                    if target.discovery_progress >= 0.8:
+                        self.discovered_services.add(target.name)
+                        result["discovered"] = True
+            if len(self.discovered_services) >= 1 and np.random.random() < 0.4 * (1 - defense_prob * 0.4):
+                self.phase = AttackPhase.EXPLOITATION
+        elif self.phase == AttackPhase.EXPLOITATION:
+            for target in self.targets:
+                if target.name not in self.discovered_services or target.name in self.exploited_services:
+                    continue
+                if np.random.random() < defense_prob * 0.7:
+                    result["defended"] = True
+                    continue
+                exploit_prob = self.profile["p_exp"] * target.vulnerability_score * effective_rate
+                if np.random.random() < exploit_prob:
+                    target.exploit_progress += 0.5
+                    if target.exploit_progress >= 0.9:
+                        self.exploited_services.add(target.name)
+                        result["exploited"] = True
+                        if target.is_critical:
+                            self.phase = AttackPhase.PERSISTENCE
+        elif self.phase == AttackPhase.PERSISTENCE:
+            if np.random.random() < defense_prob * 0.8:
+                result["defended"] = True
+            else:
+                critical_exploited = any(t.is_critical and t.name in self.exploited_services for t in self.targets)
+                if critical_exploited and np.random.random() < 0.3 * (1 - defense_prob):
+                    self.phase = AttackPhase.BREACH
+                    result["breach"] = True
+        
+        result["phase"] = self.phase
+        result["energy"] = self.energy
+        return result
 
 
 # =============================================================================
@@ -110,32 +896,19 @@ class NumpyJSONEncoder(json.JSONEncoder):
 # =============================================================================
 if TORCH_AVAILABLE:
     class ActorCritic(nn.Module):
-        def __init__(self, state_dim: int, action_dim: int, hidden_size: int = 256, num_layers: int = 2):
+        def __init__(self, state_dim: int = STATE_DIM, action_dim: int = ACTION_DIM, hidden_size: int = 256):
             super().__init__()
-            self.state_dim = state_dim
-            self.action_dim = action_dim
-
-            layers = []
-            input_dim = state_dim
-            for i in range(num_layers):
-                layers.extend([
-                    nn.Linear(input_dim, hidden_size),
-                    nn.LayerNorm(hidden_size),
-                    nn.ReLU(),
-                ])
-                input_dim = hidden_size
-            self.shared = nn.Sequential(*layers)
-
+            self.shared = nn.Sequential(
+                nn.Linear(state_dim, hidden_size), nn.LayerNorm(hidden_size), nn.ReLU(),
+                nn.Linear(hidden_size, hidden_size), nn.LayerNorm(hidden_size), nn.ReLU(),
+            )
             self.actor = nn.Sequential(
-                nn.Linear(hidden_size, hidden_size // 2),
-                nn.ReLU(),
-                nn.Linear(hidden_size // 2, action_dim),
-                nn.Tanh(),
+                nn.Linear(hidden_size, hidden_size // 2), nn.ReLU(),
+                nn.Linear(hidden_size // 2, action_dim), nn.Tanh(),
             )
             self.log_std = nn.Parameter(torch.ones(action_dim) * -0.5)
             self.critic = nn.Sequential(
-                nn.Linear(hidden_size, hidden_size // 2),
-                nn.ReLU(),
+                nn.Linear(hidden_size, hidden_size // 2), nn.ReLU(),
                 nn.Linear(hidden_size // 2, 1),
             )
 
@@ -143,499 +916,491 @@ if TORCH_AVAILABLE:
             features = self.shared(state)
             return self.actor(features), self.critic(features)
 
-        def act(self, state, deterministic: bool = True):
+        def act(self, state, deterministic=True):
             action_mean, value = self.forward(state)
             if deterministic:
                 return action_mean, torch.zeros(1), value
-            from torch.distributions import Normal
             std = torch.exp(self.log_std)
-            dist = Normal(action_mean, std)
-            action = dist.sample()
-            action = torch.clamp(action, -1, 1)
-            log_prob = dist.log_prob(action).sum(dim=-1, keepdim=True)
-            return action, log_prob, value
+            dist = torch.distributions.Normal(action_mean, std)
+            action = dist.sample().clamp(-1, 1)
+            return action, dist.log_prob(action).sum(-1, keepdim=True), value
 
 
 # =============================================================================
-# Real-Time State
+# Defense Probability Calculator
+# =============================================================================
+class DefenseProbabilityCalculator:
+    P_BASE = 0.25
+    BETA_CDI = 0.15
+    
+    def __init__(self):
+        self.recent_effects: List[Tuple[int, float]] = []
+    
+    def compute(self, action_intensities: Dict, cdi: float, attacker_level: int, 
+                step: int, cti_detected: bool = False) -> float:
+        current_effect = sum(MTD_DEFENSE_WEIGHTS.get(a, 0) * i for a, i in action_intensities.items())
+        self.recent_effects.append((step, current_effect))
+        if len(self.recent_effects) > 10:
+            self.recent_effects = self.recent_effects[-10:]
+        residual = sum(e * 0.3 * (0.9 ** (step - s)) for s, e in self.recent_effects[:-1] if step > s)
+        kappa = ATTACKER_PROFILES[attacker_level]["kappa"]
+        cti_bonus = 0.15 if cti_detected else 0.0
+        p_def = (self.P_BASE + current_effect + residual + self.BETA_CDI * cdi + cti_bonus) * kappa
+        return float(np.clip(p_def, 0.10, 0.95))
+    
+    def reset(self):
+        self.recent_effects.clear()
+
+
+# =============================================================================
+# Episode Result
 # =============================================================================
 @dataclass
-class RealTimeState:
-    """실시간 상태 데이터"""
-    timestamp: float = field(default_factory=time.time)
-    scan_detected: bool = False
-    scan_rate: float = 0.0
-    suspicious_ips: List[str] = field(default_factory=list)
-    blocked_ips: List[str] = field(default_factory=list)
-    services_up: int = 6
+class EpisodeResult:
+    episode_id: int = 0
+    strategy_name: str = ""
+    attacker_level: int = 0
+    steps: int = 0
+    breach_occurred: bool = False
+    total_cost: float = 0.0
+    mttc: int = 200
+    asr: float = 0.0
+    cdi: float = 0.0
+    redundancy: float = 0.0
+    des: float = 0.0
+    cer: float = 0.0
+    shuffle_count: int = 0
+    swap_count: int = 0
+    decoy_hits: int = 0
     services_discovered: int = 0
-    critical_exposed: bool = False
-    diversity_score: float = 0.0
-    redundancy_score: float = 0.0
-    confusion_level: float = 0.0
-    active_decoys: int = 0
-    active_swaps: int = 0
-    network_latency_ms: float = 0.0
-    cti_alert: bool = False
-    cti_threat_level: float = 0.0
-    cti_attack_type: Optional[str] = None
+    services_exploited: int = 0
+    final_phase: str = "initial"
+    cti_detections: int = 0
+    iptables_commands: int = 0
 
 
 # =============================================================================
-# State Collector
+# Strategies
 # =============================================================================
-class StateCollector:
-    """실시간 상태 수집기"""
-    
-    def __init__(
-        self,
-        mtd_controller: IptablesMTDController,
-        cti_file: Optional[str] = None,
-        network_monitor_file: Optional[str] = None,
-    ):
-        self.mtd_controller = mtd_controller
-        self.cti_file = Path(cti_file) if cti_file else None
-        self.network_monitor_file = Path(network_monitor_file) if network_monitor_file else None
-        self.state_history: deque = deque(maxlen=1000)
-        self.last_state = RealTimeState()
-        self._lock = threading.Lock()
-    
-    def collect_state(self) -> RealTimeState:
-        """현재 상태 수집"""
-        with self._lock:
-            state = RealTimeState()
-            
-            # MTD Controller 상태
-            mtd_state = self.mtd_controller.get_mtd_state_for_attacker()
-            state.diversity_score = float(mtd_state.get("diversity_score", 0.0))
-            state.redundancy_score = float(mtd_state.get("redundancy_score", 0.0))
-            state.confusion_level = float(mtd_state.get("confusion_level", 0.0))
-            state.active_decoys = int(mtd_state.get("decoy_count", 0))
-            state.active_swaps = int(mtd_state.get("active_swap_count", 0))
-            state.blocked_ips = list(self.mtd_controller.blacklist.keys())
-            
-            # CTI 파일
-            if self.cti_file and self.cti_file.exists():
-                try:
-                    with open(self.cti_file, 'r') as f:
-                        cti_data = json.load(f)
-                    state.cti_alert = cti_data.get("alert", False)
-                    state.cti_threat_level = float(cti_data.get("threat_level", 0.0))
-                    state.cti_attack_type = cti_data.get("attack_type")
-                except Exception as e:
-                    logger.warning(f"CTI file read error: {e}")
-            
-            # 네트워크 모니터 파일
-            if self.network_monitor_file and self.network_monitor_file.exists():
-                try:
-                    with open(self.network_monitor_file, 'r') as f:
-                        net_data = json.load(f)
-                    state.scan_detected = net_data.get("scan_detected", False)
-                    state.scan_rate = float(net_data.get("scan_rate", 0.0))
-                    state.suspicious_ips = net_data.get("suspicious_ips", [])
-                    state.services_discovered = int(net_data.get("services_discovered", 0))
-                    state.critical_exposed = net_data.get("critical_exposed", False)
-                except Exception as e:
-                    logger.warning(f"Network monitor file read error: {e}")
-            
-            self.last_state = state
-            self.state_history.append(state)
-            
-            return state
-    
-    def get_state_vector(self) -> np.ndarray:
-        """RL 정책 입력용 상태 벡터 (17차원)"""
-        state = self.collect_state()
-        
-        scanned_ratio = min(1.0, state.scan_rate / 0.2) if state.scan_detected else 0.0
-        discovered_ratio = state.services_discovered / 6.0
-        exploit_progress = max(0, (state.cti_threat_level - 0.5) * 2) if state.cti_threat_level > 0.5 else 0.0
-        
-        compromise_progress = 0.0
-        if state.cti_attack_type in ["lateral_movement", "data_exfiltration"]:
-            compromise_progress = 0.5
-        if state.cti_attack_type == "command_control":
-            compromise_progress = 1.0
-        
-        energy = max(0.0, 1.0 - len(state.blocked_ips) * 0.1)
-        
-        last_action = self.mtd_controller.stats.last_action_time or time.time()
-        steps_since_shuffle = min(1.0, (time.time() - last_action) / 300)
-        
-        last_swap = self.mtd_controller.stats.last_swap_time or time.time()
-        steps_since_swap = min(1.0, (time.time() - last_swap) / 300)
-        
-        return np.array([
-            scanned_ratio,
-            discovered_ratio,
-            float(state.critical_exposed),
-            exploit_progress,
-            compromise_progress,
-            state.diversity_score,
-            state.redundancy_score,
-            state.active_decoys / 4.0,
-            energy,
-            state.active_swaps / 3.0,
-            steps_since_shuffle,
-            steps_since_swap,
-            min(1.0, state.scan_rate / 0.2),
-            0.5, 0.5, 0.5, 0.5,  # Last action intensities (placeholder)
-        ], dtype=np.float32)
+class BaselineStrategy:
+    def __init__(self, name: str):
+        self.name = name
+    def get_action(self, state, step) -> np.ndarray:
+        raise NotImplementedError
+    def reset(self):
+        pass
 
 
-# =============================================================================
-# Action Executor
-# =============================================================================
-class ActionExecutor:
-    """RL 액션 실행기"""
+class NoMTDStrategy(BaselineStrategy):
+    def __init__(self):
+        super().__init__("Baseline")
+    def get_action(self, state, step):
+        return np.ones(ACTION_DIM) * -1.0
+
+
+class StaticMTDStrategy(BaselineStrategy):
+    def __init__(self, period: int = 30):
+        super().__init__("Static MTD")
+        self.period = period
+    def get_action(self, state, step):
+        action = np.ones(ACTION_DIM) * -1.0
+        if step % self.period == 0:
+            action[0] = 0.8
+            action[1] = 0.5
+        return action
+
+
+class HeuristicCTIStrategy(BaselineStrategy):
+    def __init__(self, threshold: float = 0.7):
+        super().__init__("Heuristic+CTI")
+        self.threshold = threshold
+        self.cti = CTIDetectionModel()
     
-    def __init__(self, mtd_controller: IptablesMTDController):
-        self.mtd_controller = mtd_controller
-        self.action_history: List[Dict] = []
-    
-    def execute_action(self, action: np.ndarray, state: RealTimeState) -> Dict[str, Any]:
-        """액션 실행"""
-        scaled = scale_action(action)
-        result = {
-            "timestamp": time.time(),
-            "action_raw": [float(x) for x in action],  # numpy -> float 변환
-            "action_scaled": [float(x) for x in scaled],  # numpy -> float 변환
-            "executed": [],
-            "total_cost": 0.0,
-        }
-        
-        # Shuffle
-        if scaled[0] > 0.25:
-            for svc in ["fc_mavlink", "cc_sitl", "gcs_mavlink"]:
-                if self.mtd_controller.shuffle_network(svc, float(scaled[0])):
-                    result["executed"].append(f"shuffle:{svc}")
-            result["total_cost"] += float(scaled[0]) * 0.25
-        
-        # Port Hop
-        if scaled[1] > 0.35:
-            for svc in ["fc_mavlink", "gcs_mavlink"]:
-                if self.mtd_controller.port_hop(svc, float(scaled[1])):
-                    result["executed"].append(f"port_hop:{svc}")
-            result["total_cost"] += float(scaled[1]) * 0.15
-        
-        # Decoy
-        if scaled[2] > 0.4:
-            decoy_count = max(1, int(scaled[2] * 3))
-            decoys = self.mtd_controller.activate_decoy("fc_mavlink", decoy_count)
-            if decoys:
-                result["executed"].append(f"decoy:{len(decoys)}")
-            result["total_cost"] += float(scaled[2]) * 0.12
-        
-        # Blacklist
-        if scaled[3] > 0.6 and state.suspicious_ips:
-            for ip in state.suspicious_ips[:3]:
-                duration = 60 + float(scaled[4]) * 240
-                if self.mtd_controller.add_to_blacklist(ip, duration):
-                    result["executed"].append(f"blacklist:{ip}")
-            result["total_cost"] += float(scaled[3]) * 0.08
-        
-        # Service Swap
-        if scaled[5] > 0.30:
-            if scaled[6] > 0.5:
-                success, cost = self.mtd_controller.swap_with_decoy("fc_mavlink", float(scaled[5]))
-                if success:
-                    result["executed"].append("swap:fc_mavlink<->decoy")
-                    result["total_cost"] += float(cost.get("total", 0))
+    def get_action(self, state, step):
+        action = np.ones(ACTION_DIM) * -1.0
+        threat = state[1] * 0.3 + state[3] * 0.5 + state[4] * 0.2 if len(state) > 4 else 0.2
+        detected, conf, _ = self.cti.detect_attack("scan")
+        if detected and conf > self.threshold:
+            action[0] = 0.8
+            action[5] = 0.7
+        elif threat > 0.5:
+            action[0] = 0.6
+            action[2] = 0.5
+        elif threat > 0.3:
+            action[1] = 0.5
+            action[2] = 0.4
+        elif threat > 0.1:
+            action[2] = 0.3
+        return action
+
+
+if TORCH_AVAILABLE:
+    class RLCTIMTDStrategy(BaselineStrategy):
+        def __init__(self, model_path: str, device: str = "cpu"):
+            super().__init__("RL-CTI MTD")
+            self.device = device
+            self.policy = ActorCritic(STATE_DIM, ACTION_DIM).to(device)
+            if os.path.exists(model_path):
+                ckpt = torch.load(model_path, map_location=device, weights_only=False)
+                self.policy.load_state_dict(ckpt.get("policy", ckpt))
+                self.policy.eval()
+                print(f"✅ RL-CTI MTD Policy loaded: {model_path}")
             else:
-                success, cost = self.mtd_controller.service_swap("cc_sitl", "sim_sitl", float(scaled[5]))
-                if success:
-                    result["executed"].append("swap:cc_sitl<->sim_sitl")
-                    result["total_cost"] += float(cost.get("total", 0))
+                print(f"⚠️ Model not found: {model_path}")
         
-        self.action_history.append(result)
-        return result
+        def get_action(self, state, step):
+            with torch.no_grad():
+                t = torch.FloatTensor(state).unsqueeze(0).to(self.device)
+                a, _, _ = self.policy.act(t, deterministic=True)
+            return a.cpu().numpy().squeeze()
 
 
 # =============================================================================
-# Metrics Logger (수정됨)
-# =============================================================================
-class MetricsLogger:
-    """메트릭 로깅 및 시각화 - numpy 타입 자동 변환"""
-    
-    def __init__(self, log_dir: str):
-        self.log_dir = Path(log_dir)
-        self.log_dir.mkdir(parents=True, exist_ok=True)
-        
-        self.metrics_history: List[Dict] = []
-        self.step_times: List[float] = []
-        self.costs: List[float] = []
-        self.diversity_scores: List[float] = []
-        self.actions_executed: List[int] = []
-    
-    def log_step(self, step: int, state: RealTimeState, action_result: Dict, mtd_stats: Dict):
-        """스텝 메트릭 기록 - 모든 값을 Python native 타입으로 변환"""
-        metrics = {
-            "step": int(step),
-            "timestamp": float(time.time()),
-            "diversity_score": float(state.diversity_score),
-            "redundancy_score": float(state.redundancy_score),
-            "confusion_level": float(state.confusion_level),
-            "active_decoys": int(state.active_decoys),
-            "active_swaps": int(state.active_swaps),
-            "blocked_ips": len(state.blocked_ips),
-            "scan_detected": bool(state.scan_detected),
-            "cti_threat_level": float(state.cti_threat_level),
-            "action_cost": float(action_result["total_cost"]),
-            "actions_executed": len(action_result["executed"]),
-            "total_shuffles": int(mtd_stats.get("total_shuffles", 0)),
-            "total_swaps": int(mtd_stats.get("total_service_swaps", 0)),
-            "total_decoy_hits": int(mtd_stats.get("total_decoy_hits", 0)),
-        }
-        
-        self.metrics_history.append(metrics)
-        self.step_times.append(metrics["timestamp"])
-        self.costs.append(action_result["total_cost"])
-        self.diversity_scores.append(state.diversity_score)
-        self.actions_executed.append(len(action_result["executed"]))
-    
-    def save_metrics(self):
-        """메트릭 JSON 저장 - NumpyJSONEncoder 사용"""
-        path = self.log_dir / f"deployment_metrics_{int(time.time())}.json"
-        
-        # 저장 전 모든 데이터를 serializable하게 변환
-        serializable_history = to_serializable(self.metrics_history)
-        
-        with open(path, 'w') as f:
-            json.dump(serializable_history, f, indent=2, cls=NumpyJSONEncoder)
-        logger.info(f"Metrics saved: {path}")
-        return path
-    
-    def generate_deployment_figures(self):
-        """배포 세션 요약 그래프 생성"""
-        if not IEEE_FIGURES_AVAILABLE or len(self.metrics_history) < 2:
-            return
-        
-        setup_ieee_style()
-        
-        fig, axes = plt.subplots(2, 2, figsize=(7.16, 4.5))
-        
-        steps = list(range(len(self.metrics_history)))
-        
-        # (a) Diversity Score
-        ax = axes[0, 0]
-        ax.plot(steps, self.diversity_scores, color='#0072B2', linewidth=1.0)
-        ax.fill_between(steps, self.diversity_scores, alpha=0.3, color='#0072B2')
-        ax.set_xlabel('Step')
-        ax.set_ylabel('Diversity Score')
-        ax.set_title('(a) Configuration Diversity')
-        ax.set_ylim(0, 1)
-        
-        # (b) Cumulative Cost
-        ax = axes[0, 1]
-        cumulative_cost = np.cumsum(self.costs)
-        ax.plot(steps, cumulative_cost, color='#E69F00', linewidth=1.0)
-        ax.set_xlabel('Step')
-        ax.set_ylabel('Cumulative Cost')
-        ax.set_title('(b) MTD Cost Over Time')
-        
-        # (c) Actions per Step
-        ax = axes[1, 0]
-        ax.bar(steps, self.actions_executed, color='#009E73', alpha=0.7)
-        ax.set_xlabel('Step')
-        ax.set_ylabel('Actions Executed')
-        ax.set_title('(c) MTD Actions per Step')
-        
-        # (d) Threat Level & Confusion
-        ax = axes[1, 1]
-        threat_levels = [m.get('cti_threat_level', 0) for m in self.metrics_history]
-        confusion_levels = [m.get('confusion_level', 0) for m in self.metrics_history]
-        ax.plot(steps, threat_levels, color='#D73027', linewidth=1.0, label='Threat Level')
-        ax.plot(steps, confusion_levels, color='#4575B4', linewidth=1.0, label='Attacker Confusion')
-        ax.set_xlabel('Step')
-        ax.set_ylabel('Level')
-        ax.set_title('(d) Threat vs Confusion')
-        ax.legend(loc='upper right', fontsize=7)
-        ax.set_ylim(0, 1)
-        
-        plt.tight_layout()
-        
-        path = self.log_dir / f"deployment_summary_{int(time.time())}.png"
-        plt.savefig(path, dpi=300, bbox_inches='tight')
-        plt.close()
-        
-        logger.info(f"Deployment summary figure saved: {path}")
-        return path
-
-
-# =============================================================================
-# RL Deception Manager (수정됨)
+# Main Manager
 # =============================================================================
 class RLDeceptionManager:
-    """RL 기반 Deception 매니저"""
-    
     def __init__(
         self,
-        model_path: str,
-        mtd_controller: IptablesMTDController,
-        cti_file: Optional[str] = None,
-        network_monitor_file: Optional[str] = None,
-        decision_interval: float = 5.0,
-        log_dir: Optional[str] = None,
+        model_path: Optional[str] = None,
+        output_dir: str = "results",
+        max_steps: int = 200,
         device: str = "cpu",
+        testbed_mode: bool = False,
+        dry_run: bool = True,
     ):
-        if not TORCH_AVAILABLE:
-            raise RuntimeError("PyTorch required")
-        
+        self.model_path = model_path
+        self.output_dir = Path(output_dir)
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+        self.max_steps = max_steps
         self.device = device
-        self.decision_interval = decision_interval
-        self.log_dir = log_dir or "logs/deployment"
+        self.testbed_mode = testbed_mode
+        self.dry_run = dry_run
         
-        self.mtd_controller = mtd_controller
-        self.state_collector = StateCollector(mtd_controller, cti_file, network_monitor_file)
-        self.action_executor = ActionExecutor(mtd_controller)
-        self.metrics_logger = MetricsLogger(self.log_dir)
+        log_file = str(self.output_dir / "iptables_commands.log") if testbed_mode else None
+        self.mtd = MTDController(testbed_mode=testbed_mode, dry_run=dry_run, log_file=log_file)
+        self.defense_calc = DefenseProbabilityCalculator()
+        self.cti = CTIDetectionModel()
         
-        # Policy 로드
-        self.policy = ActorCritic(STATE_DIM, ACTION_DIM).to(device)
-        self._load_policy(model_path)
+        self.strategies = {
+            "Baseline": NoMTDStrategy(),
+            "Static MTD": StaticMTDStrategy(period=30),
+            "Heuristic+CTI": HeuristicCTIStrategy(threshold=0.7),
+        }
         
-        self.running = False
-        self.step_count = 0
-        self.total_cost = 0.0
+        if TORCH_AVAILABLE and model_path and os.path.exists(model_path):
+            self.strategies["RL-CTI MTD"] = RLCTIMTDStrategy(model_path, device)
         
-        logger.info(f"RLDeceptionManager initialized (model={model_path})")
+        self.results: Dict[str, Dict[int, List[EpisodeResult]]] = defaultdict(lambda: defaultdict(list))
     
-    def _load_policy(self, model_path: str):
-        checkpoint = torch.load(model_path, map_location=self.device, weights_only=False)
-        if "policy" in checkpoint:
-            self.policy.load_state_dict(checkpoint["policy"])
-        else:
-            self.policy.load_state_dict(checkpoint)
-        self.policy.eval()
-        logger.info(f"✅ Policy loaded: {model_path}")
+    def _build_state(self, attacker: AttackerAgent, step: int, last_action: np.ndarray) -> np.ndarray:
+        n_svc = len(self.mtd.services)
+        scaled = scale_action(last_action)
+        critical_exposed = any(
+            self.mtd.services[s].is_critical for s in attacker.discovered_services if s in self.mtd.services
+        )
+        phase_map = {
+            AttackPhase.INITIAL: 0.0, AttackPhase.RECONNAISSANCE: 0.2,
+            AttackPhase.DISCOVERY: 0.4, AttackPhase.EXPLOITATION: 0.6,
+            AttackPhase.PERSISTENCE: 0.8, AttackPhase.BREACH: 1.0, AttackPhase.DEFENDED: 0.0,
+        }
+        return np.array([
+            min(1.0, len(attacker.scanned_ips) / 254),
+            len(attacker.discovered_services) / n_svc,
+            float(critical_exposed),
+            len(attacker.exploited_services) / n_svc,
+            phase_map.get(attacker.phase, 0.0),
+            self.mtd.get_cdi(),
+            self.mtd.get_redundancy(),
+            min(1.0, attacker.decoy_hits / 10),
+            attacker.energy,
+            min(1.0, self.mtd.stats['total_swaps'] / 10),
+            min(1.0, step / 50),
+            attacker.confusion_level,
+            min(1.0, len(attacker.scanned_ips) / 50),
+            scaled[0], scaled[1], scaled[2],
+            scaled[5] if len(scaled) > 5 else 0,
+        ], dtype=np.float32)
     
-    def get_action(self, state_vector: np.ndarray) -> np.ndarray:
-        with torch.no_grad():
-            state_tensor = torch.FloatTensor(state_vector).unsqueeze(0).to(self.device)
-            action, _, _ = self.policy.act(state_tensor, deterministic=True)
-        return action.cpu().numpy().squeeze()
+    def _execute_action(self, action: np.ndarray) -> Tuple[Dict[str, float], float]:
+        scaled = scale_action(action)
+        total_cost = 0.0
+        intensities = {}
+        
+        if scaled[0] > ACTION_THRESHOLDS['shuffle']:
+            cost, _ = self.mtd.shuffle(scaled[0])
+            total_cost += cost
+            intensities['shuffle'] = float(scaled[0])
+        
+        if scaled[1] > ACTION_THRESHOLDS['port_hop']:
+            cost, _ = self.mtd.port_hop(scaled[1])
+            total_cost += cost
+            intensities['port_hop'] = float(scaled[1])
+        
+        if scaled[2] > ACTION_THRESHOLDS['decoy']:
+            cost, _ = self.mtd.activate_decoys(scaled[2])
+            total_cost += cost
+            intensities['decoy'] = float(scaled[2])
+        
+        if scaled[3] > ACTION_THRESHOLDS['blacklist']:
+            total_cost += scaled[3] * scaled[4] * ACTION_COSTS['blacklist']
+            intensities['blacklist'] = float(scaled[3])
+        
+        if scaled[5] > ACTION_THRESHOLDS['swap']:
+            cost, _ = self.mtd.swap(scaled[5], scaled[6] > 0.5)
+            total_cost += cost
+            intensities['swap'] = float(scaled[5])
+        
+        return intensities, total_cost
     
-    def step(self) -> Dict[str, Any]:
-        """한 스텝 실행"""
-        self.step_count += 1
-        self.mtd_controller.set_step(self.step_count)
+    def run_episode(self, strategy: BaselineStrategy, level: int, ep_id: int, seed: int) -> EpisodeResult:
+        np.random.seed(seed)
+        self.mtd.reset()
+        self.defense_calc.reset()
+        strategy.reset()
         
-        state_vector = self.state_collector.get_state_vector()
-        current_state = self.state_collector.last_state
+        attacker = AttackerAgent(level=level, seed=seed, targets=self.mtd.get_targets())
+        result = EpisodeResult(episode_id=ep_id, strategy_name=strategy.name, attacker_level=level)
         
-        action = self.get_action(state_vector)
-        result = self.action_executor.execute_action(action, current_state)
+        last_action = np.zeros(ACTION_DIM)
+        cti_detections = 0
         
-        self.total_cost += result["total_cost"]
-        
-        mtd_stats = self.mtd_controller.get_statistics()
-        self.metrics_logger.log_step(self.step_count, current_state, result, mtd_stats)
-        
-        if result["executed"]:
-            logger.info(f"Step {self.step_count}: Executed {len(result['executed'])} actions")
-        
-        return {"step": self.step_count, "actions": result["executed"], "cost": result["total_cost"]}
-    
-    def _save_mtd_state_safe(self, filepath: str):
-        """MTD 상태를 안전하게 JSON으로 저장 (numpy 타입 변환 포함)"""
-        try:
-            # MTD 상태 가져오기
-            state = self.mtd_controller.get_mtd_state_for_attacker()
+        for step in range(self.max_steps):
+            state = self._build_state(attacker, step, last_action)
+            action = strategy.get_action(state, step)
+            last_action = action.copy()
             
-            # numpy 타입을 Python native 타입으로 변환
-            serializable_state = to_serializable(state)
+            intensities, _ = self._execute_action(action)
+            cdi = self.mtd.get_cdi()
             
-            with open(filepath, 'w') as f:
-                json.dump(serializable_state, f, indent=2, cls=NumpyJSONEncoder)
-                
-        except Exception as e:
-            logger.warning(f"Failed to save MTD state: {e}")
+            cti_detected = False
+            if len(attacker.scanned_ips) > 10 or len(attacker.exploited_services) > 0:
+                detected, conf, _ = self.cti.detect_attack("scan")
+                cti_detected = detected
+                if detected:
+                    cti_detections += 1
+            
+            defense_prob = self.defense_calc.compute(intensities, cdi, level, step, cti_detected)
+            
+            attack_result = attacker.step({
+                'is_shuffle': 'shuffle' in intensities,
+                'shuffle_intensity': intensities.get('shuffle', 0),
+                'is_swap': 'swap' in intensities,
+                'swap_intensity': intensities.get('swap', 0),
+                'defense_probability': defense_prob,
+            })
+            
+            if attack_result['breach']:
+                result.breach_occurred = True
+                result.mttc = step + 1
+                break
+            
+            if attacker.phase == AttackPhase.DEFENDED:
+                break
+        
+        result.steps = step + 1
+        result.total_cost = float(self.mtd.stats['total_cost'])
+        result.shuffle_count = int(self.mtd.stats['total_shuffles'])
+        result.swap_count = int(self.mtd.stats['total_swaps'])
+        result.decoy_hits = int(attacker.decoy_hits)
+        result.services_discovered = int(len(attacker.discovered_services))
+        result.services_exploited = int(len(attacker.exploited_services))
+        result.final_phase = str(attacker.phase)
+        result.cti_detections = cti_detections
+        
+        if self.testbed_mode and self.mtd.executor:
+            result.iptables_commands = len(self.mtd.executor.command_history)
+        
+        n_svc = len(self.mtd.services)
+        mttc = result.mttc if result.breach_occurred else self.max_steps
+        result.mttc = int(mttc)
+        result.cdi = float(cdi)
+        result.redundancy = float(self.mtd.get_redundancy())
+        
+        discovered = result.services_discovered
+        exploited = result.services_exploited
+        exposed = discovered + exploited * 2
+        max_exposure = n_svc * 3
+        result.asr = float(1.0 - min(1.0, exposed / max_exposure))
+        
+        mttc_norm = mttc / self.max_steps
+        asp = exploited / max(1, discovered) if discovered > 0 else 0
+        ned = np.random.uniform(0.3, 0.7)
+        result.des = float(
+            0.25 * mttc_norm + 0.20 * result.asr + 0.20 * result.cdi + 
+            0.15 * ned + 0.10 * (1.0 - asp) + 0.10 * result.redundancy
+        )
+        result.cer = float(result.des / (result.total_cost + 0.1))
+        
+        return result
     
-    def run(self, max_steps: Optional[int] = None):
-        """메인 루프 (수정됨)"""
-        self.running = True
-        logger.info("Starting RL Deception Manager...")
+    def run_experiment(self, episodes: int = 50, levels: List[int] = None, strategies: List[str] = None):
+        levels = levels or [0, 1, 2, 3, 4]
+        strategies = strategies or list(self.strategies.keys())
         
-        def signal_handler(sig, frame):
-            logger.info("Shutdown signal received")
-            self.running = False
+        mode_str = "TESTBED" if self.testbed_mode else "SIMULATION"
+        dry_str = " (DRY-RUN)" if self.testbed_mode and self.dry_run else ""
         
-        signal.signal(signal.SIGINT, signal_handler)
-        signal.signal(signal.SIGTERM, signal_handler)
+        print(f"\n{'='*70}")
+        print(f"MTD-RL Experiment v09.8 - {mode_str}{dry_str}")
+        print(f"{'='*70}")
+        print(f"Strategies: {strategies}")
+        print(f"Levels: {levels}")
+        print(f"Episodes/level: {episodes}")
+        print(f"{'='*70}\n")
         
-        try:
-            while self.running:
-                if max_steps and self.step_count >= max_steps:
-                    logger.info(f"Reached max steps ({max_steps})")
-                    break
+        if self.testbed_mode:
+            self.mtd.init_iptables_chains()
+        
+        start_time = time.time()
+        
+        for strat_name in strategies:
+            if strat_name not in self.strategies:
+                print(f"⚠️ Strategy not found: {strat_name}")
+                continue
+            
+            strat = self.strategies[strat_name]
+            print(f"\n📊 Strategy: {strat_name}")
+            
+            for level in levels:
+                print(f"  Level {level} ({ATTACKER_PROFILES[level]['name']}): ", end="", flush=True)
                 
-                self.step()
+                for ep in range(episodes):
+                    r = self.run_episode(strat, level, ep, 42 + level * 1000 + ep)
+                    self.results[strat_name][level].append(r)
+                    if (ep + 1) % 10 == 0:
+                        print(".", end="", flush=True)
                 
-                # 핵심 수정: 안전한 JSON 저장 메서드 사용
-                self._save_mtd_state_safe("/tmp/mtd_state.json")
-                
-                time.sleep(self.decision_interval)
+                eps = self.results[strat_name][level]
+                br = sum(1 for e in eps if e.breach_occurred) / len(eps) * 100
+                des = np.mean([e.des for e in eps])
+                cdi = np.mean([e.cdi for e in eps])
+                print(f" BR={br:.1f}%, DES={des:.3f}, CDI={cdi:.2f}")
         
-        except Exception as e:
-            logger.error(f"Error in main loop: {e}")
-            raise
+        elapsed = (time.time() - start_time) / 60
+        print(f"\n✅ Completed in {elapsed:.1f} minutes")
         
-        finally:
-            self.shutdown()
+        if self.testbed_mode:
+            summary = self.mtd.get_iptables_summary()
+            print(f"\n📋 iptables Summary:")
+            print(f"   Total commands: {summary.get('total_commands', 0)}")
+            print(f"   Successful: {summary.get('successful', 0)}")
+            print(f"   Failed: {summary.get('failed', 0)}")
+        
+        self._save_results()
+        self._print_summary()
     
-    def shutdown(self):
-        """종료 처리"""
-        self.running = False
-        logger.info("Shutting down...")
+    def _save_results(self):
+        output = {}
+        for strat, level_results in self.results.items():
+            output[strat] = {}
+            for level, eps in level_results.items():
+                output[strat][str(level)] = [
+                    to_python({
+                        "episode_id": r.episode_id, "steps": r.steps, "breach": r.breach_occurred,
+                        "cost": r.total_cost, "mttc": r.mttc, "asr": r.asr, "cdi": r.cdi,
+                        "redundancy": r.redundancy, "des": r.des, "cer": r.cer,
+                        "shuffle_count": r.shuffle_count, "swap_count": r.swap_count,
+                        "decoy_hits": r.decoy_hits, "services_discovered": r.services_discovered,
+                        "services_exploited": r.services_exploited, "final_phase": r.final_phase,
+                        "cti_detections": r.cti_detections, "iptables_commands": r.iptables_commands,
+                    }) for r in eps
+                ]
         
-        # 메트릭 저장
-        self.metrics_logger.save_metrics()
+        path = self.output_dir / "experiment_results.json"
+        with open(path, 'w') as f:
+            json.dump(output, f, indent=2)
+        print(f"\n✅ Results saved: {path}")
+    
+    def _print_summary(self):
+        print(f"\n{'='*110}")
+        print("EXPERIMENT SUMMARY")
+        print(f"{'='*110}")
         
-        # 그래프 생성
-        if IEEE_FIGURES_AVAILABLE:
-            self.metrics_logger.generate_deployment_figures()
+        levels = sorted(self.results[list(self.results.keys())[0]].keys())
+        header = f"{'Strategy':<20}"
+        for l in levels:
+            header += f" | L{l} BR%"
+        header += " | Avg DES | Avg CDI | Avg CER"
+        print(header)
+        print("-" * 110)
         
-        # 통계 출력
-        stats = self.mtd_controller.get_statistics()
-        logger.info(f"Final Statistics:")
-        logger.info(f"  Total steps: {self.step_count}")
-        logger.info(f"  Total cost: {self.total_cost:.2f}")
-        logger.info(f"  Shuffles: {stats['total_shuffles']}")
-        logger.info(f"  Service swaps: {stats['total_service_swaps']}")
-        logger.info(f"  Decoy hits: {stats['total_decoy_hits']}")
-        
-        self.mtd_controller.cleanup()
-        logger.info("Shutdown complete")
+        for strat in self.results:
+            row = f"{strat:<20}"
+            all_des, all_cdi, all_cer = [], [], []
+            for level in levels:
+                eps = self.results[strat][level]
+                br = sum(1 for e in eps if e.breach_occurred) / len(eps) * 100
+                row += f" | {br:6.1f}"
+                all_des.extend([e.des for e in eps])
+                all_cdi.extend([e.cdi for e in eps])
+                all_cer.extend([e.cer for e in eps])
+            row += f" | {np.mean(all_des):7.3f} | {np.mean(all_cdi):7.2f} | {np.mean(all_cer):7.2f}"
+            print(row)
+        print(f"{'='*110}")
+    
+    def cleanup(self):
+        """정리"""
+        if self.testbed_mode:
+            self.mtd.cleanup_iptables()
 
 
 # =============================================================================
 # CLI
 # =============================================================================
 def main():
-    parser = argparse.ArgumentParser(description="RL-Driven Deception Manager v09 (Fixed)")
-    parser.add_argument("--model", type=str, required=True, help="Path to trained model")
-    parser.add_argument("--dry-run", action="store_true", default=True, help="Dry-run mode")
-    parser.add_argument("--interval", type=float, default=5.0, help="Decision interval (sec)")
-    parser.add_argument("--max-steps", type=int, default=None, help="Max steps")
-    parser.add_argument("--cti-file", type=str, default=None)
-    parser.add_argument("--network-monitor-file", type=str, default=None)
-    parser.add_argument("--log-dir", type=str, default="logs/deployment")
-    parser.add_argument("--state-file", type=str, default=None)
-    
+    parser = argparse.ArgumentParser(
+        description="MTD-RL Deception Manager v09.8",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Simulation experiment
+  python %(prog)s --experiment --episodes 50
+
+  # Testbed with dry-run (print commands only)
+  python %(prog)s --model best.pt --testbed --dry-run
+
+  # Testbed with real iptables execution (requires root)
+  sudo python %(prog)s --model best.pt --testbed
+
+  # Single level test
+  python %(prog)s --testbed --dry-run --level 4 --episodes 10
+        """
+    )
+    parser.add_argument("--model", type=str, default=None, help="RL model path")
+    parser.add_argument("--output-dir", type=str, default="results", help="Output directory")
+    parser.add_argument("--max-steps", type=int, default=200, help="Max steps per episode")
+    parser.add_argument("--device", type=str, default="cpu", help="PyTorch device")
+    parser.add_argument("--level", type=int, default=None, help="Single attacker level")
+    parser.add_argument("--episodes", type=int, default=50, help="Episodes per level")
+    parser.add_argument("--experiment", action="store_true", help="Run full experiment (all levels)")
+    parser.add_argument("--strategies", nargs="+", default=None, help="Strategies to test")
+    parser.add_argument("--testbed", action="store_true", help="Enable testbed mode (iptables)")
+    parser.add_argument("--dry-run", action="store_true", help="Dry-run mode (print commands only)")
     args = parser.parse_args()
-    
-    mtd_controller = IptablesMTDController(dry_run=args.dry_run, state_file=args.state_file)
     
     manager = RLDeceptionManager(
         model_path=args.model,
-        mtd_controller=mtd_controller,
-        cti_file=args.cti_file,
-        network_monitor_file=args.network_monitor_file,
-        decision_interval=args.interval,
-        log_dir=args.log_dir,
+        output_dir=args.output_dir,
+        max_steps=args.max_steps,
+        device=args.device,
+        testbed_mode=args.testbed,
+        dry_run=args.dry_run,
     )
     
-    manager.run(max_steps=args.max_steps)
+    if args.experiment:
+        levels = [0, 1, 2, 3, 4]
+    else:
+        levels = [args.level] if args.level is not None else [2]
+    
+    try:
+        manager.run_experiment(
+            episodes=args.episodes,
+            levels=levels,
+            strategies=args.strategies,
+        )
+    finally:
+        if args.testbed and not args.dry_run:
+            manager.cleanup()
 
 
 if __name__ == "__main__":

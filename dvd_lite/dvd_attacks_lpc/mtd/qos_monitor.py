@@ -5,7 +5,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Dict, Optional
 
-from .mtd_state_store import BlacklistEntry, MTDState, MTDStateStore
+from .old_ver.mtd_state_store import BlacklistEntry, MTDState, MTDStateStore
 
 
 @dataclass

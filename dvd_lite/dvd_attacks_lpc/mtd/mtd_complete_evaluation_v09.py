@@ -23,7 +23,7 @@ Usage:
     python mtd_complete_evaluation_v09.py --results-json eval_results.json --figures-only
 
 저자: MTD-RL Research Team
-버전: 0.9.0
+버전: 0.9.5
 """
 from __future__ import annotations
 
@@ -59,22 +59,20 @@ except ImportError as e:
 # IEEE Figure Utils
 try:
     from ieee_figure_utils import (
-        generate_all_figures,
         plot_strategy_comparison,
         plot_level_comparison,
         plot_des_heatmap,
         plot_tradeoff_analysis,
         plot_statistical_comparison,
-        plot_attacker_profiles,
+        plot_grouped_bar_by_level,
         generate_latex_table_overall,
-        generate_latex_table_improvement,
-        generate_latex_table_attacker,
+        generate_latex_table_by_level,
         setup_ieee_style,
     )
     IEEE_FIGURES_AVAILABLE = True
 except ImportError:
     IEEE_FIGURES_AVAILABLE = False
-    print("⚠️ ieee_figure_utils not found. Install it or ensure it's in the same directory.")
+    print("⚠️ ieee_figure_utils not found. Figures will not be generated.")
 
 
 # =============================================================================
@@ -459,45 +457,48 @@ def generate_evaluation_figures(
         print("⚠️ ieee_figure_utils not available. Skipping figure generation.")
         return
     
-    os.makedirs(output_dir, exist_ok=True)
-    os.makedirs(f'{output_dir}/tables', exist_ok=True)
+    fig_dir = Path(output_dir) / "figures"
+    tables_dir = Path(output_dir) / "tables"
+    fig_dir.mkdir(parents=True, exist_ok=True)
+    tables_dir.mkdir(parents=True, exist_ok=True)
     
     print("\n" + "="*60)
     print("📊 Generating IEEE Access Figures")
     print("="*60)
     
-    # 1. Attacker Profiles
-    print("\n[1/7] Attacker Profiles...")
-    plot_attacker_profiles(f'{output_dir}/fig06_attacker_profiles')
-    generate_latex_table_attacker(f'{output_dir}/tables/table_attacker.tex')
+    # 1. Strategy Comparison (Main Result) - 6-panel
+    print("\n[1/6] Strategy Comparison (Main Result)...")
+    plot_strategy_comparison(summary, str(fig_dir / "fig_strategy_comparison"))
     
-    # 2. Strategy Comparison (Main Result)
-    print("[2/7] Strategy Comparison (Main Result)...")
-    plot_strategy_comparison(summary, f'{output_dir}/fig09_strategy_comparison')
+    # 2. Level Comparison - 3-panel line
+    print("[2/6] Level Comparison...")
+    plot_level_comparison(level_results, str(fig_dir / "fig_level_comparison"))
     
-    # 3. Level Comparison
-    print("[3/7] Level Comparison...")
-    plot_level_comparison(level_results, f'{output_dir}/fig10_level_comparison')
+    # 3. DES Heatmap
+    print("[3/6] DES Heatmap...")
+    plot_des_heatmap(level_results, str(fig_dir / "fig_des_heatmap"))
     
-    # 4. DES Heatmap
-    print("[4/7] DES Heatmap...")
-    plot_des_heatmap(level_results, f'{output_dir}/fig11_des_heatmap')
+    # 4. Trade-off Analysis - 2-panel scatter
+    print("[4/6] Trade-off Analysis...")
+    plot_tradeoff_analysis(summary, str(fig_dir / "fig_tradeoff_analysis"))
     
-    # 5. Trade-off Analysis
-    print("[5/7] Trade-off Analysis...")
-    plot_tradeoff_analysis(summary, f'{output_dir}/fig12_tradeoff_analysis')
+    # 5. Statistical Comparison (Box plots)
+    print("[5/6] Statistical Comparison...")
+    plot_statistical_comparison(summary, str(fig_dir / "fig_statistical_comparison"))
     
-    # 6. Statistical Comparison
-    print("[6/7] Statistical Comparison...")
-    plot_statistical_comparison(summary, f'{output_dir}/fig13_statistical_comparison')
+    # 6. Grouped Bar by Level - 4-panel
+    print("[6/6] Grouped Bar by Level...")
+    plot_grouped_bar_by_level(level_results, str(fig_dir / "fig_grouped_bar"))
     
-    # 7. LaTeX Tables
-    print("[7/7] LaTeX Tables...")
-    generate_latex_table_overall(summary, f'{output_dir}/tables/table_overall.tex')
-    generate_latex_table_improvement(summary, f'{output_dir}/tables/table_improvement.tex')
+    # LaTeX Tables
+    print("\n[+] Generating LaTeX Tables...")
+    generate_latex_table_overall(summary, str(tables_dir / "table_overall.tex"))
+    generate_latex_table_by_level(level_results, str(tables_dir / "table_breach_by_level.tex"), 'breach_rate')
+    generate_latex_table_by_level(level_results, str(tables_dir / "table_des_by_level.tex"), 's_mtd')
     
     print("\n" + "="*60)
-    print(f"✅ All figures saved to: {output_dir}/")
+    print(f"✅ All figures saved to: {fig_dir}/")
+    print(f"✅ All tables saved to: {tables_dir}/")
     print("="*60)
 
 
@@ -511,7 +512,7 @@ def main():
     parser.add_argument("--max-steps", type=int, default=200)
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--hidden-size", type=int, default=256)
-    parser.add_argument("--output-dir", type=str, default="paper_figures")
+    parser.add_argument("--output-dir", type=str, default="evaluation_results")
     parser.add_argument("--levels", type=int, nargs="+", default=[0, 1, 2, 3, 4])
     parser.add_argument("--device", type=str, default="cpu")
     
@@ -578,8 +579,8 @@ def main():
                         for s, levels in level_results.items()},
         }
         
-        results_path = f'{args.output_dir}/evaluation_results.json'
         os.makedirs(args.output_dir, exist_ok=True)
+        results_path = f'{args.output_dir}/evaluation_results.json'
         with open(results_path, 'w') as f:
             json.dump(results_data, f, indent=2, default=float)
         print(f"\n✅ Results saved: {results_path}")
