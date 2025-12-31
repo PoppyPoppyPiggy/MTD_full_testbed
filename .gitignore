@@ -20,6 +20,10 @@ wheels/
 .installed.cfg
 *.egg
 MANIFEST
+*.pdf
+*.png
+*.pk
+*.pkl
 
 # IDE
 .vscode/

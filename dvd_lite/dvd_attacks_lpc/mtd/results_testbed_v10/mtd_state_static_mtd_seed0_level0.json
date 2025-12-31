@@ -1,0 +1,13 @@
+{
+  "current_target": "10.13.0.101:38670",
+  "mtd_active": true,
+  "diversity_score": 0.375,
+  "redundancy_score": 0.4,
+  "confusion_level": 0.0,
+  "decoy_count": 2,
+  "blacklist_count": 0,
+  "active_swap_count": 0,
+  "last_shuffle_time": 1767132350.3800838,
+  "last_swap_time": null,
+  "timestamp": "2025-12-30T22:05:50.382030+00:00"
+}

@@ -1,0 +1,20 @@
+=== ATTACK PHASE PROGRESSION SUMMARY ===
+Recent 100 Episodes Analysis
+
+Phase Distribution:
+  S0 (Initial): 0 episodes (0.0%) - Breach Rate: 0.0%
+  S1 (Recon): 0 episodes (0.0%) - Breach Rate: 0.0%
+  S2 (Discovery): 86 episodes (86.0%) - Breach Rate: 0.0%
+  S3 (Exploit): 14 episodes (14.0%) - Breach Rate: 0.0%
+  S4 (Persist): 0 episodes (0.0%) - Breach Rate: 0.0%
+  S5 (Breach): 0 episodes (0.0%) - Breach Rate: 0.0%
+  Defended: 0 episodes (0.0%) - Breach Rate: 0.0%
+
+Overall Metrics:
+  Total Breach Rate: 0.0%
+  Average Max Phase: 2.1
+
+Learning Progress:
+  First Half Avg Phase: 2.1
+  Second Half Avg Phase: 2.2
+  Progress: +0.1

@@ -1,0 +1,64 @@
+{
+  "args": {
+    "test": false,
+    "episodes": 500,
+    "max_steps": 200,
+    "seed": 42,
+    "cpu": false,
+    "hidden_size": 256,
+    "seeker_level": 1,
+    "seeker_levels": [
+      1,
+      2,
+      3
+    ],
+    "train_all_levels": true,
+    "curriculum": true,
+    "model": null,
+    "resume": null,
+    "checkpoint_dir": "checkpoints_v10/run_20251230_051857",
+    "save_interval": 50,
+    "log_interval": 5,
+    "eval_episodes": 50,
+    "eval_all_levels": false,
+    "wandb": false,
+    "wandb_project": "mtd-rl-enhanced",
+    "wandb_name": null
+  },
+  "state_dim": 17,
+  "action_dim": 7,
+  "best_reward": 6319.786014320172,
+  "best_des": 1.0,
+  "total_episodes": 500,
+  "curriculum_boundaries": [
+    0,
+    150,
+    300,
+    500
+  ],
+  "paper_params": {
+    "gamma_decay": 0.7,
+    "window_W": 3,
+    "beta_CDI": 0.15,
+    "beta_R": 0.1
+  },
+  "version": "v10_enhanced",
+  "target_patterns": {
+    "reward_range": [
+      -50,
+      160
+    ],
+    "des_range": [
+      0.3,
+      0.7
+    ],
+    "swap_evolution": [
+      0.5,
+      0.65
+    ],
+    "shuffle_evolution": [
+      0.5,
+      0.35
+    ]
+  }
+}

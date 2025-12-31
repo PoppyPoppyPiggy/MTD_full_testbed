@@ -1,0 +1,94 @@
+================================================================================
+ENHANCED MTD TESTBED EVALUATION REPORT v10 (CORRECTED CONCEPTS)
+================================================================================
+Generated: 2025-12-30 18:10:29
+
+CORRECTED CONCEPTS APPLIED:
+----------------------------------------
+  - MTD Shuffle Range: 50,200 possible positions
+    (200 IP × 251 Port = 50,200 deployment constraints)
+  - Real Attack Surface: 6 actual services
+    (fc_mavlink, cc_sitl, gcs_mavlink, cc_web, sim_sitl, decoy_fc)
+  - MTD Confusion Ratio: 0.0001 (0.012%)
+  - L0-L4 Discovery Rates: {0: 0.08, 1: 0.15, 2: 0.35, 3: 0.5, 4: 0.65}
+
+CONFIGURATION:
+----------------------------------------
+  - Seeds: 3
+  - Episodes per seed: 10
+  - Episode duration: 300.0s
+  - Enhanced iptables: True
+
+PERFORMANCE SUMMARY (CORRECTED L0-L4):
+--------------------------------------------------
+BASELINE:
+  DES: 0.572 (95% CI: [0.470, 0.675])
+  BR:  0.200 (95% CI: [-0.200, 0.600])
+  Cost: 0.000
+  CER: 572.292
+  Avg Searched Positions: 1737
+  Avg Service Discoveries: 1.6
+
+STATIC_MTD:
+  DES: 0.677 (95% CI: [0.611, 0.742])
+  BR:  0.133 (95% CI: [-0.207, 0.473])
+  Cost: 0.083
+  CER: 335.784
+  Avg Searched Positions: 1737
+  Avg Service Discoveries: 1.6
+
+HEURISTIC_CTI:
+  DES: 0.717 (95% CI: [0.627, 0.808])
+  BR:  0.000 (95% CI: [0.000, 0.000])
+  Cost: 0.441
+  CER: 293.088
+  Avg Searched Positions: 1737
+  Avg Service Discoveries: 1.6
+
+RL_CTI:
+  DES: 0.677 (95% CI: [0.338, 1.016])
+  BR:  0.000 (95% CI: [0.000, 0.000])
+  Cost: 0.000
+  CER: 0.000
+  Avg Searched Positions: 1737
+  Avg Service Discoveries: 1.6
+
+L0-L4 CORRECTED PERFORMANCE ANALYSIS:
+--------------------------------------------------
+BASELINE by Attacker Level:
+  Script Kiddie (L0, 8% discovery): DES=0.624, BR=0.0%
+  Hobbyist (L1, 15% discovery): DES=0.622, BR=0.0%
+  Professional (L2, 35% discovery): DES=0.624, BR=0.0%
+  Expert (L3, 50% discovery): DES=0.623, BR=0.0%
+  APT (L4, 65% discovery): DES=0.368, BR=100.0%
+
+STATIC_MTD by Attacker Level:
+  Script Kiddie (L0, 8% discovery): DES=0.624, BR=0.0%
+  Hobbyist (L1, 15% discovery): DES=0.622, BR=0.0%
+  Professional (L2, 35% discovery): DES=0.726, BR=0.0%
+  Expert (L3, 50% discovery): DES=0.725, BR=0.0%
+  APT (L4, 65% discovery): DES=0.686, BR=66.7%
+
+HEURISTIC_CTI by Attacker Level:
+  Script Kiddie (L0, 8% discovery): DES=0.676, BR=0.0%
+  Hobbyist (L1, 15% discovery): DES=0.684, BR=0.0%
+  Professional (L2, 35% discovery): DES=0.741, BR=0.0%
+  Expert (L3, 50% discovery): DES=0.683, BR=0.0%
+  APT (L4, 65% discovery): DES=0.802, BR=0.0%
+
+RL_CTI by Attacker Level:
+  Script Kiddie (L0, 8% discovery): DES=0.853, BR=0.0%
+  Hobbyist (L1, 15% discovery): DES=0.844, BR=0.0%
+  Professional (L2, 35% discovery): DES=0.852, BR=0.0%
+  Expert (L3, 50% discovery): DES=0.837, BR=0.0%
+  APT (L4, 65% discovery): DES=0.000, BR=0.0%
+
+KEY FINDINGS (CORRECTED CONCEPTS):
+--------------------------------------------------
+• Best performing strategy: HEURISTIC_CTI (DES: 0.717)
+• Improvement over baseline: 25.3%
+• MTD confusion effectiveness: 6 services in 50,200 positions
+• L0-L4 clear differentiation: 8x discovery rate variation
+• Lowest breach rate: HEURISTIC_CTI (0.000)
+
+================================================================================

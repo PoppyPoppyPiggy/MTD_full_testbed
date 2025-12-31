@@ -1,0 +1,17 @@
+RL MTD COST OPTIMIZATION SUMMARY
+============================================================
+
+Episode-wise Cost Reduction Analysis:
+----------------------------------------
+Phase                Cost       DES        CER        Reduction   
+--------------------------------------------------------------
+Early (1-33%)        1.714      0.775      0.454      0%          
+Middle (34-66%)      1.263      0.820      0.667      26.3%       
+Late (67-100%)       0.829      0.873      1.075      51.6%       
+
+KEY INSIGHTS:
+• Total Cost Reduction: 51.6%
+• DES Improvement: 12.7%
+• CER Improvement: 136.8%
+• 50,200 Attack Surface: Successfully defended
+• L0-L4 Differentiation: Clear performance gaps
